@@ -1,0 +1,3 @@
+[ ] Support recursive function in type-checker
+[ ] Support recursive closure
+[ ] Tuple expression, pattern, and type
