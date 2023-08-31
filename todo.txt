@@ -1,3 +1,5 @@
-[ ] Support recursive function in type-checker
+[x] Support recursive function in type-checker
+[ ] Check infinite type e.g. 0 = [0] -> 1 when resolving type
 [ ] Support recursive closure
 [ ] Tuple expression, pattern, and type
+[ ] Remove trailing space in Meta

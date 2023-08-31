@@ -1,0 +1,22 @@
+data List['a] = Con 'a, List['a]
+              | Nil
+
+data Pair['a, 'b] = Pair 'a, 'b
+
+let fn cauchian_product xs, ys =
+    case xs of Con x1, xs1 -> let fn construct_pair y = Pair x1, y
+                              in concat_list (map_list construct_pair, ys), (cauchian_product xs1, ys)
+             | Nil         -> Nil
+
+
+let fn concat_list '0 xs, ys: [List['0], List['0]] -> List['0] =
+    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys)
+             | Nil         -> Nil
+
+let fn map_list f, xs =
+    case xs of Con y, ys -> Con (f y), (map_list f, ys)
+             | Nil       -> Nil
+
+let fn fold f, init, xs =
+    case xs of Con y, ys -> fold f, (f y, init), ys
+             | Nil       -> init

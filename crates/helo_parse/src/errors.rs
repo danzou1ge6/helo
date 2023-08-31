@@ -15,7 +15,7 @@ pub struct SpannedHint {
 }
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Unification Failure: can't unify types a={a} with b={b}")]
+#[error("Unification Failure: can't unify types a = {a} with b = {b}")]
 pub struct UnificationFailure {
     pub a: String,
     pub b: String,
@@ -28,7 +28,12 @@ pub struct UnificationFailure {
 }
 
 impl UnificationFailure {
-    pub fn new<'s>(a: &ast::Type<'s>, b: &ast::Type<'s>, meta: &ast::Meta) -> Self {
+    pub fn new<'s>(
+        a: &ast::Type<'s>,
+        b: &ast::Type<'s>,
+        meta: &ast::Meta,
+        b_is_upper_bound: bool,
+    ) -> Self {
         let hints = [
             SpannedHint {
                 msg: "Type a defined here".to_owned(),
@@ -43,7 +48,11 @@ impl UnificationFailure {
         ];
         UnificationFailure {
             a: a.to_string(),
-            b: b.to_string(),
+            b: if b_is_upper_bound {
+                format!("upper-bounded by {b}")
+            } else {
+                b.to_string()
+            },
             src: meta.named_source(),
             span: meta.span(),
             hints,

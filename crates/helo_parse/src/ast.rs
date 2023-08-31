@@ -279,6 +279,7 @@ pub enum TypeNode<'s> {
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
     Var(TypeVarId),
+    UpperBounded(Box<Type<'s>>),
     Unit,
     Never,
 }
@@ -306,6 +307,7 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
             }
             Primitive(p) => write!(f, "{}", p),
             Var(v) => write!(f, "'{}", v.0),
+            UpperBounded(v) => write!(f, "^{}", v),
             Unit => write!(f, "()"),
             Never => write!(f, "!"),
         }
@@ -396,7 +398,7 @@ impl std::fmt::Display for PrimitiveType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Type<'s> {
     pub node: TypeNode<'s>,
     pub meta: Meta,
@@ -406,6 +408,16 @@ impl<'s> Type<'s> {
     pub fn new_var(id: TypeVarId, meta: Meta) -> Self {
         Self {
             node: TypeNode::Var(id),
+            meta,
+        }
+    }
+
+    pub fn new_bounded_var(id: TypeVarId, meta: Meta) -> Self {
+        Self {
+            node: TypeNode::UpperBounded(Box::new(Self {
+                node: TypeNode::Var(id),
+                meta: meta.clone(),
+            })),
             meta,
         }
     }
@@ -438,6 +450,7 @@ impl<'s> Type<'s> {
                 ret: Box::new(v.ret.apply(selector, f)),
             }),
             Tuple(v) => Tuple(apply_many(v.iter(), selector, f)),
+            UpperBounded(v) => UpperBounded(Box::new(v.apply(selector, f))),
             Var(v) => Var(*v),
             Never => Never,
         };
@@ -499,6 +512,19 @@ impl<'s> Type<'s> {
 impl<'s> std::fmt::Display for Type<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.node.fmt(f)
+    }
+}
+
+impl<'s> std::fmt::Debug for Type<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let span = (self.meta.span.0)..(self.meta.span.0 + self.meta.span.1);
+        let report = miette::miette!(
+            labels = vec![
+                miette::LabeledSpan::at(span, format!("{}", self.node))
+            ],
+            "Type here"
+        ).with_source_code(self.meta.named_source());
+        writeln!(f, "{:?}", report)
     }
 }
 
@@ -570,7 +596,7 @@ impl<'s> Symbols<'s> {
                 }
                 Ok(())
             }
-            Primitive(_) | Var(_) | Unit | Never => Ok(()),
+            Primitive(_) | Var(_) | UpperBounded(_) | Unit | Never => Ok(()),
         }
     }
     pub fn validate_callable_type(&self, type_: &CallableType<'s>) -> Result<(), miette::Report> {

@@ -170,9 +170,7 @@ fn infer_tuple_get<'s>(
                 elements_type[index].clone()
             }
         }
-        ast::TypeNode::Var(vid) => {
-            dbg!(&inferer);
-            dbg!(vid);
+        ast::TypeNode::Var(_) => {
             e.push(errors::TypeAnnotationRequiredForTuple::new(&from.meta));
             ast::Type {
                 node: ast::TypeNode::Never,
@@ -344,7 +342,8 @@ fn infer_let_in<'s>(
         e,
     );
 
-    let ret_type = value.type_.clone();
+    let ret_type = in_.type_.clone();
+    dbg!(&ret_type);
     typed::Expr {
         node: typed::ExprNode::LetIn {
             bind,
@@ -420,10 +419,14 @@ fn infer_global<'s>(
             params: constructor.params.clone(),
             ret: Box::new(ret_type),
         };
-        let type_ = ast::Type {
+        let type_ = inferer.rename_callable_type_vars(&type_, data.kind_arity);
+        let type_ = if type_.params.len() == 0 {
+            *type_.ret
+        } else {ast::Type {
             node: ast::TypeNode::Callable(type_),
             meta: constructor.meta.clone(),
-        };
+        }};
+        dbg!(&type_);
         return typed::Expr {
             node: typed::ExprNode::Global(name),
             type_,
@@ -712,9 +715,16 @@ pub fn infer_function_type_renamed<'s>(
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
     if inferer.function_name() == name {
-        unimplemented!()
+        let r = Some(ast::CallableType {
+            params: (0..f.arity)
+                .map(|i| ast::Type::new_bounded_var(i.into(), f.param_metas[i].clone()))
+                .collect(),
+            ret: Box::new(ast::Type::new_bounded_var(f.local_cnt.into(), f.meta.clone())),
+        });
+        dbg!(&r);
+        return r;
     }
-    
+
     e.push(errors::CircularInference::new(name, name_meta));
     None
 }
@@ -725,15 +735,17 @@ fn init_inferer_for_function_inference<'s>(
     symbols: &ast::Symbols<'s>,
     inferer: &mut inferer::Inferer<'s>,
     e: &mut errors::ManyError,
-) -> Option<Box<ast::Type<'s>>> {
-    let _ = inferer.alloc_vars(f.local_cnt); // allocate type-vars for locals
+) -> ast::Type<'s> {
+    let _ = inferer.alloc_vars(f.local_cnt + 1); // allocate type-vars for locals and return-value
+
+    let ret_type = ast::Type::new_var(f.local_cnt.into(), f.meta.clone());
 
     // User provided function signature
-    let provided_ret_type = if let Some(f_type) = &f.type_ {
+    if let Some(f_type) = &f.type_ {
         // Validate user provided function signature
         if let Err(err) = symbols.validate_callable_type(f_type) {
             e.push_boxed(err);
-            return None;
+            return ret_type;
         }
         // Allocate type-vars for those in user provided function signature and rename
         let f_type = inferer.rename_callable_type_vars(f_type, f.var_cnt);
@@ -743,12 +755,12 @@ fn init_inferer_for_function_inference<'s>(
                 .update_var(i.into(), &f_type.params[i], &f.param_metas[i])
                 .commit(e);
         }
-        Some(f_type.ret)
-    } else {
-        None
+        inferer
+            .update_var(f.local_cnt.into(), &f_type.ret, &f.meta)
+            .commit(e);
     };
 
-    provided_ret_type
+    ret_type
 }
 
 pub fn infer_closure_function<'s>(
@@ -762,7 +774,7 @@ pub fn infer_closure_function<'s>(
     e: &mut errors::ManyError,
 ) -> Option<typed::Function<'s>> {
     let mut inferer = inferer::Inferer::new(name.to_string());
-    let provided_ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
+    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
 
     // Let the inferer know that the last argument is a tuple
     let captures_cnt = captures_meta.len();
@@ -790,11 +802,9 @@ pub fn infer_closure_function<'s>(
         e,
     );
 
-    if let Some(provided_ret_type) = provided_ret_type {
-        inferer
-            .unify(&provided_ret_type, &body_expr.type_, &f.meta)
-            .commit(e);
-    }
+    inferer
+        .unify(&ret_type, &body_expr.type_, &f.meta)
+        .commit(e);
 
     // Construct type of function
     let f_type = ast::CallableType {
@@ -839,9 +849,7 @@ pub fn infer_function<'s>(
 ) -> Option<typed::Function<'s>> {
     let mut inferer = inferer::Inferer::new(name.to_string());
 
-    let _ = inferer.alloc_vars(f.local_cnt); // allocate type-vars for locals
-
-    let provided_ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
+    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
 
     typed_functions.begin_infering(name.to_owned());
     // Resolve type of function body
@@ -855,11 +863,9 @@ pub fn infer_function<'s>(
         e,
     );
 
-    if let Some(provided_ret_type) = provided_ret_type {
-        inferer
-            .unify(&provided_ret_type, &body_expr.type_, &f.meta)
-            .commit(e);
-    }
+    inferer
+        .unify(&ret_type, &body_expr.type_, &f.meta)
+        .commit(e);
 
     // Construct type of function
     let f_type = ast::CallableType {
