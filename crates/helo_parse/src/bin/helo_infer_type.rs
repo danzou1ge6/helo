@@ -33,6 +33,9 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
         &mut ptable,
     ) {
         Ok((_, ())) => {
+            e.emit()?;
+            let mut e = errors::ManyError::new();
+
             let mut typed_nodes = typed::ExprHeap::new();
             let mut typed_functions = typed::FunctionTable::new();
 

@@ -287,6 +287,24 @@ impl InfiniteType {
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Constructor name must be uppercase")]
+pub struct ConstructorNameNotUppercase {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Constructor here")]
+    pub span: SourceSpan,
+}
+
+impl ConstructorNameNotUppercase {
+    pub fn new(constructor_meta: &ast::Meta) -> Self {
+        Self {
+            src: constructor_meta.named_source(),
+            span: constructor_meta.span(),
+        }
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {

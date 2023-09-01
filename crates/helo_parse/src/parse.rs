@@ -232,6 +232,7 @@ impl<'s, 'a> Context<'s, 'a> {
         self.ast_nodes.push(node)
     }
 
+
     pub fn define_local(&mut self, name: &'s str) -> ast::LocalId {
         let id = self.resolution_env.current().id_cnt;
         self.resolution_env.current().locals.push((name, id));
@@ -322,6 +323,10 @@ impl<'s, 'a> Context<'s, 'a> {
 
     pub fn generic_param_cnt(&self) -> usize {
         self.generic_params.len()
+    }
+
+    pub fn push_error(&mut self, e: impl miette::Diagnostic + 'static + Send + Sync) {
+        self.e.push(e)
     }
 }
 
@@ -829,7 +834,12 @@ fn constructor<'s>(
     ctx: &mut Context<'s, '_>,
     data_name: &'s str,
 ) -> PResult<'s, ast::Constructor<'s>> {
-    let (s1, (name, _)) = alphabetic_identifier_str(s, ctx)?;
+    let (s1, (name, c_meta)) = alphabetic_identifier_str(s, ctx)?;
+
+    if !name.chars().next().unwrap().is_uppercase() {
+        ctx.push_error(errors::ConstructorNameNotUppercase::new(&c_meta));
+    }
+
     let (s2, params) =
         nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s1)?;
     Ok((
