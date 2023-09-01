@@ -107,8 +107,9 @@ pub fn infer_expr<'s>(
         ExprNode::Local(id) => infer_local(*id, &expr.meta),
     };
     if let Some(provided_type) = &expr.type_ {
+        let provided_type = inferer.instantiate_wildcard(provided_type);
         inferer
-            .unify(provided_type, &typed_expr.type_, &expr.meta)
+            .unify(&provided_type, &typed_expr.type_, &expr.meta)
             .commit(e);
     }
     typed_expr

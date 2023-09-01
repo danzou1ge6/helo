@@ -525,4 +525,11 @@ impl<'s> Inferer<'s> {
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
         self.uf.new_slots(cnt)
     }
+
+    pub fn instantiate_wildcard(&mut self, type_: &ast::Type<'s>) -> ast::Type<'s> {
+        type_.apply(
+            &|t| matches!(&t.node, ast::TypeNode::WildCard),
+            &mut |_| ast::Type::new_var(self.alloc_var(), type_.meta.clone())
+        )
+    }
 }

@@ -96,6 +96,7 @@ struct Context<'s, 'a> {
     resolution_env: ResolutionEnv<'s>,
     generic_params: Vec<&'s str>,
     precedence_table: &'a mut PrecedenceTable<'s>,
+    allow_wildcard_in_type: bool,
 }
 
 impl<'s, 'a> Context<'s, 'a> {
@@ -114,6 +115,7 @@ impl<'s, 'a> Context<'s, 'a> {
             resolution_env: ResolutionEnv::Normal(FunctionResolutionEnv::new()),
             generic_params: Vec::new(),
             precedence_table: ptable,
+            allow_wildcard_in_type: false,
         }
     }
 
@@ -294,6 +296,13 @@ impl<'s, 'a> Context<'s, 'a> {
         (captures, captures_meta, locals_cnt, r)
     }
 
+    fn with_allow_wildcard_in_type<R>(&mut self, f: impl Fn(&mut Context<'s, '_>) -> R) -> R {
+        self.allow_wildcard_in_type = true;
+        let r = f(self);
+        self.allow_wildcard_in_type = false;
+        r
+    }
+
     pub fn set_generic_params(&mut self, v: Vec<&'s str>) {
         self.generic_params = v;
     }
@@ -353,13 +362,17 @@ where
     }
 }
 
+// const symbolic_keywords: [&'static str; 3] = ["|", ")", ","];
+const ALPHABETICAL_KEYWORDS: [&'static str; 8] =
+    ["then", "else", "of", "case", "let", "fn", "in", "data"];
+
 /// An identifier that is made purely of a set of symbols. NOTE that the `_a` suffix means trailing spaces
 /// are not consumed
 fn symbolic_identifier_str_a<'s>(
     s: &'s str,
     ctx: &Context<'s, '_>,
 ) -> PResult<'s, (&'s str, ast::Meta)> {
-    let (s1, id) = nbyte::is_a("~!@#$%^&*<>=+-./|")(s)?;
+    let (s1, id) = nbyte::is_a("~!@#$%^&*<>=+-./")(s)?;
     Ok((s1, (id, ctx.meta(s, s1))))
 }
 
@@ -370,10 +383,20 @@ fn alphabetic_identifier_str_a<'s>(
 ) -> PResult<'s, (&'s str, ast::Meta)> {
     let (s1, _) = nchar::none_of("0123456789~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n")(s)?;
     let (s2, left) = ncomb::opt(nbyte::is_not("~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n"))(s1)?;
-    if let Some(left) = left {
-        Ok((s2, (&s[0..left.len() + 1], ctx.meta(s, s2))))
+
+    let (s2, (id, meta)) = if let Some(left) = left {
+        (s2, (&s[0..left.len() + 1], ctx.meta(s, s2)))
     } else {
-        Ok((s2, (&s[0..1], ctx.meta(s, s2))))
+        (s2, (&s[0..1], ctx.meta(s, s2)))
+    };
+
+    if ALPHABETICAL_KEYWORDS.contains(&id) {
+        Err(nom::Err::Error(nom::error::Error::new(
+            s,
+            nom::error::ErrorKind::Alpha,
+        )))
+    } else {
+        Ok((s2, (id, meta)))
     }
 }
 
@@ -683,10 +706,24 @@ fn generic_params_decl<'s>(
 fn type_generic<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
     let (s1, (template, _)) = alphabetic_identifier_str(s, ctx)?;
 
-    let (s2, _) = trailing_space(nbyte::tag("["))(s1)?;
-    let (s3, args) =
-        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s2)?;
-    let (s4, _) = trailing_space(nbyte::tag("]"))(s3)?;
+    if template == "_" && ctx.allow_wildcard_in_type {
+        return Ok((
+            s1,
+            ast::Type {
+                node: ast::TypeNode::WildCard,
+                meta: ctx.meta(s, s1),
+            },
+        ));
+    }
+
+    let (s4, args) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("[")))(s1)? {
+        let (s3, args) =
+            nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s2)?;
+        let (s4, _) = trailing_space(nbyte::tag("]"))(s3)?;
+        (s4, args)
+    } else {
+        (s1, vec![])
+    };
 
     Ok((
         s4,
@@ -945,7 +982,7 @@ fn build_application_expr<'s>(
 }
 
 fn add_type<'s>(mut lhs: ast::Expr<'s>, ctx: &mut Context<'s, '_>, rest: &'s str) -> EResult<'s> {
-    let (s1, type_) = type_(rest, ctx)?;
+    let (s1, type_) = ctx.with_allow_wildcard_in_type(|ctx| type_(rest, ctx))?;
     lhs.type_ = Some(type_);
     Ok((s1, lhs))
 }

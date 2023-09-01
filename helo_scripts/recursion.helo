@@ -9,8 +9,8 @@ let fn cauchian_product xs, ys =
              | Nil         -> Nil
 
 
-let fn concat_list '0 xs, ys: [List['0], List['0]] -> List['0] =
-    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys)
+let fn concat_list '0 xs, ys =
+    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys: List[_])
              | Nil         -> Nil
 
 let fn map_list f, xs =

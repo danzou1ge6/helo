@@ -231,6 +231,8 @@ pub enum TypeNode<'s> {
     UpperBounded(Box<Type<'s>>),
     Unit,
     Never,
+    /// This is only used for parsing. During inference, any wildcard is replaced with a new variable
+    WildCard
 }
 
 impl<'s> std::fmt::Display for TypeNode<'s> {
@@ -259,6 +261,7 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
             UpperBounded(v) => write!(f, "^{}", v),
             Unit => write!(f, "()"),
             Never => write!(f, "!"),
+            WildCard => write!(f, "*"),
         }
     }
 }
@@ -409,6 +412,7 @@ impl<'s> Type<'s> {
             UpperBounded(v) => UpperBounded(Box::new(v.apply(selector, f))),
             Var(v) => Var(*v),
             Never => Never,
+            WildCard => WildCard
         };
         Type {
             node,
@@ -451,6 +455,7 @@ impl<'s> Type<'s> {
             UpperBounded(v) => UpperBounded(Box::new(v.apply_result(selector, f)?)),
             Var(v) => Var(*v),
             Never => Never,
+            WildCard => WildCard
         };
         Ok(Type {
             node,
@@ -593,7 +598,7 @@ impl<'s> Symbols<'s> {
                 }
                 Ok(())
             }
-            Primitive(_) | Var(_) | UpperBounded(_) | Unit | Never => Ok(()),
+            Primitive(_) | Var(_) | UpperBounded(_) | Unit | Never | WildCard => Ok(()),
         }
     }
     pub fn validate_callable_type(&self, type_: &CallableType<'s>) -> Result<(), miette::Report> {
