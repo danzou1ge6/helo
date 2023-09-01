@@ -265,6 +265,28 @@ impl NoTupleAccess {
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Infinite type not supported")]
+pub struct InfiniteType {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Type variable {} here equals to {}", var_name, var_value)]
+    pub span: SourceSpan,
+    pub var_name: String,
+    pub var_value: String
+}
+
+impl InfiniteType {
+    pub fn new(var_id: ast::TypeVarId, var_meta: &ast::Meta, var_value: &ast::Type) -> Self {
+        Self {
+            src: var_meta.named_source(),
+            span: var_meta.span(),
+            var_name: format!("'{}", var_id.0),
+            var_value: var_value.to_string()
+        }
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {

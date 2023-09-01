@@ -402,43 +402,53 @@ impl<'s> Inferer<'s> {
 
     /// Repeatingly replace all non-empty type variables with the type expression until they hold, until
     /// no variable is non-empty
-    pub fn resolve_var(&mut self, id: ast::TypeVarId, meta: &ast::Meta) -> ast::Type<'s> {
+    pub fn resolve_var_descdent(
+        &mut self,
+        id: ast::TypeVarId,
+        meta: &ast::Meta,
+        var_stack: &mut Vec<ast::TypeVarId>,
+    ) -> Result<ast::Type<'s>, errors::InfiniteType> {
         let root_var_id = self.uf.find(id);
         match &self.uf.get(root_var_id).clone() {
             Slot::Value(v) => {
-                let (t, _) = self.resolve(&v);
-                t
+                if var_stack.iter().rfind(|x| **x == root_var_id).is_some() {
+                    return Err(errors::InfiniteType::new(id, meta, v));
+                }
+                var_stack.push(root_var_id);
+                self.resolve_descdent(&v, var_stack)
             }
-            Slot::Empty => ast::Type::new_var(root_var_id, meta.clone()),
+            Slot::Empty => Ok(ast::Type::new_var(root_var_id, meta.clone())),
         }
     }
 
-    /// Replace all variables in `type_`. Returns `(_, true)` if still some variables exist
-    pub fn resolve(&mut self, type_: &ast::Type<'s>) -> (ast::Type<'s>, bool) {
+    pub fn resolve_var(
+        &mut self,
+        id: ast::TypeVarId,
+        meta: &ast::Meta,
+    ) -> Result<ast::Type<'s>, errors::InfiniteType> {
+        self.resolve_var_descdent(id, meta, &mut Vec::new())
+    }
+
+    /// Replace all variables in `type_`.
+    fn resolve_descdent(
+        &mut self,
+        type_: &ast::Type<'s>,
+        var_stack: &mut Vec<ast::TypeVarId>,
+    ) -> Result<ast::Type<'s>, errors::InfiniteType> {
         use ast::TypeNode::*;
         // During traversing of the tree, some [`Var`] node resolves to another variable, then the resolution
         // is not clean
-        let mut not_clean = false;
-        (
-            type_.apply(&|t| matches!(t.node, Var(_)), &mut |t| match t.node {
-                Var(v) => {
-                    let root_var_id = self.uf.find(v);
-                    match &self.uf.get(root_var_id).clone() {
-                        Slot::Value(v) => {
-                            let (t, nc) = self.resolve(&v);
-                            not_clean |= nc;
-                            t
-                        }
-                        Slot::Empty => {
-                            not_clean = true;
-                            ast::Type::new_var(root_var_id, t.meta.clone())
-                        }
-                    }
-                }
-                _ => unreachable!(),
-            }),
-            not_clean,
-        )
+        type_.apply_result(&|t| matches!(t.node, Var(_)), &mut |t| match t.node {
+            Var(v) => self.resolve_var_descdent(v, &t.meta, var_stack),
+            _ => unreachable!(),
+        })
+    }
+
+    pub fn resolve(
+        &mut self,
+        type_: &ast::Type<'s>,
+    ) -> Result<ast::Type<'s>, errors::InfiniteType> {
+        self.resolve_descdent(type_, &mut Vec::new())
     }
 
     fn discretization_walk(

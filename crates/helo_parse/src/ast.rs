@@ -361,6 +361,13 @@ impl<'s> Type<'s> {
         }
     }
 
+    pub fn new_never(meta: Meta) -> Self {
+        Self {
+            node: TypeNode::Never,
+            meta
+        }
+    }
+
     pub fn new_bounded_var(id: TypeVarId, meta: Meta) -> Self {
         Self {
             node: TypeNode::UpperBounded(Box::new(Self {
@@ -407,6 +414,48 @@ impl<'s> Type<'s> {
             node,
             meta: self.meta.clone(),
         }
+    }
+
+    pub fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>
+    ) -> Result<Type<'s>, E> {
+        use TypeNode::*;
+        fn apply_many<'a, 's, E>(
+            many: impl Iterator<Item = &'a Type<'s>>,
+            selector: &impl Fn(&Type<'s>) -> bool,
+            f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+        ) -> Result<Vec<Type<'s>>, E>
+        where
+            's: 'a,
+        {
+            let mut r = vec![];
+            for x in many {
+                r.push(x.apply_result(selector, f)?);
+            }
+            Ok(r)
+        }
+        if selector(self) {
+            return f(self);
+        }
+        let node = match &self.node {
+            Primitive(p) => Primitive(*p),
+            Unit => Unit,
+            Generic(template, args) => Generic(template, apply_many(args.iter(), selector, f)?),
+            Callable(v) => Callable(CallableType {
+                params: apply_many(v.params.iter(), selector, f)?,
+                ret: Box::new(v.ret.apply_result(selector, f)?),
+            }),
+            Tuple(v) => Tuple(apply_many(v.iter(), selector, f)?),
+            UpperBounded(v) => UpperBounded(Box::new(v.apply_result(selector, f)?)),
+            Var(v) => Var(*v),
+            Never => Never,
+        };
+        Ok(Type {
+            node,
+            meta: self.meta.clone(),
+        })
     }
 
     pub fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {

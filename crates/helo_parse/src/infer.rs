@@ -159,32 +159,30 @@ fn infer_tuple_get<'s>(
         e,
     );
 
-    let type_ = match inferer.resolve(&from.type_).0.node {
+    let type_ = match inferer
+        .resolve(&from.type_)
+        .unwrap_or_else(|err| {
+            e.push(err);
+            ast::Type::new_never(get_meta.clone())
+        })
+        .node
+    {
         ast::TypeNode::Tuple(elements_type) => {
             if elements_type.len() <= index {
-                ast::Type {
-                    node: ast::TypeNode::Never,
-                    meta: get_meta.clone(),
-                }
+                ast::Type::new_never(get_meta.clone())
             } else {
                 elements_type[index].clone()
             }
         }
         ast::TypeNode::Var(_) => {
             e.push(errors::TypeAnnotationRequiredForTuple::new(&from.meta));
-            ast::Type {
-                node: ast::TypeNode::Never,
-                meta: get_meta.clone(),
-            }
+            ast::Type::new_never(get_meta.clone())
         }
         otherwise => {
             if !matches!(otherwise, ast::TypeNode::Never) {
                 e.push(errors::NoTupleAccess::new(&from.type_));
             }
-            ast::Type {
-                node: ast::TypeNode::Never,
-                meta: get_meta.clone(),
-            }
+            ast::Type::new_never(get_meta.clone())
         }
     };
 
@@ -256,7 +254,14 @@ fn infer_call<'s>(
         e,
     );
 
-    let ret_type = match inferer.resolve(&callee.type_).0.node {
+    let ret_type = match inferer
+        .resolve(&callee.type_)
+        .unwrap_or_else(|err| {
+            e.push(err);
+            ast::Type::new_never(call_meta.clone())
+        })
+        .node
+    {
         // NOTE that we assume that type-vars have already been renamed
         ast::TypeNode::Callable(ast::CallableType { params, ret }) => {
             inferer
@@ -288,10 +293,7 @@ fn infer_call<'s>(
             if !matches!(otherwise, ast::TypeNode::Never) {
                 e.push(errors::NotCallable::new(&callee.type_));
             }
-            ast::Type {
-                node: ast::TypeNode::Never,
-                meta: call_meta.clone(),
-            }
+            ast::Type::new_never(call_meta.clone())
         }
     };
 
@@ -443,10 +445,7 @@ fn infer_global<'s>(
     // Fail: fallthrough
     typed::Expr {
         node: typed::ExprNode::Global(name),
-        type_: ast::Type {
-            node: ast::TypeNode::Never,
-            meta: global_meta.clone(),
-        },
+        type_: ast::Type::new_never(global_meta.clone()),
         meta: global_meta.clone(),
     }
 }
@@ -497,10 +496,7 @@ fn infer_if_else<'s>(
         .map_or_else(
             |err| {
                 e.push(err);
-                ast::Type {
-                    node: ast::TypeNode::Never,
-                    meta: if_else_meta.clone(),
-                }
+                ast::Type::new_never(if_else_meta.clone())
             },
             |_| then.type_.clone(),
         );
@@ -603,10 +599,7 @@ fn infer_closure<'s>(
 
     // Fail: fail to infer closure function, use dummy never type, but throw no error
     } else {
-        ast::Type {
-            node: ast::TypeNode::Never,
-            meta: closure_meta.clone(),
-        }
+        ast::Type::new_never(closure_meta.clone())
     };
     return typed::Expr {
         node: typed::ExprNode::Closure(typed::Closure {
@@ -655,10 +648,7 @@ pub fn infer_pattern_type<'s>(
 
             if let Err(err) = inferer.unify_list(args_type.iter(), params.iter(), meta) {
                 e.push(err);
-                return ast::Type {
-                    node: ast::TypeNode::Never,
-                    meta: meta.clone(),
-                };
+                return ast::Type::new_never(meta.clone());
             }
             ast::Type {
                 node: ast::TypeNode::Generic(constructor.belongs_to, data_params),
@@ -885,17 +875,29 @@ pub fn infer_closure_function<'s>(
     let f_type = ast::CallableType {
         params: (0..f.arity)
             .map(|i| {
-                inferer.resolve_var(
-                    i.into(),
-                    if i == f.arity - 1 {
-                        &f.meta
-                    } else {
-                        &f.param_metas[i]
-                    },
-                )
+                inferer
+                    .resolve_var(
+                        type_var_id_for_local(i.into()),
+                        if i == f.arity - 1 {
+                            &f.meta
+                        } else {
+                            &f.param_metas[i]
+                        },
+                    )
+                    .unwrap_or_else(|err| {
+                        e.push(err);
+                        ast::Type::new_never(if i == f.arity - 1 {
+                            f.meta.clone()
+                        } else {
+                            f.param_metas[i].clone()
+                        })
+                    })
             })
             .collect(),
-        ret: Box::new(inferer.resolve(&body_expr.type_).0),
+        ret: Box::new(inferer.resolve(&body_expr.type_).unwrap_or_else(|err| {
+            e.push(err);
+            ast::Type::new_never(body_expr.meta.clone())
+        })),
     };
 
     // Discretize type of function such that variables are the first few unsigned integers
@@ -947,9 +949,17 @@ pub fn infer_function<'s>(
     let f_type = ast::CallableType {
         params: (0..f.arity)
             .zip(f.param_metas.iter())
-            .map(|(i, m)| inferer.resolve_var(i.into(), m))
+            .map(|(i, m)| {
+                inferer.resolve_var(i.into(), m).unwrap_or_else(|err| {
+                    e.push(err);
+                    ast::Type::new_never(f.param_metas[i].clone())
+                })
+            })
             .collect(),
-        ret: Box::new(inferer.resolve(&body_expr.type_).0),
+        ret: Box::new(inferer.resolve(&body_expr.type_).unwrap_or_else(|err| {
+            e.push(err);
+            ast::Type::new_never(body_expr.meta.clone())
+        })),
     };
 
     // Discretize type of function such that variables are the first few unsigned integers
