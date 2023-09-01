@@ -53,14 +53,17 @@ impl<'s> ExprHeap<'s> {
 
 pub struct FunctionTable<'s> {
     tab: HashMap<String, Function<'s>>,
-    infering: HashSet<String>,
+    infering: Vec<String>,
 }
 impl<'s> FunctionTable<'s> {
     pub fn new() -> Self {
         Self {
             tab: HashMap::new(),
-            infering: HashSet::new(),
+            infering: Vec::new(),
         }
+    }
+    pub fn currently_infering(&self) -> Option<&str> {
+        self.infering.last().map(|x| x.as_str())
     }
     pub fn insert(&mut self, name: String, f: Function<'s>) {
         self.tab.insert(name, f);
@@ -69,13 +72,13 @@ impl<'s> FunctionTable<'s> {
         self.tab.get(name)
     }
     pub fn begin_infering(&mut self, name: String) {
-        self.infering.insert(name);
+        self.infering.push(name);
     }
     pub fn is_infering(&self, name: &str) -> bool {
-        self.infering.contains(name)
+        self.infering.iter().find(|x| x.as_str() == name).is_some()
     }
-    pub fn finish_infering(&mut self, name: &str) {
-        self.infering.remove(name);
+    pub fn finish_infering(&mut self) {
+        self.infering.pop().unwrap();
     }
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Function<'s>)> {
         self.tab.iter()

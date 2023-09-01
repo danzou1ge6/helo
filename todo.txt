@@ -3,3 +3,6 @@
 [ ] Support recursive closure
 [ ] Tuple expression, pattern, and type
 [ ] Remove trailing space in Meta
+[ ] Fix expression type annotation: Currently type-vars in annotations are colliding inferer-defined ones
+[ ] Support guard in case-of expression
+[ ] Use more efficient method when backing-up union-find array

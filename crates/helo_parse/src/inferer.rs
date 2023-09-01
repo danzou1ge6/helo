@@ -3,14 +3,17 @@ use std::collections::HashMap;
 use crate::ast;
 
 #[derive(Debug, Clone)]
+/// Represents a type variable
 pub enum Slot<'s> {
+    /// The type variable is bound to some other type expression
     Value(ast::Type<'s>),
+    /// The type variable is undetermined
     Empty,
 }
 
 #[derive(Debug, Clone)]
+/// A heap of type variables
 pub struct UnionFind<'s> {
-    /// NOTE First few elements on `heap` are reserved for locals
     heap: Vec<Slot<'s>>,
 }
 
@@ -27,6 +30,7 @@ impl<'s> UnionFind<'s> {
         &mut self.heap[addr.0]
     }
 
+    /// Find the root of a class of equivalent type variables. NOTE that path compression is applied
     pub fn find(&mut self, addr: ast::TypeVarId) -> ast::TypeVarId {
         let same_as = match &self.get(addr) {
             Slot::Value(ast::Type {
@@ -46,23 +50,31 @@ impl<'s> UnionFind<'s> {
         root
     }
 
+    /// Allocate a new empty type variale on heap
     pub fn new_slot(&mut self) -> ast::TypeVarId {
         let addr = self.heap.len();
         self.heap.push(Slot::Empty);
         addr.into()
     }
 
+    /// Allocate a continuous series of empty type variables on heap, returning the index of the first one
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
         let addr = self.heap.len();
         self.heap.resize_with(addr + cnt, || Slot::Empty);
         addr.into()
     }
-
 }
 
+/// The type inferer. Inference are performed seperatedly for each function.
+/// Unfortunately, only self-recursion is supported. If function A refers to function B, and function B refers indirectly or
+/// directly to function A, then at least one of them must be type annotated by the programmer.
+///
+/// All methods suffixed with `no_rollback` won't rollback to previous state upon unification failure.
+/// Currently, rollback upon unfication failure is implemented simply by cloning the underlying union-find array,
+/// which is less then efficient.
 pub struct Inferer<'s> {
+    /// THe underlying union-find set
     uf: UnionFind<'s>,
-    function_name: String,
 }
 
 use crate::errors;
@@ -80,26 +92,20 @@ impl<'s> std::fmt::Debug for Inferer<'s> {
 }
 
 impl<'s> Inferer<'s> {
-    pub fn new(f_name: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            function_name: f_name,
             uf: UnionFind::new(),
         }
     }
 
-    pub fn function_name(&self) -> &str {
-        &self.function_name
-    }
-
-    fn fill_empty_slot(
-        &mut self,
-        root: ast::TypeVarId,
-        type_: &ast::Type<'s>
-    ) {
+    /// WARNING The underlying type variable must be empty upon calling this function, or the algorithm will go wrong
+    /// Write `type` to root of a equivalent class root `root`. If `type_` is also refering to a type variable, execute
+    /// root-merge on them
+    fn fill_empty_slot(&mut self, root: ast::TypeVarId, type_: &ast::Type<'s>) {
         match type_ {
             ast::Type {
                 node: ast::TypeNode::Var(var_id),
-                meta
+                meta,
             } => {
                 let root1 = self.uf.find(*var_id);
                 if root != root1 {
@@ -108,11 +114,12 @@ impl<'s> Inferer<'s> {
                         meta: meta.clone(),
                     })
                 }
-            },
-            other => *self.uf.get_mut(root) = Slot::Value(other.clone())
+            }
+            other => *self.uf.get_mut(root) = Slot::Value(other.clone()),
         }
     }
 
+    /// Unify type variable `id` with `type_`
     fn update_var_no_rollback(
         &mut self,
         id: ast::TypeVarId,
@@ -127,35 +134,57 @@ impl<'s> Inferer<'s> {
         Ok(())
     }
 
+    /// Unify a variable upper-bounded by `id_bounded` with `type_`.
+    /// If the variable is empty, we do nothing unless `type_` is also a empty varianle,
+    /// because an empty variable is upper bound of any non-variable type.
+    /// If the variable is not empty, then unfication is continued on two type expressions.
     fn update_bounded_var_no_rollback(
         &mut self,
-        id_bounded: ast::TypeVarId,
+        bound_id: ast::TypeVarId,
         type_: &ast::Type<'s>,
         meta: &ast::Meta,
     ) -> Result<(), errors::UnificationFailure> {
-        let root = self.uf.find(id_bounded);
+        let root = self.uf.find(bound_id);
         match self.uf.get(root).clone() {
-            Slot::Empty => self.fill_empty_slot(root, type_),
+            Slot::Empty => match type_ {
+                ast::Type {
+                    node: ast::TypeNode::Var(var_id),
+                    meta,
+                } => {
+                    let root1 = self.uf.find(*var_id);
+                    if root != root1 {
+                        *self.uf.get_mut(root) = Slot::Value(ast::Type {
+                            node: ast::TypeNode::Var(root1),
+                            meta: meta.clone(),
+                        })
+                    }
+                }
+                _ => return Ok(()),
+            },
             Slot::Value(old_value) => self.unify_bounded_no_rollback(&type_, &old_value, meta)?,
         };
         Ok(())
     }
 
-
+    /// Unify a type variable `id` with a type upper-bounded by `type_bound`
+    /// If `id` is an empty variable, then it unifies with `type_bound`, so that it can be upper-bounded by `type_`.
     fn update_var_with_bounded_no_rollback(
         &mut self,
         id: ast::TypeVarId,
-        type_bounded: &ast::Type<'s>,
+        type_bound: &ast::Type<'s>,
         meta: &ast::Meta,
     ) -> Result<(), errors::UnificationFailure> {
         let root = self.uf.find(id);
         match self.uf.get(root).clone() {
-            Slot::Empty => self.fill_empty_slot(root, type_bounded),
-            Slot::Value(old_value) => self.unify_bounded_no_rollback(&old_value, &type_bounded, meta)?,
+            Slot::Empty => self.fill_empty_slot(root, type_bound),
+            Slot::Value(old_value) => {
+                self.unify_bounded_no_rollback(&old_value, &type_bound, meta)?
+            }
         };
         Ok(())
     }
 
+    /// Unify type variable `id` with `type_`
     pub fn update_var(
         &mut self,
         id: ast::TypeVarId,
@@ -178,6 +207,8 @@ impl<'s> Inferer<'s> {
         (offset..offset + var_cnt).map(|x| ast::TypeVarId(x))
     }
 
+    /// Allocate `var_cnt` of empty type variables and returns an Iterator yielding them.
+    /// NOTE that the caller has to provide the metas for those new types
     pub fn alloc_type_vars<'a>(
         &mut self,
         var_cnt: usize,
@@ -246,18 +277,19 @@ impl<'s> Inferer<'s> {
         Ok(())
     }
 
+    /// Unify `a` with a type upper-bounded by `bound`
     fn unify_bounded_no_rollback(
         &mut self,
         a: &ast::Type<'s>,
-        bounded: &ast::Type<'s>,
+        bound: &ast::Type<'s>,
         meta: &ast::Meta,
     ) -> Result<(), errors::UnificationFailure> {
         use ast::TypeNode::*;
-        match (&a.node, &bounded.node) {
-            (_, Var(id_bounded)) => Ok(self.update_bounded_var_no_rollback(*id_bounded, a, meta)?),
-            (Var(a_id), _) => Ok(
-                self.update_var_with_bounded_no_rollback(*a_id, bounded, meta)?
-            ),
+        match (&a.node, &bound.node) {
+            (_, Var(id_bounded)) => {
+                Ok(self.update_bounded_var_no_rollback(*id_bounded, a, meta)?)
+            }
+            (Var(a_id), _) => Ok(self.update_var_with_bounded_no_rollback(*a_id, bound, meta)?),
             (Unit, Unit) => Ok(()),
             (Never, _) => Ok(()),
             (_, Never) => Ok(()),
@@ -284,10 +316,11 @@ impl<'s> Inferer<'s> {
                 Ok(())
             }
             (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
-            _ => Err(errors::UnificationFailure::new(a, bounded, meta, true)),
+            _ => Err(errors::UnificationFailure::new(a, bound, meta, true)),
         }
     }
 
+    /// Unify type expressions `a` with `b`
     fn unify_no_rollback(
         &mut self,
         a: &ast::Type<'s>,
@@ -367,6 +400,8 @@ impl<'s> Inferer<'s> {
         )
     }
 
+    /// Repeatingly replace all non-empty type variables with the type expression until they hold, until
+    /// no variable is non-empty
     pub fn resolve_var(&mut self, id: ast::TypeVarId, meta: &ast::Meta) -> ast::Type<'s> {
         let root_var_id = self.uf.find(id);
         match &self.uf.get(root_var_id).clone() {
@@ -447,7 +482,9 @@ impl<'s> Inferer<'s> {
     }
 
     /// Walk `type_` and for each variable that hasn't been deternimed, map them to a continuous range
-    /// of integers, starting from zero
+    /// of integers, starting from zero.
+    ///
+    /// For example, `[1, 4, [1] -> 3] -> 3` is mapped to `[0, 1, [0] -> 2] -> 2` by the returned HashMap
     pub fn discretization(
         &mut self,
         type_: &ast::Type<'s>,

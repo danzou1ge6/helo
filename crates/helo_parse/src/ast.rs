@@ -8,13 +8,7 @@ impl From<usize> for ExprId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LocalId(usize);
-
-impl LocalId {
-    pub fn type_var_id(&self) -> TypeVarId {
-        TypeVarId(self.0)
-    }
-}
+pub struct LocalId(pub usize);
 
 impl std::default::Default for LocalId {
     fn default() -> Self {
@@ -166,52 +160,6 @@ impl<'s> Pattern<'s> {
             }
         }
     }
-
-    pub fn type_(
-        &self,
-        symbols: &Symbols<'s>,
-        inferer: &mut crate::inferer::Inferer<'s>,
-        e: &mut crate::errors::ManyError,
-    ) -> Type<'s> {
-        match self {
-            Pattern::Bind(local_id, meta) => Type {
-                node: TypeNode::Var(local_id.type_var_id()),
-                meta: meta.clone(),
-            },
-            Pattern::Literal(c, meta) => Type {
-                node: TypeNode::Primitive(c.type_()),
-                meta: meta.clone(),
-            },
-            Pattern::Construct(constructor, args, meta) => {
-                let args_type: Vec<_> = args.iter().map(|p| p.type_(symbols, inferer, e)).collect();
-                let constructor = symbols.constructor(&constructor);
-                let data = symbols.data(constructor.belongs_to);
-
-                let type_var_zero = inferer.new_slots(data.kind_arity);
-                let data_params = (0..data.kind_arity)
-                    .map(|i| Type::new_var(type_var_zero.offset(i), data.generic_metas[i].clone()))
-                    .collect();
-
-                let params: Vec<_> = constructor
-                    .params
-                    .iter()
-                    .map(|p| p.offset_vars(type_var_zero))
-                    .collect();
-
-                if let Err(err) = inferer.unify_list(args_type.iter(), params.iter(), meta) {
-                    e.push(err);
-                    return Type {
-                        node: TypeNode::Never,
-                        meta: meta.clone(),
-                    };
-                }
-                Type {
-                    node: TypeNode::Generic(constructor.belongs_to, data_params),
-                    meta: meta.clone(),
-                }
-            }
-        }
-    }
 }
 
 pub struct Data<'s> {
@@ -279,6 +227,7 @@ pub enum TypeNode<'s> {
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
     Var(TypeVarId),
+    /// This says that the underlying type is unknown, but we know it is upper-bounded by some typejkjkjkjkjkjkjk
     UpperBounded(Box<Type<'s>>),
     Unit,
     Never,
@@ -519,11 +468,10 @@ impl<'s> std::fmt::Debug for Type<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let span = (self.meta.span.0)..(self.meta.span.0 + self.meta.span.1);
         let report = miette::miette!(
-            labels = vec![
-                miette::LabeledSpan::at(span, format!("{}", self.node))
-            ],
+            labels = vec![miette::LabeledSpan::at(span, format!("{}", self.node))],
             "Type here"
-        ).with_source_code(self.meta.named_source());
+        )
+        .with_source_code(self.meta.named_source());
         writeln!(f, "{:?}", report)
     }
 }
