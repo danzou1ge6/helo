@@ -704,7 +704,7 @@ fn generic_params_decl<'s>(
 }
 
 fn type_generic<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, (template, _)) = alphabetic_identifier_str(s, ctx)?;
+    let (s1, (template, template_meta)) = alphabetic_identifier_str(s, ctx)?;
 
     if template == "_" && ctx.allow_wildcard_in_type {
         return Ok((
@@ -716,20 +716,21 @@ fn type_generic<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::T
         ));
     }
 
-    let (s4, args) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("[")))(s1)? {
+    let (s4, args, meta) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("[")))(s1)? {
         let (s3, args) =
             nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s2)?;
-        let (s4, _) = trailing_space(nbyte::tag("]"))(s3)?;
-        (s4, args)
+        let (s4, _) = nbyte::tag("]")(s3)?;
+        let (s5, _) = empty(s4)?;
+        (s5, args, ctx.meta(s, s4))
     } else {
-        (s1, vec![])
+        (s1, vec![], template_meta)
     };
 
     Ok((
         s4,
         ast::Type {
             node: ast::TypeNode::Generic(template, args),
-            meta: ctx.meta(s, s4),
+            meta,
         },
     ))
 }
@@ -774,10 +775,10 @@ fn type_primitive<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast:
         ncomb::map(nbyte::tag("Str"), |_| ast::PrimitiveType::Str),
         ncomb::map(nbyte::tag("Bool"), |_| ast::PrimitiveType::Bool),
     ))(s)?;
-    let (s1, _) = empty(s1)?;
+    let (s2, _) = empty(s1)?;
 
     Ok((
-        s1,
+        s2,
         ast::Type {
             node: ast::TypeNode::Primitive(pri),
             meta: ctx.meta(s, s1),
@@ -786,9 +787,10 @@ fn type_primitive<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast:
 }
 
 fn type_unit<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, _) = trailing_space(nbyte::tag("()"))(s)?;
+    let (s1, _) = nbyte::tag("()")(s)?;
+    let (s2, _) = empty(s1)?;
     Ok((
-        s1,
+        s2,
         ast::Type {
             node: ast::TypeNode::Unit,
             meta: ctx.meta(s, s1),
@@ -797,7 +799,7 @@ fn type_unit<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type
 }
 
 fn type_var<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, (gp, _)) = trailing_space(|s| generic_param_a(s, ctx))(s)?;
+    let (s1, (gp, meta)) = trailing_space(|s| generic_param_a(s, ctx))(s)?;
     let type_node = ctx
         .resolve_generic_param(gp)
         .map_or(ast::TypeNode::Never, |var_id| ast::TypeNode::Var(var_id));
@@ -805,7 +807,7 @@ fn type_var<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<
         s1,
         ast::Type {
             node: type_node,
-            meta: ctx.meta(s, s1),
+            meta,
         },
     ))
 }
@@ -1058,9 +1060,10 @@ fn function_signature<'s>(
     let (s4, t) = type_callable_type(s3, ctx)?;
 
     let (s5, _) = trailing_space(nbyte::tag("="))(s4)?;
-    let (s5, _) = trailing_space(nbyte::tag(".."))(s5)?;
+    let (s5, _) = nbyte::tag("..")(s5)?;
+    let (s6, _) = empty(s5)?;
 
-    Ok((s5, (f_name, t, ctx.generic_param_cnt(), ctx.meta(s, s5))))
+    Ok((s6, (f_name, t, ctx.generic_param_cnt(), ctx.meta(s, s5))))
 }
 
 fn function<'s>(
