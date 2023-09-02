@@ -15,6 +15,14 @@ pub struct SpannedHint {
 }
 
 #[derive(Diagnostic, Debug, Error)]
+#[error("Details")]
+#[diagnostic()]
+pub struct TwoSpannedHint {
+    #[related]
+    hints: [SpannedHint; 2],
+}
+
+#[derive(Diagnostic, Debug, Error)]
 #[error("Unification Failure: can't unify types a = {a} with b = {b}")]
 pub struct UnificationFailure {
     pub a: String,
@@ -23,8 +31,9 @@ pub struct UnificationFailure {
     pub src: NamedSource,
     #[label("Unification in this expression")]
     pub span: SourceSpan,
-    #[related]
-    pub hints: [SpannedHint; 2],
+    #[source]
+    #[diagnostic_source]
+    pub hints: TwoSpannedHint,
 }
 
 impl UnificationFailure {
@@ -34,28 +43,30 @@ impl UnificationFailure {
         meta: &ast::Meta,
         b_is_upper_bound: bool,
     ) -> Self {
-        let hints = [
-            SpannedHint {
-                msg: "Type a defined here".to_owned(),
-                src: a.meta.named_source(),
-                span: a.meta.span.into(),
-            },
-            SpannedHint {
-                msg: "Type b defined here".to_owned(),
-                src: b.meta.named_source(),
-                span: b.meta.span.into(),
-            },
-        ];
-        UnificationFailure {
-            a: a.to_string(),
-            b: if b_is_upper_bound {
+        let b_repr = if b_is_upper_bound {
                 format!("upper-bounded by {b}")
             } else {
                 b.to_string()
-            },
+            };
+        UnificationFailure {
+            a: a.to_string(),
+            b: b_repr.clone(),
             src: meta.named_source(),
             span: meta.span(),
-            hints,
+            hints: TwoSpannedHint {
+                hints: [
+                    SpannedHint {
+                        msg: format!("Type a = {} here", a),
+                        src: a.meta.named_source(),
+                        span: a.meta.span.into(),
+                    },
+                    SpannedHint {
+                        msg: format!("Type b = {} here", b_repr),
+                        src: b.meta.named_source(),
+                        span: b.meta.span.into(),
+                    },
+                ],
+            },
         }
     }
 }
@@ -273,7 +284,7 @@ pub struct InfiniteType {
     #[label("Type variable {} here equals to {}", var_name, var_value)]
     pub span: SourceSpan,
     pub var_name: String,
-    pub var_value: String
+    pub var_value: String,
 }
 
 impl InfiniteType {
@@ -282,7 +293,7 @@ impl InfiniteType {
             src: var_meta.named_source(),
             span: var_meta.span(),
             var_name: format!("'{}", var_id.0),
-            var_value: var_value.to_string()
+            var_value: var_value.to_string(),
         }
     }
 }
@@ -305,7 +316,6 @@ impl ConstructorNameNotUppercase {
     }
 }
 
-
 #[derive(Diagnostic, Debug, Error)]
 #[error("Refutable pattern not allowed here")]
 pub struct RefutablePattern {
@@ -323,7 +333,6 @@ impl RefutablePattern {
         }
     }
 }
-
 
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
