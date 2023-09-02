@@ -41,6 +41,7 @@ pub enum ExprNode_<'s, Id, C> {
     IfElse { test: Id, then: Id, else_: Id },
     Case { operand: Id, arms: Vec<CaseArm<'s>> },
     LetIn { bind: LocalId, value: Id, in_: Id },
+    LetPatIn { bind: Pattern<'s>, value: Id, in_: Id},
     Closure(C),
     Global(&'s str),
     Tuple(Vec<Id>),
@@ -123,6 +124,7 @@ pub enum Pattern<'s> {
     Construct(&'s str, Vec<Pattern<'s>>, Meta),
     Bind(LocalId, Meta),
     Literal(Constant<'s>, Meta),
+    Tuple(Vec<Pattern<'s>>, Meta),
 }
 
 pub struct Constructor<'s> {
@@ -138,6 +140,7 @@ impl<'s> Pattern<'s> {
             Pattern::Bind(_, meta) => meta,
             Pattern::Construct(_, _, meta) => meta,
             Pattern::Literal(_, meta) => meta,
+            Pattern::Tuple(_, meta) => meta,
         }
     }
     pub fn validate(&self, symbols: &Symbols<'s>) -> Result<(), miette::Report> {
@@ -158,6 +161,25 @@ impl<'s> Pattern<'s> {
                     )))
                 }
             }
+            Pattern::Tuple(v, _) => {
+                for elem in v {
+                    elem.validate(symbols)?;
+                }
+                Ok(())
+            }
+        }
+    }
+    /// Check if this pattern is refutable. WARNING: Pattern must be validated before hand
+    pub fn inrefutable(&self, symbols: &Symbols<'s>) -> bool {
+        match self {
+            Pattern::Construct(constructor, args, _) => {
+                let c = symbols.constructor(&constructor);
+                let data = symbols.data(c.belongs_to);
+                data.constructors.len() == 1 && args.iter().all(|pat| pat.inrefutable(symbols))
+            }
+            Self::Tuple(elements, _) => elements.iter().all(|pat| pat.inrefutable(symbols)),
+            Self::Literal(_, _) => true,
+            Self::Bind(_, _) => true,
         }
     }
 }
@@ -232,7 +254,7 @@ pub enum TypeNode<'s> {
     Unit,
     Never,
     /// This is only used for parsing. During inference, any wildcard is replaced with a new variable
-    WildCard
+    WildCard,
 }
 
 impl<'s> std::fmt::Display for TypeNode<'s> {
@@ -367,7 +389,7 @@ impl<'s> Type<'s> {
     pub fn new_never(meta: Meta) -> Self {
         Self {
             node: TypeNode::Never,
-            meta
+            meta,
         }
     }
 
@@ -412,7 +434,7 @@ impl<'s> Type<'s> {
             UpperBounded(v) => UpperBounded(Box::new(v.apply(selector, f))),
             Var(v) => Var(*v),
             Never => Never,
-            WildCard => WildCard
+            WildCard => WildCard,
         };
         Type {
             node,
@@ -423,7 +445,7 @@ impl<'s> Type<'s> {
     pub fn apply_result<E>(
         &self,
         selector: &impl Fn(&Type<'s>) -> bool,
-        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
     ) -> Result<Type<'s>, E> {
         use TypeNode::*;
         fn apply_many<'a, 's, E>(
@@ -455,7 +477,7 @@ impl<'s> Type<'s> {
             UpperBounded(v) => UpperBounded(Box::new(v.apply_result(selector, f)?)),
             Var(v) => Var(*v),
             Never => Never,
-            WildCard => WildCard
+            WildCard => WildCard,
         };
         Ok(Type {
             node,

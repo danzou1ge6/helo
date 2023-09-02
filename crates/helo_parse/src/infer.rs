@@ -62,6 +62,18 @@ pub fn infer_expr<'s>(
             inferer,
             e,
         ),
+        ExprNode::LetPatIn { bind, value, in_ } => infer_let_pattern_in(
+            bind,
+            *value,
+            *in_,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            e,
+        ),
         ExprNode::Closure(closure) => infer_closure(
             closure,
             &expr.meta,
@@ -350,6 +362,61 @@ fn infer_let_in<'s>(
     typed::Expr {
         node: typed::ExprNode::LetIn {
             bind,
+            value: typed_nodes.push(value),
+            in_: typed_nodes.push(in_),
+        },
+        type_: ret_type,
+        meta: let_in_meta.clone(),
+    }
+}
+
+fn infer_let_pattern_in<'s>(
+    pattern: &ast::Pattern<'s>,
+    value: ast::ExprId,
+    in_: ast::ExprId,
+    let_in_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    if !pattern.inrefutable(symbols) {
+        e.push(errors::RefutablePattern::new(pattern.meta()));
+    }
+
+    let pattern_type = infer_pattern_type(pattern, symbols, inferer, e);
+    let value = infer_expr(
+        value,
+        symbols,
+        ast_nodes,
+        typed_nodes,
+        typed_functions,
+        inferer,
+        e,
+    );
+    // Bind type of value to pattern
+    inferer
+        .unify(&pattern_type, &value.type_, let_in_meta)
+        .commit(e);
+
+    // Infer type of in clause
+    let in_ = infer_expr(
+        in_,
+        symbols,
+        ast_nodes,
+        typed_nodes,
+        typed_functions,
+        inferer,
+        e,
+    );
+
+    let ret_type = in_.type_.clone();
+    dbg!(&ret_type);
+    typed::Expr {
+        node: typed::ExprNode::LetPatIn {
+            bind: pattern.clone(),
             value: typed_nodes.push(value),
             in_: typed_nodes.push(in_),
         },
@@ -656,6 +723,14 @@ pub fn infer_pattern_type<'s>(
                 meta: meta.clone(),
             }
         }
+        ast::Pattern::Tuple(v, meta) => ast::Type {
+            node: ast::TypeNode::Tuple(
+                v.iter()
+                    .map(|x| infer_pattern_type(x, symbols, inferer, e))
+                    .collect(),
+            ),
+            meta: meta.clone(),
+        },
     }
 }
 

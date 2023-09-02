@@ -305,6 +305,26 @@ impl ConstructorNameNotUppercase {
     }
 }
 
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Refutable pattern not allowed here")]
+pub struct RefutablePattern {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Pattern here")]
+    pub span: SourceSpan,
+}
+
+impl RefutablePattern {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {

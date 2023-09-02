@@ -1,8 +1,14 @@
+let fn fst x = let x of (a, b) in a
+
 let fn partial2_1 f, x =
     let fn g y = f x, y in g
 
 let fn sum x : [Int] -> Int =
     if x == 0
     then 0
-    else let rest = sum (x - 1)
+    else let sum (x - 1) of rest
          in x + rest
+
+data Pair ['a, 'b] = Pair 'a, 'b
+
+let fn pair_fst x = let x of Pair a, b in a

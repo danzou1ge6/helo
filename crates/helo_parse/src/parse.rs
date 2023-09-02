@@ -86,6 +86,10 @@ impl<'s> ResolutionEnv<'s> {
             .locals
             .resize_with(new_len, || unreachable!());
     }
+    fn pop_scope(&mut self) {
+        let pop_cnt = self.current().scope_cnt.pop().unwrap();
+        self.pop(pop_cnt);
+    }
 }
 
 struct Context<'s, 'a> {
@@ -232,7 +236,6 @@ impl<'s, 'a> Context<'s, 'a> {
         self.ast_nodes.push(node)
     }
 
-
     pub fn define_local(&mut self, name: &'s str) -> ast::LocalId {
         let id = self.resolution_env.current().id_cnt;
         self.resolution_env.current().locals.push((name, id));
@@ -248,11 +251,11 @@ impl<'s, 'a> Context<'s, 'a> {
     }
 
     /// All variables defined in `f` will be popped upon exit
-    pub fn with_scope<R>(&mut self, f: impl Fn(&mut Context<'s, '_>) -> R) -> R {
+    pub fn with_scope<R>(&mut self, f: impl FnOnce(&mut Context<'s, '_>) -> R) -> R {
         self.resolution_env.current().scope_cnt.push(0);
         let r = f(self);
-        let pop_cnt = self.resolution_env.current().scope_cnt.pop().unwrap();
-        self.resolution_env.pop(pop_cnt);
+
+        self.resolution_env.pop_scope();
         r
     }
 
@@ -549,9 +552,16 @@ fn pattern_bind<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::P
 
 fn parenthesed_pattern<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
     let (s1, _) = trailing_space(nbyte::tag("("))(s)?;
-    let (s1, pat) = pattern(s1, ctx)?;
-    let (s2, _) = trailing_space(nbyte::tag(")"))(s1)?;
-    Ok((s2, pat))
+    let (s1, mut pats) =
+        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| pattern(s, ctx))(s1)?;
+    let (s2, _) = nbyte::tag(")")(s1)?;
+    let (s3, _) = empty(s2)?;
+
+    if pats.len() == 1 {
+        Ok((s3, pats.pop().unwrap()))
+    } else {
+        Ok((s3, ast::Pattern::Tuple(pats, ctx.meta(s, s2))))
+    }
 }
 
 /// A pattern
@@ -596,21 +606,21 @@ fn case_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
 }
 
 fn let_in_bind_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s1, (id, _)) = alphabetic_identifier_str(s, ctx)?;
-
-    let (s1, _) = trailing_space(nbyte::tag("="))(s1)?;
-    let (s2, value) = expression(s1, ctx)?;
+    let (s1, value) = expression(s, ctx)?;
     let value = ctx.push_expr(value);
 
-    let (s3, _) = trailing_space(nbyte::tag("in"))(s2)?;
+    let (s1, _) = trailing_space(nbyte::tag("of"))(s1)?;
+
     ctx.with_scope(|ctx| {
-        let local_id = ctx.define_local(id);
+        let (s2, pattern) = pattern(s1, ctx)?;
+    
+        let (s3, _) = trailing_space(nbyte::tag("in"))(s2)?;
         let (s4, in_) = expression(s3, ctx)?;
         Ok((
             s4,
             ast::Expr::new_untyped(
-                ast::ExprNode::LetIn {
-                    bind: local_id,
+                ast::ExprNode::LetPatIn {
+                    bind: pattern,
                     value,
                     in_: ctx.push_expr(in_),
                 },
@@ -688,7 +698,7 @@ fn let_in_closure_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s>
 }
 
 fn let_in_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    alt!(s, ctx, let_in_bind_expr, let_in_closure_expr)
+    alt!(s, ctx, let_in_closure_expr, let_in_bind_expr)
 }
 
 fn generic_param_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, &'s str> {
@@ -817,13 +827,30 @@ fn type_var<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<
     ))
 }
 
+fn type_tuple<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
+    let (s1, _) = trailing_space(nbyte::tag("("))(s)?;
+    let (s2, args) =
+        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s1)?;
+    let (s3, _) = nbyte::tag(")")(s2)?;
+    let (s4, _) = empty(s3)?;
+
+    Ok((
+        s4,
+        ast::Type {
+            node: ast::TypeNode::Tuple(args),
+            meta: ctx.meta(s, s3),
+        },
+    ))
+}
+
 fn type_<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
     alt!(
         s,
         ctx,
         type_var,
-        type_generic,
+        type_tuple,
         type_primitive,
+        type_generic,
         type_callable,
         type_unit
     );
@@ -924,14 +951,30 @@ fn expression_item<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
     );
 }
 
+fn expression_parenthesed<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
+    let (s1, mut exprs) =
+        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| expression(s, ctx))(s)?;
+    let (s2, _) = nbyte::tag(")")(s1)?;
+    let (s3, _) = empty(s2)?;
+
+    if exprs.len() == 1 {
+        Ok((s3, exprs.pop().unwrap()))
+    } else {
+        Ok((
+            s3,
+            ast::Expr::new_untyped(
+                ast::ExprNode::Tuple(ctx.push_expr_many(exprs.into_iter())),
+                ctx.meta(s, s2),
+            ),
+        ))
+    }
+}
+
 fn prefix_expression<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
     // Parenthesed
     if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
         let (s1, _) = empty(s1)?;
-        let (s2, expr) = expression(s1, ctx)?;
-        let (s3, _) = nbyte::tag(")")(s2)?;
-        let (s3, _) = empty(s3)?;
-        Ok((s3, expr))
+        expression_parenthesed(s1, ctx)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("if"))(s)? {
         let (s1, _) = empty(s1)?;
         if_expr(s1, ctx)
