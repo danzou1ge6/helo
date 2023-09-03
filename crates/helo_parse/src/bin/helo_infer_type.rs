@@ -42,7 +42,6 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
             for f_name in symbols.function_names() {
                 let f = infer::infer_function(
                     &f_name,
-                    symbols.function(f_name),
                     &symbols,
                     &ast_ndoes,
                     &mut typed_nodes,

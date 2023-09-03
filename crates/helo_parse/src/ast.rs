@@ -35,22 +35,52 @@ impl From<LocalId> for usize {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CapturedId(pub usize);
+
+impl From<usize> for CapturedId {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
+
+pub type FunctionId = String;
+
 #[derive(Debug)]
 pub enum ExprNode_<'s, Id, C> {
-    Call { callee: Id, args: Vec<Id> },
-    IfElse { test: Id, then: Id, else_: Id },
-    Case { operand: Id, arms: Vec<CaseArm<'s>> },
-    LetIn { bind: LocalId, value: Id, in_: Id },
-    LetPatIn { bind: Pattern<'s>, value: Id, in_: Id},
-    Closure(C),
+    Call {
+        callee: Id,
+        args: Vec<Id>,
+    },
+    IfElse {
+        test: Id,
+        then: Id,
+        else_: Id,
+    },
+    Case {
+        operand: Id,
+        arms: Vec<CaseArm<'s>>,
+    },
+    LetIn {
+        bind: LocalId,
+        value: Id,
+        in_: Id,
+    },
+    LetPatIn {
+        bind: Pattern<'s>,
+        value: Id,
+        in_: Id,
+    },
+    MakeClosure(FunctionId),
+    ThisClosure(C),
     Global(&'s str),
     Tuple(Vec<Id>),
-    TupleGet(Id, usize),
+    Captured(CapturedId),
     Constant(Constant<'s>),
     Local(LocalId),
 }
 
-pub type ExprNode<'s> = ExprNode_<'s, ExprId, Closure<'s>>;
+pub type ExprNode<'s> = ExprNode_<'s, ExprId, ()>;
 
 #[derive(Debug, Clone)]
 pub enum Constant<'s> {
@@ -89,19 +119,6 @@ impl<'s> Expr<'s> {
     }
 }
 
-/// Arguments supplied to `function` are laid out in the following way:
-///     a_0, .. , a_n, (b_0, .. b_m)
-/// where a_i 's are arguments to the closure, therefore n begin the arity of the closure; b_i 's are locals captured by
-/// the closure
-#[derive(Debug)]
-pub struct Closure_<F> {
-    pub captures: Vec<LocalId>,
-    pub captures_meta: Vec<Meta>,
-    pub function: F,
-}
-
-pub type Closure<'s> = Closure_<Function<'s>>;
-
 #[derive(Debug)]
 pub struct Function<'s> {
     pub type_: Option<CallableType<'s>>,
@@ -111,6 +128,8 @@ pub struct Function<'s> {
     pub body: ExprId,
     pub meta: Meta,
     pub param_metas: Vec<Meta>,
+    pub captures: Vec<LocalId>,
+    pub captures_meta: Vec<Meta>,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +313,31 @@ pub struct CallableType<'s> {
     pub ret: Box<Type<'s>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct FunctionType<'s> {
+    pub params: Vec<Type<'s>>,
+    pub ret: Box<Type<'s>>,
+    pub captures: Vec<Type<'s>>,
+}
+
+impl<'s> From<FunctionType<'s>> for CallableType<'s> {
+    fn from(value: FunctionType<'s>) -> Self {
+        Self {
+            params: value.params,
+            ret: value.ret,
+        }
+    }
+}
+impl<'s> From<CallableType<'s>> for FunctionType<'s> {
+    fn from(value: CallableType<'s>) -> Self {
+        Self {
+            params: value.params,
+            ret: value.ret,
+            captures: vec![],
+        }
+    }
+}
+
 fn str_join_vec<T>(f: &mut std::fmt::Formatter<'_>, j: &str, slice: &[T]) -> std::fmt::Result
 where
     T: std::fmt::Display,
@@ -315,12 +359,22 @@ impl<'s> std::fmt::Display for CallableType<'s> {
     }
 }
 
-impl<'s> CallableType<'s> {
-    pub fn apply(
+impl<'s> std::fmt::Display for FunctionType<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        str_join_vec(f, ", ", &self.params)?;
+        write!(f, "][")?;
+        str_join_vec(f, ", ", &self.captures)?;
+        write!(f, "] -> {}", &self.ret)
+    }
+}
+
+impl<'s> TypeApply<'s> for CallableType<'s> {
+    fn apply(
         &self,
         selector: &impl Fn(&Type<'s>) -> bool,
         f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
-    ) -> CallableType<'s> {
+    ) -> Self {
         let params = self.params.iter().map(|x| x.apply(selector, f)).collect();
         let ret = self.ret.apply(selector, f);
         CallableType {
@@ -328,11 +382,48 @@ impl<'s> CallableType<'s> {
             ret: Box::new(ret),
         }
     }
+}
 
+impl<'s> CallableType<'s> {
     pub fn substitute_vars_with_nodes(
         &self,
         nodes: &impl Fn(TypeVarId) -> TypeNode<'s>,
     ) -> CallableType<'s> {
+        self.apply(
+            &|t| matches!(t.node, TypeNode::Var(_)),
+            &mut |t| match t.node {
+                TypeNode::Var(v) => Type {
+                    node: nodes(v),
+                    meta: t.meta.clone(),
+                },
+                _ => unreachable!(),
+            },
+        )
+    }
+}
+
+impl<'s> TypeApply<'s> for FunctionType<'s> {
+    fn apply(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
+    ) -> Self {
+        let params = self.params.iter().map(|x| x.apply(selector, f)).collect();
+        let captures = self.captures.iter().map(|x| x.apply(selector, f)).collect();
+        let ret = self.ret.apply(selector, f);
+        FunctionType {
+            params,
+            captures,
+            ret: Box::new(ret),
+        }
+    }
+}
+
+impl<'s> FunctionType<'s> {
+    pub fn substitute_vars_with_nodes(
+        &self,
+        nodes: &impl Fn(TypeVarId) -> TypeNode<'s>,
+    ) -> FunctionType<'s> {
         self.apply(
             &|t| matches!(t.node, TypeNode::Var(_)),
             &mut |t| match t.node {
@@ -378,36 +469,16 @@ pub struct Type<'s> {
     pub meta: Meta,
 }
 
-impl<'s> Type<'s> {
-    pub fn new_var(id: TypeVarId, meta: Meta) -> Self {
-        Self {
-            node: TypeNode::Var(id),
-            meta,
-        }
-    }
-
-    pub fn new_never(meta: Meta) -> Self {
-        Self {
-            node: TypeNode::Never,
-            meta,
-        }
-    }
-
-    pub fn new_bounded_var(id: TypeVarId, meta: Meta) -> Self {
-        Self {
-            node: TypeNode::UpperBounded(Box::new(Self {
-                node: TypeNode::Var(id),
-                meta: meta.clone(),
-            })),
-            meta,
-        }
-    }
-    /// Walk the tree, and apply `f` to any child that makes `selector` produce `true`
-    pub fn apply(
+pub trait TypeApply<'s> {
+    fn apply(
         &self,
         selector: &impl Fn(&Type<'s>) -> bool,
         f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
-    ) -> Type<'s> {
+    ) -> Self;
+}
+
+impl<'s> TypeApply<'s> for Type<'s> {
+    fn apply(&self, selector: &impl Fn(&Self) -> bool, f: &mut impl FnMut(&Self) -> Self) -> Self {
         use TypeNode::*;
         fn apply_many<'a, 's>(
             many: impl Iterator<Item = &'a Type<'s>>,
@@ -439,6 +510,32 @@ impl<'s> Type<'s> {
         Type {
             node,
             meta: self.meta.clone(),
+        }
+    }
+}
+
+impl<'s> Type<'s> {
+    pub fn new_var(id: TypeVarId, meta: Meta) -> Self {
+        Self {
+            node: TypeNode::Var(id),
+            meta,
+        }
+    }
+
+    pub fn new_never(meta: Meta) -> Self {
+        Self {
+            node: TypeNode::Never,
+            meta,
+        }
+    }
+
+    pub fn new_bounded_var(id: TypeVarId, meta: Meta) -> Self {
+        Self {
+            node: TypeNode::UpperBounded(Box::new(Self {
+                node: TypeNode::Var(id),
+                meta: meta.clone(),
+            })),
+            meta,
         }
     }
 
@@ -559,15 +656,15 @@ pub struct BuiltinFunction<'s> {
 }
 
 pub struct Symbols<'s> {
-    functions: HashMap<&'s str, Function<'s>>,
+    functions: HashMap<FunctionId, Function<'s>>,
     constructors: HashMap<&'s str, Constructor<'s>>,
     datas: HashMap<&'s str, Data<'s>>,
     builtins: HashMap<&'s str, BuiltinFunction<'s>>,
 }
 
 impl<'s> Symbols<'s> {
-    pub fn function_names(&self) -> impl Iterator<Item = &&'s str> {
-        self.functions.keys()
+    pub fn function_names(&self) -> impl Iterator<Item = &str> {
+        self.functions.keys().map(|x| &x[..])
     }
     pub fn get_constructor(&self, name: &str) -> Option<&Constructor<'s>> {
         self.constructors.get(name)
@@ -644,7 +741,7 @@ impl<'s> Symbols<'s> {
             builtins: HashMap::new(),
         }
     }
-    pub fn add_function(&mut self, name: &'s str, f: Function<'s>) {
+    pub fn add_function(&mut self, name: FunctionId, f: Function<'s>) {
         self.functions.insert(name, f);
     }
     pub fn add_constructor(&mut self, name: &'s str, c: Constructor<'s>) {

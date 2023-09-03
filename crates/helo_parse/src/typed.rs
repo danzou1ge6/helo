@@ -2,16 +2,14 @@ use std::collections::HashMap;
 
 use crate::ast;
 
-pub type ExprNode<'s> = ast::ExprNode_<'s, ExprId, Closure<'s>>;
+pub type ExprNode<'s> = ast::ExprNode_<'s, ExprId, ast::FunctionId>;
 
 pub struct Function<'s> {
     pub var_cnt: usize,
-    pub type_: ast::CallableType<'s>,
+    pub type_: ast::FunctionType<'s>,
     pub body: ExprId,
     pub meta: ast::Meta,
 }
-
-pub type Closure<'s> = ast::Closure_<String>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExprId(usize);

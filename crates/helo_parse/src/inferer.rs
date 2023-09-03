@@ -382,11 +382,7 @@ impl<'s> Inferer<'s> {
     /// During type inference of function call, new type-vars may be introduced by the
     /// function template. Corresponding slots must be created in uf set, and those
     /// type-vars need to be renamed.
-    pub fn rename_callable_type_vars(
-        &mut self,
-        type_: &ast::CallableType<'s>,
-        var_cnt: usize,
-    ) -> ast::CallableType<'s> {
+    pub fn rename_type_vars<T: ast::TypeApply<'s>>(&mut self, type_: &T, var_cnt: usize) -> T {
         let offset = self.uf.new_slots(var_cnt);
         type_.apply(
             &|t| matches!(t.node, ast::TypeNode::Var(_)),
@@ -507,15 +503,19 @@ impl<'s> Inferer<'s> {
     }
 
     /// Same as `discretization`, but for [`ast::CallableType`]
-    pub fn discretization_callable(
+    pub fn discretization_function(
         &mut self,
-        type_: &ast::CallableType<'s>,
+        type_: &ast::FunctionType<'s>,
     ) -> (HashMap<ast::TypeVarId, ast::TypeVarId>, usize) {
         let mut map = HashMap::new();
         let mut counter = 0;
 
         type_
             .params
+            .iter()
+            .for_each(|type_| self.discretization_walk(type_, &mut map, &mut counter));
+        type_
+            .captures
             .iter()
             .for_each(|type_| self.discretization_walk(type_, &mut map, &mut counter));
         self.discretization_walk(&type_.ret, &mut map, &mut counter);
@@ -527,9 +527,9 @@ impl<'s> Inferer<'s> {
     }
 
     pub fn instantiate_wildcard(&mut self, type_: &ast::Type<'s>) -> ast::Type<'s> {
-        type_.apply(
-            &|t| matches!(&t.node, ast::TypeNode::WildCard),
-            &mut |_| ast::Type::new_var(self.alloc_var(), type_.meta.clone())
-        )
+        use ast::TypeApply;
+        type_.apply(&|t| matches!(&t.node, ast::TypeNode::WildCard), &mut |_| {
+            ast::Type::new_var(self.alloc_var(), type_.meta.clone())
+        })
     }
 }

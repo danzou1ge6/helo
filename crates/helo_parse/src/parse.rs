@@ -68,8 +68,7 @@ enum ResolutionEnv<'s> {
         current: FunctionResolutionEnv<'s>,
         captures: Vec<ast::LocalId>,
         caputures_meta: Vec<ast::Meta>,
-        /// Arity of closure, not closure function
-        arity: usize,
+        this_name: &'s str,
     },
 }
 
@@ -101,6 +100,7 @@ struct Context<'s, 'a> {
     generic_params: Vec<&'s str>,
     precedence_table: &'a mut PrecedenceTable<'s>,
     allow_wildcard_in_type: bool,
+    pub symbols: &'a mut ast::Symbols<'s>,
 }
 
 impl<'s, 'a> Context<'s, 'a> {
@@ -110,6 +110,7 @@ impl<'s, 'a> Context<'s, 'a> {
         ast_nodes: &'a mut ast::ExprHeap<'s>,
         e: &'a mut errors::ManyError,
         ptable: &'a mut PrecedenceTable<'s>,
+        symbols: &'a mut ast::Symbols<'s>,
     ) -> Self {
         Self {
             file_name,
@@ -120,6 +121,7 @@ impl<'s, 'a> Context<'s, 'a> {
             generic_params: Vec::new(),
             precedence_table: ptable,
             allow_wildcard_in_type: false,
+            symbols,
         }
     }
 
@@ -176,59 +178,56 @@ impl<'s, 'a> Context<'s, 'a> {
                         parent,
                         current,
                         captures,
-                        arity,
                         caputures_meta,
+                        this_name,
                     },
-                ast_nodes,
                 ..
-            } => current
-                .locals
-                .iter()
-                .rfind(|(n, _)| *n == name)
-                .map_or_else(
-                    // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
-                    || {
-                        parent
-                            .locals
-                            .iter()
-                            .rfind(|(n, _)| *n == name)
-                            .map_or(None, |(_, id)| {
-                                // Found in parent namespace
-                                if let Some(i) = captures.iter().position(|i| *i == *id) {
-                                    Some(ast::Expr::new_untyped(
-                                        ast::ExprNode::TupleGet(
-                                            ast_nodes.push(ast::Expr::new_untyped(
-                                                ast::ExprNode::Local((*arity).into()),
+            } => {
+                if name == *this_name {
+                    Some(ast::Expr::new_untyped(
+                        ast::ExprNode::ThisClosure(()),
+                        meta.clone(),
+                    ))
+                } else {
+                    current
+                        .locals
+                        .iter()
+                        .rfind(|(n, _)| *n == name)
+                        .map_or_else(
+                            // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
+                            || {
+                                parent.locals.iter().rfind(|(n, _)| *n == name).map_or(
+                                    None,
+                                    |(_, id)| {
+                                        // Found in parent namespace
+                                        if let Some(i) = captures.iter().position(|i| *i == *id) {
+                                            Some(ast::Expr::new_untyped(
+                                                ast::ExprNode::Captured(i.into()),
                                                 meta.clone(),
-                                            )),
-                                            i,
-                                        ),
-                                        meta.clone(),
-                                    ))
-                                } else {
-                                    captures.push(*id);
-                                    caputures_meta.push(meta.clone());
-                                    Some(ast::Expr::new_untyped(
-                                        ast::ExprNode::TupleGet(
-                                            ast_nodes.push(ast::Expr::new_untyped(
-                                                ast::ExprNode::Local((*arity).into()),
+                                            ))
+                                        } else {
+                                            captures.push(*id);
+                                            caputures_meta.push(meta.clone());
+                                            Some(ast::Expr::new_untyped(
+                                                ast::ExprNode::Captured(
+                                                    (captures.len() - 1).into(),
+                                                ),
                                                 meta.clone(),
-                                            )),
-                                            captures.len() - 1,
-                                        ),
-                                        meta.clone(),
-                                    ))
-                                }
-                            })
-                    },
-                    // Local
-                    |(_, id)| {
-                        Some(ast::Expr::new_untyped(
-                            ast::ExprNode::Local(*id),
-                            meta.clone(),
-                        ))
-                    },
-                ),
+                                            ))
+                                        }
+                                    },
+                                )
+                            },
+                            // Local
+                            |(_, id)| {
+                                Some(ast::Expr::new_untyped(
+                                    ast::ExprNode::Local(*id),
+                                    meta.clone(),
+                                ))
+                            },
+                        )
+                }
+            }
         }
     }
 
@@ -264,7 +263,7 @@ impl<'s, 'a> Context<'s, 'a> {
     /// Return (captures, number of locals, result of `f`)
     pub fn with_closure_scope<R>(
         &mut self,
-        arity: usize,
+        this_name: &'s str,
         f: impl Fn(&mut Context<'s, '_>) -> R,
     ) -> (Vec<ast::LocalId>, Vec<ast::Meta>, usize, R) {
         let parent = match &mut self.resolution_env {
@@ -274,9 +273,9 @@ impl<'s, 'a> Context<'s, 'a> {
         self.resolution_env = ResolutionEnv::InClosure {
             parent,
             current: FunctionResolutionEnv::new(),
-            arity,
             captures: Vec::new(),
             caputures_meta: Vec::new(),
+            this_name,
         };
 
         let r = f(self);
@@ -292,7 +291,7 @@ impl<'s, 'a> Context<'s, 'a> {
                 std::mem::take(parent),
                 std::mem::take(captures),
                 std::mem::take(caputures_meta),
-                current.locals.len(),
+                current.local_cnt(),
             ),
             _ => unreachable!(),
         };
@@ -613,7 +612,7 @@ fn let_in_bind_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
 
     ctx.with_scope(|ctx| {
         let (s2, pattern) = pattern(s1, ctx)?;
-    
+
         let (s3, _) = trailing_space(nbyte::tag("in"))(s2)?;
         let (s4, in_) = expression(s3, ctx)?;
         Ok((
@@ -646,49 +645,52 @@ fn let_in_closure_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s>
 
     let (s1, (id, _)) = alphabetic_identifier_str(s1, ctx)?;
 
-    let (s2, params) = nmulti::many0(|s| alphabetic_identifier_str(s, ctx))(s1)?;
-    let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
-
-    let (s3, _) = trailing_space(nbyte::tag("="))(s2)?;
-
-    let (captures, captures_meta, local_cnt, r) = ctx.with_closure_scope(params.len(), |ctx| {
-        params.iter().for_each(|p| {
-            ctx.define_local(p);
-        });
-        ctx.define_local("_closure_captures");
-        expression(s3, ctx)
-    });
-    let (s4, body) = r?;
-
-    let f = ast::Function {
-        type_: None,
-        var_cnt: 0,
-        local_cnt,
-        arity: params.len() + 1,
-        body: ctx.push_expr(body),
-        meta: ctx.meta(s, s4),
-        param_metas: params_meta,
-    };
-    let closure = ast::Expr::new_untyped(
-        ast::ExprNode::Closure(ast::Closure {
-            captures,
-            function: f,
-            captures_meta,
-        }),
-        ctx.meta(s, s4),
-    );
-    let closure = ctx.push_expr(closure);
-
-    let (s5, _) = trailing_space(nbyte::tag("in"))(s4)?;
     ctx.with_scope(|ctx| {
         let local_id = ctx.define_local(id);
+
+        let (s2, params) = nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| {
+            alphabetic_identifier_str(s, ctx)
+        })(s1)?;
+        let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
+
+        let (s3, _) = trailing_space(nbyte::tag("="))(s2)?;
+
+        let (captures, captures_meta, local_cnt, r) = ctx.with_closure_scope(id, |ctx| {
+            params.iter().for_each(|p| {
+                ctx.define_local(p);
+            });
+            expression(s3, ctx)
+        });
+        let (s4, body) = r?;
+
+        let f = ast::Function {
+            type_: None,
+            var_cnt: 0,
+            local_cnt,
+            arity: params.len(),
+            body: ctx.push_expr(body),
+            meta: ctx.meta(s, s4),
+            param_metas: params_meta,
+            captures,
+            captures_meta,
+        };
+        let closure_meta = ctx.meta(s, s4);
+        let closure_id = closure_meta.closure_id();
+        ctx.symbols.add_function(closure_id.clone(), f);
+
+        let closure_expr = ctx.push_expr(ast::Expr::new_untyped(
+            ast::ExprNode::MakeClosure(closure_id),
+            closure_meta,
+        ));
+
+        let (s5, _) = trailing_space(nbyte::tag("in"))(s4)?;
         let (s6, in_) = expression(s5, ctx)?;
         Ok((
             s6,
             ast::Expr::new_untyped(
                 ast::ExprNode::LetIn {
                     bind: local_id,
-                    value: closure,
+                    value: closure_expr,
                     in_: ctx.push_expr(in_),
                 },
                 ctx.meta(s, s6),
@@ -1161,6 +1163,8 @@ fn function<'s>(
         body: ctx.push_expr(body),
         meta: ctx.meta(s, s6),
         param_metas,
+        captures: vec![],
+        captures_meta: vec![],
     };
 
     Ok((s6, (f_name, f)))
@@ -1176,16 +1180,17 @@ pub fn parse_ast<'s>(
     e: &mut errors::ManyError,
     precedence_table: &mut PrecedenceTable<'s>,
 ) -> PResult<'s, ()> {
-    let mut ctx = Context::new(file_name, src, ast_nodes, e, precedence_table);
+    let mut ctx = Context::new(file_name, src, ast_nodes, e, precedence_table, symbols);
 
     let (mut s, _) = empty(s)?;
 
     while s.len() > 0 {
-        if let (s1, Some((data_name, data, constructors))) = ncomb::opt(|s| data(s, &mut ctx))(s)? {
-            symbols.add_data(data_name, data);
+        let (s1, r) = ncomb::opt(|s| data(s, &mut ctx))(s)?;
+        if let Some((data_name, data, constructors)) = r {
+            ctx.symbols.add_data(data_name, data);
             constructors
                 .into_iter()
-                .for_each(|c| symbols.add_constructor(c.name, c));
+                .for_each(|c| ctx.symbols.add_constructor(c.name, c));
             s = s1;
             continue;
         }
@@ -1195,9 +1200,10 @@ pub fn parse_ast<'s>(
             continue;
         }
 
-        if let (s1, Some((f_name, f))) = ncomb::opt(|s| function(s, &mut ctx))(s)? {
+        let (s1, r) = ncomb::opt(|s| function(s, &mut ctx))(s)?;
+        if let Some((f_name, f)) = r {
             s = s1;
-            symbols.add_function(f_name, f);
+            ctx.symbols.add_function(f_name.to_string(), f);
             continue;
         }
 
@@ -1220,7 +1226,7 @@ pub fn parse_builtin_function_signatures<'s>(
     let mut ast_ndoes = ast::ExprHeap::new();
     let mut e = errors::ManyError::new();
     let mut ptable = PrecedenceTable::new();
-    let mut ctx = Context::new(file_name, src, &mut ast_ndoes, &mut e, &mut ptable);
+    let mut ctx = Context::new(file_name, src, &mut ast_ndoes, &mut e, &mut ptable, symbols);
 
     let (s, _) = empty(s).unwrap();
     let (_, sigs) = nmulti::many1(|s| function_signature(s, &mut ctx))(s).unwrap();

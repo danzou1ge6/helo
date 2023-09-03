@@ -74,7 +74,9 @@ pub fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::Closure(closure) => infer_closure(
+        ExprNode::Captured(id) => infer_captured(*id, &expr.meta, symbols, typed_functions),
+        ExprNode::ThisClosure(()) => infer_this_closure(&expr.meta, symbols, typed_functions),
+        ExprNode::MakeClosure(closure) => infer_make_closure(
             closure,
             &expr.meta,
             symbols,
@@ -104,17 +106,6 @@ pub fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::TupleGet(from, index) => infer_tuple_get(
-            *from,
-            *index,
-            &expr.meta,
-            symbols,
-            ast_nodes,
-            typed_nodes,
-            typed_functions,
-            inferer,
-            e,
-        ),
         ExprNode::Constant(constant) => infer_constant(constant, &expr.meta),
         ExprNode::Local(id) => infer_local(*id, &expr.meta),
     };
@@ -124,6 +115,7 @@ pub fn infer_expr<'s>(
             .unify(&provided_type, &typed_expr.type_, &expr.meta)
             .commit(e);
     }
+    dbg!(&typed_expr.type_);
     typed_expr
 }
 
@@ -149,61 +141,6 @@ pub fn infer_expr_many<'s, 'a>(
             )
         })
         .collect()
-}
-
-fn infer_tuple_get<'s>(
-    from: ast::ExprId,
-    index: usize,
-    get_meta: &ast::Meta,
-    symbols: &ast::Symbols<'s>,
-    ast_nodes: &ast::ExprHeap<'s>,
-    typed_nodes: &mut typed::ExprHeap<'s>,
-    typed_functions: &mut typed::FunctionTable<'s>,
-    inferer: &mut inferer::Inferer<'s>,
-    e: &mut errors::ManyError,
-) -> typed::Expr<'s> {
-    let from = infer_expr(
-        from,
-        symbols,
-        ast_nodes,
-        typed_nodes,
-        typed_functions,
-        inferer,
-        e,
-    );
-
-    let type_ = match inferer
-        .resolve(&from.type_)
-        .unwrap_or_else(|err| {
-            e.push(err);
-            ast::Type::new_never(get_meta.clone())
-        })
-        .node
-    {
-        ast::TypeNode::Tuple(elements_type) => {
-            if elements_type.len() <= index {
-                ast::Type::new_never(get_meta.clone())
-            } else {
-                elements_type[index].clone()
-            }
-        }
-        ast::TypeNode::Var(_) => {
-            e.push(errors::TypeAnnotationRequiredForTuple::new(&from.meta));
-            ast::Type::new_never(get_meta.clone())
-        }
-        otherwise => {
-            if !matches!(otherwise, ast::TypeNode::Never) {
-                e.push(errors::NoTupleAccess::new(&from.type_));
-            }
-            ast::Type::new_never(get_meta.clone())
-        }
-    };
-
-    typed::Expr {
-        node: typed::ExprNode::TupleGet(typed_nodes.push(from), index),
-        type_,
-        meta: get_meta.clone(),
-    }
 }
 
 fn infer_tuple<'s>(
@@ -276,7 +213,7 @@ fn infer_call<'s>(
         .node
     {
         // NOTE that we assume that type-vars have already been renamed
-        ast::TypeNode::Callable(ast::CallableType { params, ret }) => {
+        ast::TypeNode::Callable(ast::CallableType { params, ret, .. }) => {
             inferer
                 .unify_list(args.iter().map(|a| &a.type_), params.iter(), call_meta)
                 .commit(e);
@@ -358,7 +295,6 @@ fn infer_let_in<'s>(
     );
 
     let ret_type = in_.type_.clone();
-    dbg!(&ret_type);
     typed::Expr {
         node: typed::ExprNode::LetIn {
             bind,
@@ -413,7 +349,6 @@ fn infer_let_pattern_in<'s>(
     );
 
     let ret_type = in_.type_.clone();
-    dbg!(&ret_type);
     typed::Expr {
         node: typed::ExprNode::LetPatIn {
             bind: pattern.clone(),
@@ -440,7 +375,6 @@ fn infer_global<'s>(
         if let Some(renamed_f_type) = infer_function_type_renamed(
             name,
             global_meta,
-            f,
             symbols,
             ast_nodes,
             typed_nodes,
@@ -451,7 +385,7 @@ fn infer_global<'s>(
             return typed::Expr {
                 node: typed::ExprNode::Global(name),
                 type_: ast::Type {
-                    node: ast::TypeNode::Callable(renamed_f_type),
+                    node: ast::TypeNode::Callable(renamed_f_type.into()),
                     meta: f.meta.clone(),
                 },
                 meta: global_meta.clone(),
@@ -462,7 +396,7 @@ fn infer_global<'s>(
 
         // Global is builtin
     } else if let Some(f) = symbols.get_builtin_type(name) {
-        let renamed_type = inferer.rename_callable_type_vars(&f.type_, f.var_cnt);
+        let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
         let r = typed::Expr {
             node: typed::ExprNode::Global(name),
             type_: ast::Type {
@@ -489,7 +423,8 @@ fn infer_global<'s>(
             params: constructor.params.clone(),
             ret: Box::new(ret_type),
         };
-        let type_ = inferer.rename_callable_type_vars(&type_, data.kind_arity);
+        let type_ = inferer.rename_type_vars(&type_, data.kind_arity);
+        dbg!(&type_);
         let type_ = if type_.params.len() == 0 {
             *type_.ret
         } else {
@@ -498,7 +433,6 @@ fn infer_global<'s>(
                 meta: constructor.meta.clone(),
             }
         };
-        dbg!(&type_);
         return typed::Expr {
             node: typed::ExprNode::Global(name),
             type_,
@@ -557,6 +491,7 @@ fn infer_if_else<'s>(
         inferer,
         e,
     );
+    dbg!(&then.type_, &else_.type_);
 
     // then and else clause must have same type
     let ret_type = inferer
@@ -603,8 +538,8 @@ fn infer_constant<'s>(constant: &ast::Constant<'s>, constant_meta: &ast::Meta) -
     }
 }
 
-fn infer_closure<'s>(
-    closure: &ast::Closure<'s>,
+fn infer_make_closure<'s>(
+    closure_id: &ast::FunctionId,
     closure_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
@@ -613,71 +548,40 @@ fn infer_closure<'s>(
     inferer: &mut inferer::Inferer<'s>,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
-    // Infer closure function
-    let closure_id = closure_meta.closure_id();
-
-    // TODO: the last parameter passed to the closure function is a tuple, this must be known during inference of closure function
-
-    let closure_type = if let Some(infered_f) = infer_closure_function(
-        &closure_id,
-        &closure.function,
-        &closure.captures_meta,
+    let closure_type = infer_function_type_renamed(
+        closure_id,
+        closure_meta,
         symbols,
         ast_nodes,
         typed_nodes,
         typed_functions,
+        inferer,
         e,
-    ) {
-        let mut renamed_type =
-            inferer.rename_callable_type_vars(&infered_f.type_, infered_f.var_cnt);
-
-        let captured_tuple_type = ast::Type {
-            node: ast::TypeNode::Tuple(
-                closure
-                    .captures
-                    .iter()
-                    .zip(closure.captures_meta.iter())
-                    .map(|(local, meta)| {
-                        ast::Type::new_var(type_var_id_for_local(*local), meta.clone())
-                    })
-                    .collect(),
-            ),
-            meta: closure_meta.clone(),
-        };
-
-        // Unify captured locals with the last parameter of the closure function,
-        // so as to get the type of the closure
-        let arity = renamed_type.params.len() - 1;
-        inferer
-            .unify(
-                &renamed_type.params[arity],
-                &captured_tuple_type,
-                closure_meta,
-            )
-            .commit(e);
-
-        // Throw away the last few arguments corresponding to captured locals
-        renamed_type.params.resize_with(arity, || unreachable!());
-        let closure_type = ast::Type {
-            node: ast::TypeNode::Callable(renamed_type),
-            meta: closure_meta.clone(),
-        };
-        typed_functions.insert(closure_id.clone(), infered_f);
-        closure_type
-
-    // Fail: fail to infer closure function, use dummy never type, but throw no error
-    } else {
-        ast::Type::new_never(closure_meta.clone())
-    };
-    return typed::Expr {
-        node: typed::ExprNode::Closure(typed::Closure {
-            function: closure_id,
-            captures: closure.captures.iter().map(|i| *i).collect(),
-            captures_meta: closure.captures_meta.clone(),
-        }),
+    )
+    .map_or_else(
+        || ast::Type::new_never(closure_meta.clone()),
+        |c| {
+            let f = symbols.function(&closure_id);
+            c.captures
+                .iter()
+                .zip(f.captures.iter())
+                .zip(f.captures_meta.iter())
+                .for_each(|((ctype, local_id), local_meta)| {
+                    inferer
+                        .update_var(type_var_id_for_local(*local_id), ctype, local_meta)
+                        .commit(e);
+                });
+            ast::Type {
+                node: ast::TypeNode::Callable(c.into()),
+                meta: closure_meta.clone(),
+            }
+        },
+    );
+    typed::Expr {
+        node: typed::ExprNode::MakeClosure(closure_id.clone()),
         type_: closure_type,
         meta: closure_meta.clone(),
-    };
+    }
 }
 
 pub fn infer_pattern_type<'s>(
@@ -798,44 +702,62 @@ fn infer_local(id: ast::LocalId, id_meta: &ast::Meta) -> typed::Expr<'static> {
     }
 }
 
+fn infer_captured<'s>(
+    id: ast::CapturedId,
+    id_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+) -> typed::Expr<'static> {
+    let local_cnt = symbols
+        .function(typed_functions.currently_infering().unwrap())
+        .local_cnt;
+    typed::Expr {
+        node: typed::ExprNode::Captured(id),
+        type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id), id_meta.clone()),
+        meta: id_meta.clone(),
+    }
+}
+
 /// Infer type of a function and return its signature renamed
 pub fn infer_function_type_renamed<'s>(
     name: &str,
     name_meta: &ast::Meta,
-    f: &ast::Function<'s>,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     e: &mut errors::ManyError,
-) -> Option<ast::CallableType<'s>> {
+) -> Option<ast::FunctionType<'s>> {
     // Already infered its type
     if let Some(infered_f) = typed_functions.get(name) {
-        let renamed_type = inferer.rename_callable_type_vars(&infered_f.type_, infered_f.var_cnt);
+        let renamed_type = inferer.rename_type_vars(&infered_f.type_, infered_f.var_cnt);
         return Some(renamed_type);
     }
 
     // Type annotated by programmer
+    let f = symbols.function(name);
     if let Some(f_type) = &f.type_ {
-        return Some(inferer.rename_callable_type_vars(f_type, f.var_cnt));
+        return Some(inferer.rename_type_vars(&f_type.clone().into(), f.var_cnt));
     }
 
     // Not in infering tree
     if !typed_functions.is_infering(name) {
         if let Some(infered_f) =
-            infer_function(name, f, symbols, ast_nodes, typed_nodes, typed_functions, e)
+            infer_function(name, symbols, ast_nodes, typed_nodes, typed_functions, e)
         {
-            let renamed_type =
-                inferer.rename_callable_type_vars(&infered_f.type_, infered_f.var_cnt);
+            let renamed_type = inferer.rename_type_vars(&infered_f.type_, infered_f.var_cnt);
             typed_functions.insert(name.to_owned(), infered_f);
             return Some(renamed_type);
         }
     }
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
+    // Arguments we are passing are certainly more specified than parameters, so we use a upper-bound here
+    // to represent the relationship. The same is for return value.
+    // And we will never infer closure recursively, so no closure-inference will reach here
     if typed_functions.currently_infering().unwrap() == name {
-        let r = Some(ast::CallableType {
+        let r = Some(ast::FunctionType {
             params: (0..f.arity)
                 .map(|i| {
                     ast::Type::new_bounded_var(
@@ -844,17 +766,56 @@ pub fn infer_function_type_renamed<'s>(
                     )
                 })
                 .collect(),
+            captures: (0..f.captures.len())
+                .map(|i| {
+                    ast::Type::new_var(
+                        type_var_id_for_captured(f.local_cnt, i.into()),
+                        f.captures_meta[i].clone(),
+                    )
+                })
+                .collect(),
             ret: Box::new(ast::Type::new_bounded_var(
                 type_var_id_for_local(f.local_cnt.into()),
                 f.meta.clone(),
             )),
         });
-        dbg!(&r);
         return r;
     }
 
     e.push(errors::CircularInference::new(name, name_meta));
     None
+}
+
+/// Variables are renamed
+fn infer_this_closure<'s>(
+    name_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+) -> typed::Expr<'s> {
+    let f = symbols.function(&typed_functions.currently_infering().unwrap());
+    let type_ = ast::CallableType {
+        params: (0..f.arity)
+            .map(|i| {
+                ast::Type::new_bounded_var(
+                    type_var_id_for_local(i.into()),
+                    f.param_metas[i].clone(),
+                )
+            })
+            .collect(),
+        ret: Box::new(ast::Type::new_bounded_var(
+            type_var_id_for_ret(f.local_cnt),
+            f.meta.clone(),
+        )),
+    };
+    dbg!(&type_);
+    typed::Expr {
+        node: typed::ExprNode::ThisClosure(typed_functions.currently_infering().unwrap().to_string()),
+        type_: ast::Type {
+            node: ast::TypeNode::Callable(type_),
+            meta: f.meta.clone()
+        },
+        meta: name_meta.clone()
+    }
 }
 
 /// Init the [`inferer::Inferer`] for infering function `f`.
@@ -863,6 +824,7 @@ pub fn infer_function_type_renamed<'s>(
 /// `0..f.arity` are assigned to parameters of `f`
 /// `0..f.locals_cnt ` are assigned to locals of f. Actually, `f`'s parameters are exactly the first few locals
 /// `f.locals_cnt` is assigned to return value of `f`
+/// `(f.locals_cnt + 1)..(f.locals_cnt + 1 + f.captures_cnt)` are assigned to captured values of `f`
 ///
 /// This function allocate locals, unify user provided function signature and returns the type variable representing
 /// return value of the function
@@ -872,9 +834,10 @@ fn init_inferer_for_function_inference<'s>(
     inferer: &mut inferer::Inferer<'s>,
     e: &mut errors::ManyError,
 ) -> ast::Type<'s> {
-    let _ = inferer.alloc_vars(f.local_cnt + 1); // allocate type-vars for locals and return-value
+    // allocate type-vars for locals and return-value and captures
+    let _ = inferer.alloc_vars(f.local_cnt + 1 + f.captures.len());
 
-    let ret_type = ast::Type::new_var(f.local_cnt.into(), f.meta.clone());
+    let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt), f.meta.clone());
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
@@ -884,7 +847,7 @@ fn init_inferer_for_function_inference<'s>(
             return ret_type;
         }
         // Allocate type-vars for those in user provided function signature and rename
-        let f_type = inferer.rename_callable_type_vars(f_type, f.var_cnt);
+        let f_type = inferer.rename_type_vars(f_type, f.var_cnt);
         // Unify parameters
         for i in 0..f_type.params.len() {
             inferer
@@ -892,7 +855,7 @@ fn init_inferer_for_function_inference<'s>(
                 .commit(e);
         }
         inferer
-            .update_var(f.local_cnt.into(), &f_type.ret, &f.meta)
+            .update_var(type_var_id_for_ret(f.local_cnt), &f_type.ret, &f.meta)
             .commit(e);
     };
 
@@ -903,33 +866,28 @@ fn type_var_id_for_local(local: ast::LocalId) -> ast::TypeVarId {
     ast::TypeVarId::from(local.0)
 }
 
-/// Infer type of a closure function, that is, the last parameter of the function is the tuple of captured locals
-pub fn infer_closure_function<'s>(
+fn type_var_id_for_ret(local_cnt: usize) -> ast::TypeVarId {
+    ast::TypeVarId::from(local_cnt)
+}
+
+fn type_var_id_for_captured(local_cnt: usize, captured: ast::CapturedId) -> ast::TypeVarId {
+    ast::TypeVarId::from(captured.0 + local_cnt + 1)
+}
+
+/// Infer the type a normal function.
+pub fn infer_function<'s>(
     name: &str,
-    f: &ast::Function<'s>,
-    captures_meta: &[ast::Meta],
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     e: &mut errors::ManyError,
 ) -> Option<typed::Function<'s>> {
-    let mut inferer = inferer::Inferer::new();
-    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
+    let f = symbols.function(name);
 
-    // Let the inferer know that the last argument is a tuple
-    let captures_cnt = captures_meta.len();
-    let captures_tuple_type = ast::Type {
-        node: ast::TypeNode::Tuple(
-            inferer
-                .alloc_type_vars(captures_cnt, &|i| captures_meta[i].clone())
-                .collect(),
-        ),
-        meta: f.meta.clone(),
-    };
-    inferer
-        .update_var((f.arity - 1).into(), &captures_tuple_type, &f.meta)
-        .commit(e);
+    let mut inferer = inferer::Inferer::new();
+
+    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
 
     typed_functions.begin_infering(name.to_owned());
     // Resolve type of function body
@@ -948,25 +906,28 @@ pub fn infer_closure_function<'s>(
         .commit(e);
 
     // Construct type of function
-    let f_type = ast::CallableType {
+    let f_type = ast::FunctionType {
         params: (0..f.arity)
+            .zip(f.param_metas.iter())
+            .map(|(i, m)| {
+                inferer
+                    .resolve_var(type_var_id_for_local(i.into()), m)
+                    .unwrap_or_else(|err| {
+                        e.push(err);
+                        ast::Type::new_never(f.param_metas[i].clone())
+                    })
+            })
+            .collect(),
+        captures: (0..f.captures.len())
             .map(|i| {
                 inferer
                     .resolve_var(
-                        type_var_id_for_local(i.into()),
-                        if i == f.arity - 1 {
-                            &f.meta
-                        } else {
-                            &f.param_metas[i]
-                        },
+                        type_var_id_for_captured(f.local_cnt, i.into()),
+                        &f.captures_meta[i],
                     )
                     .unwrap_or_else(|err| {
                         e.push(err);
-                        ast::Type::new_never(if i == f.arity - 1 {
-                            f.meta.clone()
-                        } else {
-                            f.param_metas[i].clone()
-                        })
+                        ast::Type::new_never(f.captures_meta[i].clone())
                     })
             })
             .collect(),
@@ -978,69 +939,7 @@ pub fn infer_closure_function<'s>(
 
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
-    let (map, var_cnt) = inferer.discretization_callable(&f_type);
-    let f_type = f_type.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
-
-    typed_functions.finish_infering();
-
-    Some(typed::Function {
-        var_cnt,
-        body: typed_nodes.push(body_expr),
-        meta: f.meta.clone(),
-        type_: f_type,
-    })
-}
-
-/// Infer the type a normal function.
-pub fn infer_function<'s>(
-    name: &str,
-    f: &ast::Function<'s>,
-    symbols: &ast::Symbols<'s>,
-    ast_nodes: &ast::ExprHeap<'s>,
-    typed_nodes: &mut typed::ExprHeap<'s>,
-    typed_functions: &mut typed::FunctionTable<'s>,
-    e: &mut errors::ManyError,
-) -> Option<typed::Function<'s>> {
-    let mut inferer = inferer::Inferer::new();
-
-    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
-
-    typed_functions.begin_infering(name.to_owned());
-    // Resolve type of function body
-    let body_expr = infer_expr(
-        f.body,
-        symbols,
-        ast_nodes,
-        typed_nodes,
-        typed_functions,
-        &mut inferer,
-        e,
-    );
-
-    inferer
-        .unify(&ret_type, &body_expr.type_, &f.meta)
-        .commit(e);
-
-    // Construct type of function
-    let f_type = ast::CallableType {
-        params: (0..f.arity)
-            .zip(f.param_metas.iter())
-            .map(|(i, m)| {
-                inferer.resolve_var(i.into(), m).unwrap_or_else(|err| {
-                    e.push(err);
-                    ast::Type::new_never(f.param_metas[i].clone())
-                })
-            })
-            .collect(),
-        ret: Box::new(inferer.resolve(&body_expr.type_).unwrap_or_else(|err| {
-            e.push(err);
-            ast::Type::new_never(body_expr.meta.clone())
-        })),
-    };
-
-    // Discretize type of function such that variables are the first few unsigned integers
-    // e.g. from 2, 3 -> 4 to 0, 1 -> 2
-    let (map, var_cnt) = inferer.discretization_callable(&f_type);
+    let (map, var_cnt) = inferer.discretization_function(&f_type);
     let f_type = f_type.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
 
     typed_functions.finish_infering();
