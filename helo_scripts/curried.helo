@@ -1,0 +1,5 @@
+let fn map_add3 xs =
+    let fn map_list f, xs =
+        case xs of Con y, ys -> Con (f y), (map_list f, ys)
+                | Nil       -> Nil
+    in map_list (+ 3), xs

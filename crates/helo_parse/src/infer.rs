@@ -204,6 +204,9 @@ fn infer_call<'s>(
         e,
     );
 
+    dbg!(&callee.type_);
+    dbg!(args.iter().map(|x| &x.type_).collect::<Vec<_>>());
+
     let ret_type = match inferer
         .resolve(&callee.type_)
         .unwrap_or_else(|err| {
@@ -214,10 +217,26 @@ fn infer_call<'s>(
     {
         // NOTE that we assume that type-vars have already been renamed
         ast::TypeNode::Callable(ast::CallableType { params, ret, .. }) => {
+            if args.len() > params.len() {
+                e.push(errors::TooManyArguments::new(call_meta, params.len()));
+            }
             inferer
                 .unify_list(args.iter().map(|a| &a.type_), params.iter(), call_meta)
                 .commit(e);
-            ret.as_ref().clone()
+
+            if args.len() == params.len() {
+                ret.as_ref().clone()
+            } else {
+                let ret_callable_type = ast::CallableType {
+                    params: params[args.len()..params.len()].to_vec(),
+                    ret: ret.clone()
+                };
+                let ret_type = ast::Type {
+                    node: ast::TypeNode::Callable(ret_callable_type),
+                    meta: call_meta.clone()
+                };
+                ret_type
+            }
         }
         ast::TypeNode::Var(v_id) => {
             let ret_type = ast::Type {

@@ -1,7 +1,4 @@
-data List['a] = Con 'a, List['a]
-              | Nil
 
-data Pair['a, 'b] = Pair 'a, 'b
 
 let fn cauchian_product xs, ys =
     case xs of Con x1, xs1 -> let fn construct_pair y = Pair x1, y

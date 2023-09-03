@@ -334,6 +334,25 @@ impl RefutablePattern {
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Too many arguments")]
+pub struct TooManyArguments {
+    expected: usize,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Function call here expect at most {} arguments", expected)]
+    pub span: SourceSpan,
+}
+
+impl TooManyArguments {
+    pub fn new(meta: &ast::Meta, expected: usize) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            expected
+        }
+    }
+}
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {

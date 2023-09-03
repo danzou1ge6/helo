@@ -1,9 +1,10 @@
 [x] Support recursive function in type-checker
 [x] Check infinite type e.g. 0 = [0] -> 1 when resolving type
-[ ] Support recursive closure
+[x] Support recursive closure
 [x] Tuple expression, pattern, and type
 [x] Remove trailing space in Meta
 [x] Fix expression type annotation: Currently type-vars in annotations are colliding inferer-defined ones
 [ ] Support guard in case-of expression
 [ ] Use more efficient method when backing-up union-find array
 [x] Check constructor name is uppercase
+[x] Curried function

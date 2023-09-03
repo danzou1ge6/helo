@@ -1,6 +1,4 @@
 
-data List ['a] = Con 'a, List['a] | Nil
-
 let fn take_first_few xs, n =
     let fn take xs, n =
         if n == 0
@@ -20,7 +18,5 @@ let fn sum x : [Int] -> Int =
     then 0
     else let sum (x - 1) of rest
          in x + rest
-
-data Pair ['a, 'b] = Pair 'a, 'b
 
 let fn pair_fst x = let x of Pair a, b in a

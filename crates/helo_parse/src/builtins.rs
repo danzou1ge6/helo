@@ -62,6 +62,12 @@ const BUILTIN_DEF: &'static str = r#"
 
     data Result['a, 'e] = Ok 'a
                         | Err 'e
+
+    data List['a] = Con 'a, List['a] 
+                  | Nil
+
+    data Pair['a, 'b] = Pair 'a, 'b
+
 "#;
 
 pub fn add_builtins_to<'s>(
