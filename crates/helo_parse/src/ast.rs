@@ -47,7 +47,7 @@ impl From<usize> for CapturedId {
 pub type FunctionId = String;
 
 #[derive(Debug)]
-pub enum ExprNode_<'s, Id, C> {
+pub enum ExprNode_<'s, Id, C, A> {
     Call {
         callee: Id,
         args: Vec<Id>,
@@ -59,7 +59,7 @@ pub enum ExprNode_<'s, Id, C> {
     },
     Case {
         operand: Id,
-        arms: Vec<CaseArm<'s>>,
+        arms: Vec<A>,
     },
     LetIn {
         bind: LocalId,
@@ -80,7 +80,7 @@ pub enum ExprNode_<'s, Id, C> {
     Local(LocalId),
 }
 
-pub type ExprNode<'s> = ExprNode_<'s, ExprId, ()>;
+pub type ExprNode<'s> = ExprNode_<'s, ExprId, (), CaseArm<'s>>;
 
 #[derive(Debug, Clone)]
 pub enum Constant<'s> {
@@ -133,10 +133,13 @@ pub struct Function<'s> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CaseArm<'s> {
+pub struct CaseArm_<'s, Id> {
     pub pattern: Pattern<'s>,
-    pub result: ExprId,
+    pub guard: Option<Id>,
+    pub result: Id,
 }
+
+pub type CaseArm<'s> = CaseArm_<'s, ExprId>;
 
 #[derive(Debug, Clone)]
 pub enum Pattern<'s> {

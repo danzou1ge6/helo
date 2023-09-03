@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::ast;
 
-pub type ExprNode<'s> = ast::ExprNode_<'s, ExprId, ast::FunctionId>;
+pub type ExprNode<'s> = ast::ExprNode_<'s, ExprId, ast::FunctionId, CaseArm<'s>>;
+
+pub type CaseArm<'s> = ast::CaseArm_<'s, ExprId>;
 
 pub struct Function<'s> {
     pub var_cnt: usize,

@@ -578,12 +578,21 @@ fn pattern<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Patter
 fn case_arm<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::CaseArm<'s>> {
     ctx.with_scope(|ctx| {
         let (s1, pat) = pattern(s, ctx)?;
-        let (s2, _) = trailing_space(nbyte::tag("->"))(s1)?;
+
+        let (s2, guard) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("if")))(s1)? {
+            let (s3, guard) = expression(s2, ctx)?;
+            (s3, Some(guard))
+        } else {
+            (s1, None)
+        };
+
+        let (s2, _) = trailing_space(nbyte::tag("->"))(s2)?;
         let (s3, result) = expression(s2, ctx)?;
         Ok((
             s3,
             ast::CaseArm {
                 pattern: pat,
+                guard: guard.map(|x| ctx.push_expr(x)),
                 result: ctx.push_expr(result),
             },
         ))
@@ -1053,6 +1062,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         nbyte::tag("in"),
         nbyte::tag("let"),
         nbyte::tag("data"),
+        nbyte::tag("->"),
         nbyte::tag(")"),
         nbyte::tag(","),
     ))(s)

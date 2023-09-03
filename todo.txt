@@ -4,7 +4,7 @@
 [x] Tuple expression, pattern, and type
 [x] Remove trailing space in Meta
 [x] Fix expression type annotation: Currently type-vars in annotations are colliding inferer-defined ones
-[ ] Support guard in case-of expression
+[x] Support guard in case-of expression
 [ ] Use more efficient method when backing-up union-find array
 [x] Check constructor name is uppercase
 [x] Curried function

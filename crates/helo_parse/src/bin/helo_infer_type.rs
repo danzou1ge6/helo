@@ -76,7 +76,7 @@ fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_infer_type <file_name>"))
     //     .clone();
-    let file_name = "helo_scripts/curried.helo".to_string();
+    let file_name = "helo_scripts/guard.helo".to_string();
     let mut file = fs::File::open(&file_name)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

@@ -229,11 +229,11 @@ fn infer_call<'s>(
             } else {
                 let ret_callable_type = ast::CallableType {
                     params: params[args.len()..params.len()].to_vec(),
-                    ret: ret.clone()
+                    ret: ret.clone(),
                 };
                 let ret_type = ast::Type {
                     node: ast::TypeNode::Callable(ret_callable_type),
-                    meta: call_meta.clone()
+                    meta: call_meta.clone(),
                 };
                 ret_type
             }
@@ -679,34 +679,68 @@ fn infer_case<'s>(
     );
     let ret_type = ast::Type::new_var(inferer.alloc_var(), case_meta.clone());
 
-    for arm in arms {
-        if let Err(err) = arm.pattern.validate(symbols) {
-            e.push_boxed(err);
-            continue;
-        }
-        // Infer type of pattern
-        let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
-        let result = infer_expr(
-            arm.result,
-            symbols,
-            ast_nodes,
-            typed_nodes,
-            typed_functions,
-            inferer,
-            e,
-        );
+    let typed_arms = arms
+        .iter()
+        .map(|arm| {
+            if let Err(err) = arm.pattern.validate(symbols) {
+                e.push_boxed(err);
+            }
 
-        inferer
-            .unify(&operand.type_, &pat_type, arm.pattern.meta())
-            .commit(e);
-        inferer
-            .unify(&ret_type, &result.type_, &result.meta)
-            .commit(e);
-    }
+            // Infer type of pattern
+            let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
+            let result = infer_expr(
+                arm.result,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+
+            let guard = arm.guard.map(|g| {
+                let guard_expr = infer_expr(
+                    g,
+                    symbols,
+                    ast_nodes,
+                    typed_nodes,
+                    typed_functions,
+                    inferer,
+                    e,
+                );
+                inferer
+                    .unify(
+                        &guard_expr.type_,
+                        &ast::Type {
+                            node: ast::TypeNode::Primitive(ast::PrimitiveType::Bool),
+                            meta: guard_expr.meta.clone(),
+                        },
+                        &guard_expr.meta,
+                    )
+                    .commit(e);
+
+                typed_nodes.push(guard_expr)
+            });
+
+            inferer
+                .unify(&operand.type_, &pat_type, arm.pattern.meta())
+                .commit(e);
+            inferer
+                .unify(&ret_type, &result.type_, &result.meta)
+                .commit(e);
+
+            typed::CaseArm {
+                pattern: arm.pattern.clone(),
+                guard,
+                result: typed_nodes.push(result),
+            }
+        })
+        .collect();
+
     typed::Expr {
         node: typed::ExprNode::Case {
             operand: typed_nodes.push(operand),
-            arms: arms.to_vec(),
+            arms: typed_arms,
         },
         type_: ret_type,
         meta: case_meta.clone(),
@@ -828,12 +862,14 @@ fn infer_this_closure<'s>(
     };
     dbg!(&type_);
     typed::Expr {
-        node: typed::ExprNode::ThisClosure(typed_functions.currently_infering().unwrap().to_string()),
+        node: typed::ExprNode::ThisClosure(
+            typed_functions.currently_infering().unwrap().to_string(),
+        ),
         type_: ast::Type {
             node: ast::TypeNode::Callable(type_),
-            meta: f.meta.clone()
+            meta: f.meta.clone(),
         },
-        meta: name_meta.clone()
+        meta: name_meta.clone(),
     }
 }
 
