@@ -57,6 +57,7 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
 
             for (name, f) in typed_functions.iter() {
                 println!("{}: {}", name, f.type_);
+                typed_nodes.dbg_expr(f.body);
             }
             Ok(())
         }

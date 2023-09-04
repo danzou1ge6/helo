@@ -992,6 +992,8 @@ pub fn infer_function<'s>(
         })),
     };
 
+    use ast::TypeApply;
+
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
     let (map, var_cnt) = inferer.discretization_function(&f_type);
@@ -999,9 +1001,20 @@ pub fn infer_function<'s>(
 
     typed_functions.finish_infering();
 
+    let body = typed_nodes.push(body_expr);
+    typed_nodes.walk(body, &mut |expr| {
+        let resolved = inferer
+            .resolve(&expr.type_)
+            .unwrap_or_else(|err| {
+                e.push(err);
+                ast::Type::new_never(expr.type_.meta.clone())
+            });
+        expr.type_ = resolved.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
+    });
+
     Some(typed::Function {
         var_cnt,
-        body: typed_nodes.push(body_expr),
+        body,
         meta: f.meta.clone(),
         type_: f_type,
     })

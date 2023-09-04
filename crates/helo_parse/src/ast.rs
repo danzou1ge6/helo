@@ -46,7 +46,7 @@ impl From<usize> for CapturedId {
 
 pub type FunctionId = String;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprNode_<'s, Id, C, A> {
     Call {
         callee: Id,
@@ -387,24 +387,6 @@ impl<'s> TypeApply<'s> for CallableType<'s> {
     }
 }
 
-impl<'s> CallableType<'s> {
-    pub fn substitute_vars_with_nodes(
-        &self,
-        nodes: &impl Fn(TypeVarId) -> TypeNode<'s>,
-    ) -> CallableType<'s> {
-        self.apply(
-            &|t| matches!(t.node, TypeNode::Var(_)),
-            &mut |t| match t.node {
-                TypeNode::Var(v) => Type {
-                    node: nodes(v),
-                    meta: t.meta.clone(),
-                },
-                _ => unreachable!(),
-            },
-        )
-    }
-}
-
 impl<'s> TypeApply<'s> for FunctionType<'s> {
     fn apply(
         &self,
@@ -419,24 +401,6 @@ impl<'s> TypeApply<'s> for FunctionType<'s> {
             captures,
             ret: Box::new(ret),
         }
-    }
-}
-
-impl<'s> FunctionType<'s> {
-    pub fn substitute_vars_with_nodes(
-        &self,
-        nodes: &impl Fn(TypeVarId) -> TypeNode<'s>,
-    ) -> FunctionType<'s> {
-        self.apply(
-            &|t| matches!(t.node, TypeNode::Var(_)),
-            &mut |t| match t.node {
-                TypeNode::Var(v) => Type {
-                    node: nodes(v),
-                    meta: t.meta.clone(),
-                },
-                _ => unreachable!(),
-            },
-        )
     }
 }
 
@@ -478,6 +442,22 @@ pub trait TypeApply<'s> {
         selector: &impl Fn(&Type<'s>) -> bool,
         f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
     ) -> Self;
+
+    fn substitute_vars_with_nodes(&self, nodes: &impl Fn(TypeVarId) -> TypeNode<'s>) -> Self
+    where
+        Self: Sized,
+    {
+        self.apply(
+            &|t| matches!(t.node, TypeNode::Var(_)),
+            &mut |t| match t.node {
+                TypeNode::Var(v) => Type {
+                    node: nodes(v),
+                    meta: t.meta.clone(),
+                },
+                _ => unreachable!(),
+            },
+        )
+    }
 }
 
 impl<'s> TypeApply<'s> for Type<'s> {
