@@ -17,3 +17,10 @@ let fn map_list f, xs =
 let fn fold f, init, xs =
     case xs of Con y, ys -> fold f, (f y, init), ys
              | Nil       -> init
+
+let fn find f, xs =
+    let fn find_inner f,xs,i =
+        case xs of Con y,ys if f y -> Some (y, i)
+                 | Con y,ys        -> find_inner f,ys,(i + 1)
+                 | Nil             -> None
+    in find_inner f,xs,0

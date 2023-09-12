@@ -115,7 +115,7 @@ pub fn infer_expr<'s>(
             .unify(&provided_type, &typed_expr.type_, &expr.meta)
             .commit(e);
     }
-    dbg!(&typed_expr.type_);
+
     typed_expr
 }
 
@@ -203,9 +203,6 @@ fn infer_call<'s>(
         inferer,
         e,
     );
-
-    dbg!(&callee.type_);
-    dbg!(args.iter().map(|x| &x.type_).collect::<Vec<_>>());
 
     let ret_type = match inferer
         .resolve(&callee.type_)
@@ -443,7 +440,7 @@ fn infer_global<'s>(
             ret: Box::new(ret_type),
         };
         let type_ = inferer.rename_type_vars(&type_, data.kind_arity);
-        dbg!(&type_);
+
         let type_ = if type_.params.len() == 0 {
             *type_.ret
         } else {
@@ -510,7 +507,6 @@ fn infer_if_else<'s>(
         inferer,
         e,
     );
-    dbg!(&then.type_, &else_.type_);
 
     // then and else clause must have same type
     let ret_type = inferer
@@ -860,7 +856,7 @@ fn infer_this_closure<'s>(
             f.meta.clone(),
         )),
     };
-    dbg!(&type_);
+
     typed::Expr {
         node: typed::ExprNode::ThisClosure(
             typed_functions.currently_infering().unwrap().to_string(),
@@ -1000,17 +996,24 @@ pub fn infer_function<'s>(
     let f_type = f_type.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
 
     typed_functions.finish_infering();
-
     let body = typed_nodes.push(body_expr);
-    typed_nodes.walk(body, &mut |expr| {
-        let resolved = inferer
-            .resolve(&expr.type_)
-            .unwrap_or_else(|err| {
-                e.push(err);
-                ast::Type::new_never(expr.type_.meta.clone())
-            });
-        expr.type_ = resolved.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
-    });
+
+    // dbg!(&f_type, &map);
+
+    // typed_nodes.walk(body, &mut |expr| {
+    //     let resolved = inferer.resolve(&expr.type_).unwrap_or_else(|err| {
+    //         e.push(err);
+    //         ast::Type::new_never(expr.type_.meta.clone())
+    //     });
+    //     let report = miette::miette!(
+    //         labels = vec![miette::LabeledSpan::at(expr.meta.span(), format!("{}", resolved.node))],
+    //         "Type here"
+    //     )
+    //     .with_source_code(expr.meta.named_source());
+    //     println!("{:?}", &report);
+    //     dbg!(&inferer);
+    //     expr.type_ = resolved.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
+    // });
 
     Some(typed::Function {
         var_cnt,
