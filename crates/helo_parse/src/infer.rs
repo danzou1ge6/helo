@@ -75,7 +75,7 @@ pub fn infer_expr<'s>(
             e,
         ),
         ExprNode::Captured(id) => infer_captured(*id, &expr.meta, symbols, typed_functions),
-        ExprNode::ThisClosure(()) => infer_this_closure(&expr.meta, symbols, typed_functions),
+        ExprNode::ThisClosure => infer_this_closure(&expr.meta, symbols, typed_functions),
         ExprNode::MakeClosure(closure) => infer_make_closure(
             closure,
             &expr.meta,
@@ -399,7 +399,7 @@ fn infer_global<'s>(
             e,
         ) {
             return typed::Expr {
-                node: typed::ExprNode::Global(name),
+                node: typed::ExprNode::UserFunction(name),
                 type_: ast::Type {
                     node: ast::TypeNode::Callable(renamed_f_type.into()),
                     meta: f.meta.clone(),
@@ -414,7 +414,7 @@ fn infer_global<'s>(
     } else if let Some(f) = symbols.get_builtin_type(name) {
         let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
         let r = typed::Expr {
-            node: typed::ExprNode::Global(name),
+            node: typed::ExprNode::Builtin(name),
             type_: ast::Type {
                 node: ast::TypeNode::Callable(renamed_type),
                 meta: f.meta.clone(),
@@ -450,7 +450,7 @@ fn infer_global<'s>(
             }
         };
         return typed::Expr {
-            node: typed::ExprNode::Global(name),
+            node: typed::ExprNode::Constructor(name),
             type_,
             meta: global_meta.clone(),
         };
@@ -462,7 +462,7 @@ fn infer_global<'s>(
 
     // Fail: fallthrough
     typed::Expr {
-        node: typed::ExprNode::Global(name),
+        node: typed::ExprNode::UserFunction(name),
         type_: ast::Type::new_never(global_meta.clone()),
         meta: global_meta.clone(),
     }
@@ -1020,5 +1020,7 @@ pub fn infer_function<'s>(
         body,
         meta: f.meta.clone(),
         type_: f_type,
+        captures: f.captures.clone(),
+        local_cnt: f.local_cnt,
     })
 }

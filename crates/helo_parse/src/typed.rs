@@ -2,7 +2,43 @@ use std::collections::HashMap;
 
 use crate::ast;
 
-pub type ExprNode<'s> = ast::ExprNode_<'s, ExprId, ast::FunctionId, CaseArm<'s>>;
+use ast::{CapturedId, Constant, FunctionId, LocalId, Pattern};
+
+#[derive(Debug, Clone)]
+pub enum ExprNode<'s> {
+    Call {
+        callee: ExprId,
+        args: Vec<ExprId>,
+    },
+    IfElse {
+        test: ExprId,
+        then: ExprId,
+        else_: ExprId,
+    },
+    Case {
+        operand: ExprId,
+        arms: Vec<CaseArm<'s>>,
+    },
+    LetIn {
+        bind: LocalId,
+        value: ExprId,
+        in_: ExprId,
+    },
+    LetPatIn {
+        bind: Pattern<'s>,
+        value: ExprId,
+        in_: ExprId,
+    },
+    MakeClosure(FunctionId),
+    ThisClosure(FunctionId),
+    Constructor(&'s str),
+    UserFunction(&'s str),
+    Builtin(&'s str),
+    Tuple(Vec<ExprId>),
+    Captured(CapturedId),
+    Constant(Constant<'s>),
+    Local(LocalId),
+}
 
 pub type CaseArm<'s> = ast::CaseArm_<'s, ExprId>;
 
@@ -11,6 +47,8 @@ pub struct Function<'s> {
     pub type_: ast::FunctionType<'s>,
     pub body: ExprId,
     pub meta: ast::Meta,
+    pub captures: Vec<LocalId>,
+    pub local_cnt: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +98,7 @@ impl<'s> ExprHeap<'s> {
     pub fn walk(&mut self, root: ExprId, f: &mut impl FnMut(&mut Expr<'s>)) {
         f(self.get_mut(root).unwrap());
 
-        use ast::ExprNode_::*;
+        use ExprNode::*;
         let node = self.get(root).unwrap().node.clone();
         match node {
             Call { callee, args } => {
@@ -136,5 +174,53 @@ impl<'s> FunctionTable<'s> {
     }
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Function<'s>)> {
         self.tab.iter()
+    }
+}
+
+pub struct Symbols<'s> {
+    functions: FunctionTable<'s>,
+    pub constructors: HashMap<&'s str, ast::Constructor<'s>>,
+    pub datas: HashMap<&'s str, ast::Data<'s>>,
+    pub builtins: HashMap<&'s str, ast::BuiltinFunction<'s>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tag<'s>(usize, &'s str);
+
+impl<'s> Tag<'s> {
+    pub fn name(&self) -> &'s str {
+        self.1
+    }
+    pub fn code(&self) -> usize {
+        self.0
+    }
+}
+
+impl<'s> Symbols<'s> {
+    pub fn function_names(&self) -> impl Iterator<Item = &FunctionId> {
+        self.functions.tab.keys()
+    }
+    pub fn new(symbols: ast::Symbols<'s>, functions: FunctionTable<'s>) -> Self {
+        Self {
+            functions,
+            constructors: symbols.constructors,
+            datas: symbols.datas,
+            builtins: symbols.builtins,
+        }
+    }
+    pub fn tag_for(&self, constructor: &'s str) -> Tag<'s> {
+        let data_name = self.constructors.get(constructor).unwrap().belongs_to;
+        let data = self.datas.get(data_name).unwrap();
+        Tag(
+            data.constructors
+                .iter()
+                .position(|c| *c == constructor)
+                .unwrap(),
+            constructor,
+        )
+    }
+
+    pub fn function(&self, name: &str) -> &Function<'s> {
+        self.functions.get(name).unwrap()
     }
 }

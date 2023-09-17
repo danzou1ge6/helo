@@ -8,3 +8,4 @@
 [ ] Use more efficient method when backing-up union-find array
 [x] Check constructor name is uppercase
 [x] Curried function
+[ ] More accurate parse-error position

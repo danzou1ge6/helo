@@ -6,4 +6,3 @@ pub mod infer;
 pub mod inferer;
 pub mod parse;
 pub mod typed;
-pub use typed as typed_ast;

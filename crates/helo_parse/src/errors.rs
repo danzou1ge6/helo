@@ -4,6 +4,24 @@ use thiserror::Error;
 use crate::ast;
 
 #[derive(Diagnostic, Debug, Error)]
+#[error("Parse error")]
+pub struct ParseError {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Here")]
+    pub span: SourceSpan,
+}
+
+impl ParseError {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
 #[error("hint")]
 #[diagnostic()]
 pub struct SpannedHint {
@@ -44,10 +62,10 @@ impl UnificationFailure {
         b_is_upper_bound: bool,
     ) -> Self {
         let b_repr = if b_is_upper_bound {
-                format!("upper-bounded by {b}")
-            } else {
-                b.to_string()
-            };
+            format!("upper-bounded by {b}")
+        } else {
+            b.to_string()
+        };
         UnificationFailure {
             a: a.to_string(),
             b: b_repr.clone(),
@@ -349,10 +367,11 @@ impl TooManyArguments {
         Self {
             src: meta.named_source(),
             span: meta.span(),
-            expected
+            expected,
         }
     }
 }
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {

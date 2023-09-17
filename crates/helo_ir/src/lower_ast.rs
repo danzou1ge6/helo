@@ -3,20 +3,11 @@ use helo_parse::ast;
 use helo_parse::typed;
 
 pub struct Context {
-    str_table: ir::StrTable,
     local_cnt: usize,
     captured_cnt: usize,
 }
 
 impl Context {
-    fn immediate_from_constant(&mut self, c: ast::Constant<'_>) -> ir::Immediate {
-        match c {
-            ast::Constant::Int(i) => ir::Immediate::Int(i),
-            ast::Constant::Float(i) => ir::Immediate::Float(i),
-            ast::Constant::Bool(i) => ir::Immediate::Bool(i),
-            ast::Constant::Str(s) => ir::Immediate::Str(self.str_table.add(s.to_string())),
-        }
-    }
     fn new_local(&mut self) -> ir::LocalId {
         let r = ir::LocalId::from(self.local_cnt);
         self.local_cnt += 1;
@@ -33,18 +24,26 @@ impl Context {
         self.captured_cnt = captured_cnt;
         f(self)
     }
+
+    pub fn new() -> Self {
+        Self {
+            local_cnt: 0,
+            captured_cnt: 0,
+        }
+    }
 }
 
 pub fn lower_function<'s>(
     fid: &ast::FunctionId,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
-    lower_ctx: &mut Context,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
 ) -> ir::Function {
     let f = symbols.function(fid);
+    let mut lower_ctx = Context::new();
     lower_ctx.with_new_function(f.local_cnt, f.captures.len(), |lower_ctx| {
-        let body = lower_expr(f.body, symbols, typed_nodes, ir_nodes, lower_ctx);
+        let body = lower_expr(f.body, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
         ir::Function {
             local_cnt: lower_ctx.local_cnt,
             arity: f.type_.params.len(),
@@ -55,9 +54,10 @@ pub fn lower_function<'s>(
 
 fn lower_expr<'s>(
     id: typed::ExprId,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
     let expr = &typed_nodes[id];
@@ -70,6 +70,7 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         IfElse { test, then, else_ } => lower_if_else(
@@ -80,6 +81,7 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         Case { operand, arms } => lower_case(
@@ -89,6 +91,7 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         LetIn { bind, value, in_ } => lower_let_bind(
@@ -99,6 +102,7 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         LetPatIn { bind, value, in_ } => lower_let_pat(
@@ -109,11 +113,16 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         MakeClosure(fid) => lower_make_closure(fid, &expr.meta, symbols, ir_nodes),
         ThisClosure(fid) => lower_this_closure(fid, &expr.meta, ir_nodes),
-        Constructor(_) => unreachable!(),
+        Constructor(name) => {
+            let tag = symbols.tag_for(&name);
+            let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
+            ir_nodes.push(expr)
+        }
         UserFunction(fid) => lower_user_function(fid, &expr.meta, ir_nodes),
         Builtin(name) => lower_builtin(&name, &expr.meta, ir_nodes),
         Tuple(elem) => lower_tuple(
@@ -122,10 +131,11 @@ fn lower_expr<'s>(
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         ),
         Captured(id) => lower_captured(*id, &expr.meta, ir_nodes),
-        Constant(c) => lower_constant(c.clone(), &expr.meta, ir_nodes, lower_ctx),
+        Constant(c) => lower_constant(c.clone(), &expr.meta, ir_nodes, str_table),
         Local(id) => lower_local(*id, &expr.meta, ir_nodes, lower_ctx),
     }
 }
@@ -140,7 +150,21 @@ mod lower_case {
     struct Row<'s> {
         patterns: VecDeque<Option<Pattern<'s>>>,
         guard: Option<ir::ExprId>,
+        binds: Vec<(ast::LocalId, ir::ExprId)>,
         result: ir::ExprId,
+    }
+
+    impl<'s> std::fmt::Debug for Row<'s> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            for p in &self.patterns {
+                if let Some(p) = p {
+                    write!(f, "{p}, ")?;
+                } else {
+                    write!(f, "_")?;
+                }
+            }
+            write!(f, " -> {}", self.result.0)
+        }
     }
 
     type Operand = ir::ExprId;
@@ -176,20 +200,11 @@ mod lower_case {
     fn move_binds_right<'s>(
         rows: Vec<(Option<Pattern<'s>>, Row<'s>)>,
         operand: Operand,
-        ir_nodes: &mut ir::ExprHeap,
     ) -> Vec<(Option<Pattern<'s>>, Row<'s>)> {
         rows.into_iter()
             .map(|(pat, mut row)| match pat {
-                Some(Pattern::Bind(local_id, meta)) => {
-                    let let_in_expr = ir::Expr::new(
-                        ir::ExprNode::LetBind {
-                            local: local_id,
-                            value: operand,
-                            in_: row.result,
-                        },
-                        (&meta).into(),
-                    );
-                    row.result = ir_nodes.push(let_in_expr);
+                Some(Pattern::Bind(local_id, _)) => {
+                    row.binds.push((local_id, operand));
                     (None, row)
                 }
                 _ => (pat, row),
@@ -204,9 +219,10 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
-    ) -> ir::Expr {
+    ) -> ir::Expr<'s> {
         let mut cases = Vec::new();
 
         while rows.len() != 0 {
@@ -233,7 +249,7 @@ mod lower_case {
                 });
 
                 rows = rest_rows;
-                let first_immediate = lower_ctx.immediate_from_constant(first);
+                let first_immediate = str_table.immediate_from_constant(first);
                 let switch_for_branch = lower_table(
                     rest_operands.clone(),
                     branch_rows,
@@ -241,6 +257,7 @@ mod lower_case {
                     symbols,
                     typed_nodes,
                     ir_nodes,
+                    str_table,
                     lower_ctx,
                 );
                 cases.push((first_immediate, switch_for_branch));
@@ -256,6 +273,7 @@ mod lower_case {
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         );
 
@@ -272,9 +290,10 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
-    ) -> ir::Expr {
+    ) -> ir::Expr<'s> {
         let mut cases = Vec::new();
         let local_for_operand = lower_ctx.new_local();
 
@@ -324,6 +343,7 @@ mod lower_case {
                     symbols,
                     typed_nodes,
                     ir_nodes,
+                    str_table,
                     lower_ctx,
                 );
                 let let_in_for_branch = ir::Expr::new(
@@ -349,6 +369,7 @@ mod lower_case {
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         );
 
@@ -365,9 +386,10 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
-    ) -> ir::Expr {
+    ) -> ir::Expr<'s> {
         let tuple_width = rows
             .iter()
             .find_map(|(p, _)| p.as_ref().map(|p| p.clone().unwrap_tuple().0.len()))
@@ -403,6 +425,7 @@ mod lower_case {
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         );
 
@@ -420,15 +443,12 @@ mod lower_case {
     fn build_guarded<'s>(
         rows: Vec<Row<'s>>,
         switch_meta: &ast::Meta,
-        symbols: &typed::Symbols<'s>,
-        typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
-        lower_ctx: &mut Context,
-    ) -> ir::Expr {
+        ir_nodes: &mut ir::ExprHeap<'s>,
+    ) -> ir::ExprId {
         let mut cond_pairs = Vec::new();
         let mut default = None;
 
-        for row in rows {
+        for row in &rows {
             if let Some(cond) = row.guard {
                 cond_pairs.push((cond, row.result));
             } else {
@@ -437,7 +457,47 @@ mod lower_case {
             }
         }
 
-        ir::Expr::new(ir::ExprNode::Cond(cond_pairs, default), switch_meta.into())
+        let default = default.unwrap_or_else(|| {
+            let r = ir::Expr::new(
+                ir::ExprNode::Panic("all conditions failed"),
+                switch_meta.into(),
+            );
+            ir_nodes.push(r)
+        });
+
+        let result = if cond_pairs.len() == 0 {
+            default
+        } else {
+            let r = ir::Expr::new(ir::ExprNode::Cond(cond_pairs, default), switch_meta.into());
+            ir_nodes.push(r)
+        };
+
+        let binds = rows.iter().fold(Vec::new(), |mut accu, row| {
+            accu.extend_from_slice(&row.binds);
+            accu
+        });
+
+        build_binds(binds, result, switch_meta, ir_nodes)
+    }
+
+    fn build_binds<'s>(
+        binds: Vec<(ast::LocalId, ir::ExprId)>,
+        mut result: ir::ExprId,
+        switch_meta: &ast::Meta,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+    ) -> ir::ExprId {
+        for (local, value) in binds {
+            let r = ir::Expr::new(
+                ir::ExprNode::LetBind {
+                    local,
+                    value,
+                    in_: result,
+                },
+                switch_meta.into(),
+            );
+            result = ir_nodes.push(r);
+        }
+        result
     }
 
     fn lower_table<'s>(
@@ -446,21 +506,26 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
     ) -> ir::ExprId {
+        // no row: panic
+        if rows.len() == 0 {
+            let r = ir::Expr::new(ir::ExprNode::Panic("all match failed"), switch_meta.into());
+            return ir_nodes.push(r);
+        }
         // no col: use guards
         if rows[0].patterns.len() == 0 {
-            let r = build_guarded(rows, switch_meta, symbols, typed_nodes, ir_nodes, lower_ctx);
-            return ir_nodes.push(r);
+            return build_guarded(rows, switch_meta, ir_nodes);
         }
 
         let col_index_with_least_binds = col_index_with_least_binds(&rows);
         let (operand, rest_operands) = take_operand(header, col_index_with_least_binds);
         let rows = take_col(rows, col_index_with_least_binds);
-        let rows = move_binds_right(rows, operand.clone(), ir_nodes);
+        let rows = move_binds_right(rows, operand.clone());
 
-        if let Some(first_pat) = rows.iter().find_map(|(p, _)| p.clone()) {
+        if let Some(first_pat) = rows.iter().find_map(|(p, _)| p.as_ref()) {
             let r = match first_pat {
                 Pattern::Construct(_, _, _) => build_tagged_switch(
                     operand,
@@ -470,6 +535,7 @@ mod lower_case {
                     symbols,
                     typed_nodes,
                     ir_nodes,
+                    str_table,
                     lower_ctx,
                 ),
                 Pattern::Literal(_, _) => build_primitive_switch(
@@ -480,6 +546,7 @@ mod lower_case {
                     symbols,
                     typed_nodes,
                     ir_nodes,
+                    str_table,
                     lower_ctx,
                 ),
                 Pattern::Tuple(_, _) => build_tuple_deconstruct(
@@ -490,6 +557,7 @@ mod lower_case {
                     symbols,
                     typed_nodes,
                     ir_nodes,
+                    str_table,
                     lower_ctx,
                 ),
                 _ => unreachable!(),
@@ -503,6 +571,7 @@ mod lower_case {
                 symbols,
                 typed_nodes,
                 ir_nodes,
+                str_table,
                 lower_ctx,
             )
         }
@@ -510,24 +579,40 @@ mod lower_case {
 
     pub fn lower_case<'s>(
         operand: typed::ExprId,
-        amrs: &[typed::CaseArm],
+        amrs: &[typed::CaseArm<'s>],
         case_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
     ) -> ir::ExprId {
-        let operand = lower_expr(operand, symbols, typed_nodes, ir_nodes, lower_ctx);
+        let operand = lower_expr(
+            operand,
+            symbols,
+            typed_nodes,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+        );
         let header = VecDeque::from([operand]);
 
         let rows = amrs
             .iter()
             .map(|arm| Row {
                 patterns: VecDeque::from([Some(arm.pattern.clone())]),
-                result: lower_expr(arm.result, symbols, typed_nodes, ir_nodes, lower_ctx),
+                result: lower_expr(
+                    arm.result,
+                    symbols,
+                    typed_nodes,
+                    ir_nodes,
+                    str_table,
+                    lower_ctx,
+                ),
+                binds: vec![],
                 guard: arm
                     .guard
-                    .map(|g| lower_expr(g, symbols, typed_nodes, ir_nodes, lower_ctx)),
+                    .map(|g| lower_expr(g, symbols, typed_nodes, ir_nodes, str_table, lower_ctx)),
             })
             .collect();
 
@@ -538,6 +623,7 @@ mod lower_case {
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         )
     }
@@ -549,16 +635,25 @@ mod lower_case {
         case_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
-        ir_nodes: &mut ir::ExprHeap,
+        ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
     ) -> ir::ExprId {
-        let operand = lower_expr(operand, symbols, typed_nodes, ir_nodes, lower_ctx);
+        let operand = lower_expr(
+            operand,
+            symbols,
+            typed_nodes,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+        );
         let header = VecDeque::from([operand]);
 
         let rows = vec![Row {
             patterns: VecDeque::from([Some(pattern.clone())]),
             guard: None,
-            result: lower_expr(in_, symbols, typed_nodes, ir_nodes, lower_ctx),
+            binds: vec![],
+            result: lower_expr(in_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx),
         }];
 
         lower_table(
@@ -568,6 +663,7 @@ mod lower_case {
             symbols,
             typed_nodes,
             ir_nodes,
+            str_table,
             lower_ctx,
         )
     }
@@ -580,13 +676,14 @@ fn lower_let_bind<'s>(
     value: typed::ExprId,
     in_: typed::ExprId,
     let_meta: &ast::Meta,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
-    let value = lower_expr(value, symbols, typed_nodes, ir_nodes, lower_ctx);
-    let in_ = lower_expr(in_, symbols, typed_nodes, ir_nodes, lower_ctx);
+    let value = lower_expr(value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let in_ = lower_expr(in_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
 
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::LetBind { local, value, in_ },
@@ -599,14 +696,15 @@ fn lower_if_else<'s>(
     then: typed::ExprId,
     else_: typed::ExprId,
     if_else_meta: &ast::Meta,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
-    let test = lower_expr(test, symbols, typed_nodes, ir_nodes, lower_ctx);
-    let then = lower_expr(then, symbols, typed_nodes, ir_nodes, lower_ctx);
-    let else_ = lower_expr(else_, symbols, typed_nodes, ir_nodes, lower_ctx);
+    let test = lower_expr(test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let then = lower_expr(then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let else_ = lower_expr(else_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
 
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::IfElse { test, then, else_ },
@@ -617,14 +715,15 @@ fn lower_if_else<'s>(
 fn lower_tuple<'s>(
     elems: &[typed::ExprId],
     tuple_meta: &ast::Meta,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
     let elems: Vec<_> = elems
         .iter()
-        .map(|id| lower_expr(*id, symbols, typed_nodes, ir_nodes, lower_ctx))
+        .map(|id| lower_expr(*id, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
         .collect();
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::MakeTuple(elems),
@@ -636,14 +735,15 @@ fn lower_call<'s>(
     callee: typed::ExprId,
     args: &[typed::ExprId],
     call_meta: &ast::Meta,
-    symbols: &typed::Symbols,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
     let args: Vec<_> = args
         .iter()
-        .map(|arg| lower_expr(*arg, symbols, typed_nodes, ir_nodes, lower_ctx))
+        .map(|arg| lower_expr(*arg, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
         .collect();
 
     let expr = match &typed_nodes[callee].node {
@@ -652,8 +752,7 @@ fn lower_call<'s>(
             ir::Expr::new(ir::ExprNode::MakeTagged(tag, args), call_meta.into())
         }
         _ => {
-            let callee = lower_expr(callee, symbols, typed_nodes, ir_nodes, lower_ctx);
-
+            let callee = lower_expr(callee, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
             ir::Expr::new(ir::ExprNode::Call { callee, args }, call_meta.into())
         }
     };
@@ -687,9 +786,9 @@ fn lower_constant<'s>(
     c: ast::Constant<'s>,
     constant_meta: &ast::Meta,
     ir_nodes: &mut ir::ExprHeap,
-    lower_ctx: &mut Context,
+    str_table: &mut ir::StrTable,
 ) -> ir::ExprId {
-    let immediate = lower_ctx.immediate_from_constant(c);
+    let immediate = str_table.immediate_from_constant(c);
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::Immediate(immediate),
         constant_meta.into(),

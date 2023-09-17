@@ -5,4 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "helo_compile_ir"
+required-features = ["pretty_print"]
+
+[features]
+default = ["pretty_print"]
+pretty_print = ["terminal_size", "pretty"]
+
 [dependencies]
+helo_parse = { path = "../helo_parse" }
+miette = "5.10"
+thiserror = "1.0"
+bitvec = "1.0"
+pretty = { version = "0.12", optional = true }
+terminal_size = { version = "0.3", optional = true }

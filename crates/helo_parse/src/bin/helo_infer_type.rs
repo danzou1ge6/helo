@@ -23,7 +23,7 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
 
     builtins::add_builtins_to(&mut symbols, &mut ast_ndoes, &mut ptable);
 
-    match parse::parse_ast(
+    parse::parse_ast(
         &s[..],
         src.clone(),
         file_name,
@@ -31,41 +31,34 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
         &mut ast_ndoes,
         &mut e,
         &mut ptable,
-    ) {
-        Ok((_, ())) => {
-            e.emit()?;
-            let mut e = errors::ManyError::new();
+    )?;
+    e.emit()?;
+    let mut e = errors::ManyError::new();
 
-            let mut typed_nodes = typed::ExprHeap::new();
-            let mut typed_functions = typed::FunctionTable::new();
+    let mut typed_nodes = typed::ExprHeap::new();
+    let mut typed_functions = typed::FunctionTable::new();
 
-            for f_name in symbols.function_names() {
-                let f = infer::infer_function(
-                    &f_name,
-                    &symbols,
-                    &ast_ndoes,
-                    &mut typed_nodes,
-                    &mut typed_functions,
-                    &mut e,
-                );
-                if let Some(f) = f {
-                    typed_functions.insert(f_name.to_string(), f);
-                }
-            }
-
-            e.emit()?;
-
-            for (name, f) in typed_functions.iter() {
-                println!("{}: {}", name, f.type_);
-                // typed_nodes.dbg_expr(f.body);
-            }
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("{:?}", e);
-            return Ok(());
+    for f_name in symbols.function_names() {
+        let f = infer::infer_function(
+            &f_name,
+            &symbols,
+            &ast_ndoes,
+            &mut typed_nodes,
+            &mut typed_functions,
+            &mut e,
+        );
+        if let Some(f) = f {
+            typed_functions.insert(f_name.to_string(), f);
         }
     }
+
+    e.emit()?;
+
+    for (name, f) in typed_functions.iter() {
+        println!("{}: {}", name, f.type_);
+        // typed_nodes.dbg_expr(f.body);
+    }
+    Ok(())
 }
 
 use std::env;

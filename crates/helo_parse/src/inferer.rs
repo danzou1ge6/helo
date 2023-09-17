@@ -328,7 +328,6 @@ impl<'s> Inferer<'s> {
         meta: &ast::Meta,
     ) -> Result<(), errors::UnificationFailure> {
         use ast::TypeNode::*;
-        dbg!(&a, &b);
         let r = match (&a.node, &b.node) {
             (Unit, Unit) => Ok(()),
             (UpperBounded(bounded), _) => Ok(self.unify_bounded_no_rollback(b, bounded, meta)?),
@@ -362,7 +361,6 @@ impl<'s> Inferer<'s> {
             (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
             _ => Err(errors::UnificationFailure::new(a, b, meta, false)),
         };
-        dbg!(&self);
         r
     }
 

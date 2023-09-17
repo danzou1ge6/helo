@@ -9,6 +9,7 @@ use nom::character::complete as nchar;
 use nom::combinator as ncomb;
 use nom::multi as nmulti;
 use nom::sequence as nseq;
+use nom::Finish;
 
 type OpPriority = u32;
 
@@ -185,7 +186,7 @@ impl<'s, 'a> Context<'s, 'a> {
             } => {
                 if name == *this_name {
                     Some(ast::Expr::new_untyped(
-                        ast::ExprNode::ThisClosure(()),
+                        ast::ExprNode::ThisClosure,
                         meta.clone(),
                     ))
                 } else {
@@ -1181,21 +1182,11 @@ fn function<'s>(
 }
 
 use std::sync::Arc;
-pub fn parse_ast<'s>(
-    s: &'s str,
-    src: Arc<String>,
-    file_name: Arc<String>,
-    symbols: &mut ast::Symbols<'s>,
-    ast_nodes: &mut ast::ExprHeap<'s>,
-    e: &mut errors::ManyError,
-    precedence_table: &mut PrecedenceTable<'s>,
-) -> PResult<'s, ()> {
-    let mut ctx = Context::new(file_name, src, ast_nodes, e, precedence_table, symbols);
-
+fn parse_ast_<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ()> {
     let (mut s, _) = empty(s)?;
 
     while s.len() > 0 {
-        let (s1, r) = ncomb::opt(|s| data(s, &mut ctx))(s)?;
+        let (s1, r) = ncomb::opt(|s| data(s, ctx))(s)?;
         if let Some((data_name, data, constructors)) = r {
             ctx.symbols.add_data(data_name, data);
             constructors
@@ -1205,12 +1196,12 @@ pub fn parse_ast<'s>(
             continue;
         }
 
-        if let (s1, Some(_)) = ncomb::opt(|s| infix_decl(s, &mut ctx))(s)? {
+        if let (s1, Some(_)) = ncomb::opt(|s| infix_decl(s, ctx))(s)? {
             s = s1;
             continue;
         }
 
-        let (s1, r) = ncomb::opt(|s| function(s, &mut ctx))(s)?;
+        let (s1, r) = ncomb::opt(|s| function(s, ctx))(s)?;
         if let Some((f_name, f)) = r {
             s = s1;
             ctx.symbols.add_function(f_name.to_string(), f);
@@ -1225,6 +1216,26 @@ pub fn parse_ast<'s>(
     }
 
     Ok((s, ()))
+}
+
+pub fn parse_ast<'s>(
+    s: &'s str,
+    src: Arc<String>,
+    file_name: Arc<String>,
+    symbols: &mut ast::Symbols<'s>,
+    ast_nodes: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+    precedence_table: &mut PrecedenceTable<'s>,
+) -> Result<(), errors::ParseError> {
+    let mut ctx = Context::new(file_name, src, ast_nodes, e, precedence_table, symbols);
+
+    let r = parse_ast_(s, &mut ctx).finish();
+
+    if let Err(e) = r {
+        let m = ctx.meta(e.input, e.input);
+        return Err(errors::ParseError::new(&m));
+    }
+    Ok(())
 }
 
 pub fn parse_builtin_function_signatures<'s>(

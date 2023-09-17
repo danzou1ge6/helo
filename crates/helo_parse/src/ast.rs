@@ -10,6 +10,12 @@ impl From<usize> for ExprId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalId(pub usize);
 
+impl std::fmt::Display for LocalId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "'{}", self.0)
+    }
+}
+
 impl std::default::Default for LocalId {
     fn default() -> Self {
         Self(0)
@@ -47,42 +53,40 @@ impl From<usize> for CapturedId {
 pub type FunctionId = String;
 
 #[derive(Debug, Clone)]
-pub enum ExprNode_<'s, Id, C, A> {
+pub enum ExprNode<'s> {
     Call {
-        callee: Id,
-        args: Vec<Id>,
+        callee: ExprId,
+        args: Vec<ExprId>,
     },
     IfElse {
-        test: Id,
-        then: Id,
-        else_: Id,
+        test: ExprId,
+        then: ExprId,
+        else_: ExprId,
     },
     Case {
-        operand: Id,
-        arms: Vec<A>,
+        operand: ExprId,
+        arms: Vec<CaseArm<'s>>,
     },
     LetIn {
         bind: LocalId,
-        value: Id,
-        in_: Id,
+        value: ExprId,
+        in_: ExprId,
     },
     LetPatIn {
         bind: Pattern<'s>,
-        value: Id,
-        in_: Id,
+        value: ExprId,
+        in_: ExprId,
     },
     MakeClosure(FunctionId),
-    ThisClosure(C),
+    ThisClosure,
     Global(&'s str),
-    Tuple(Vec<Id>),
+    Tuple(Vec<ExprId>),
     Captured(CapturedId),
     Constant(Constant<'s>),
     Local(LocalId),
 }
 
-pub type ExprNode<'s> = ExprNode_<'s, ExprId, (), CaseArm<'s>>;
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant<'s> {
     Int(i64),
     Float(f64),
@@ -141,12 +145,38 @@ pub struct CaseArm_<'s, Id> {
 
 pub type CaseArm<'s> = CaseArm_<'s, ExprId>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Pattern<'s> {
     Construct(&'s str, Vec<Pattern<'s>>, Meta),
     Bind(LocalId, Meta),
     Literal(Constant<'s>, Meta),
     Tuple(Vec<Pattern<'s>>, Meta),
+}
+
+impl<'s> std::fmt::Display for Pattern<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Pattern::*;
+        match self {
+            Construct(name, args, _) => {
+                write!(f, "{name}(")?;
+                str_join_vec(f, ", ", args)?;
+                write!(f, ")")
+            }
+            Bind(local, _) => write!(f, "{local}"),
+            Literal(lit, _) => write!(f, "{lit:?}"),
+            Tuple(elems, _) => {
+                write!(f, "(")?;
+                str_join_vec(f, ", ", elems)?;
+                write!(f, ")")
+            }
+        }
+    }
+}
+
+impl<'s> std::fmt::Debug for Pattern<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 pub struct Constructor<'s> {
@@ -165,6 +195,25 @@ impl<'s> Pattern<'s> {
             Pattern::Tuple(_, meta) => meta,
         }
     }
+    pub fn unwrap_literal(self) -> (Constant<'s>, Meta) {
+        match self {
+            Pattern::Literal(c, m) => (c, m),
+            _ => panic!("Called `unwrap_literal` on a pattern {:?}", self),
+        }
+    }
+    pub fn unwrap_construct(self) -> (&'s str, Vec<Pattern<'s>>, Meta) {
+        match self {
+            Pattern::Construct(c, args, m) => (c, args, m),
+            _ => panic!("Called `unwrap_construct` on a pattern {:?}", self),
+        }
+    }
+    pub fn unwrap_tuple(self) -> (Vec<Pattern<'s>>, Meta) {
+        match self {
+            Pattern::Tuple(args, m) => (args, m),
+            _ => panic!("Called `unwrap_tuple` on a pattern {:?}", self),
+        }
+    }
+
     pub fn validate(&self, symbols: &Symbols<'s>) -> Result<(), miette::Report> {
         use crate::errors;
         match self {
@@ -639,10 +688,10 @@ pub struct BuiltinFunction<'s> {
 }
 
 pub struct Symbols<'s> {
-    functions: HashMap<FunctionId, Function<'s>>,
-    constructors: HashMap<&'s str, Constructor<'s>>,
-    datas: HashMap<&'s str, Data<'s>>,
-    builtins: HashMap<&'s str, BuiltinFunction<'s>>,
+    pub(crate) functions: HashMap<FunctionId, Function<'s>>,
+    pub(crate) constructors: HashMap<&'s str, Constructor<'s>>,
+    pub(crate) datas: HashMap<&'s str, Data<'s>>,
+    pub(crate) builtins: HashMap<&'s str, BuiltinFunction<'s>>,
 }
 
 impl<'s> Symbols<'s> {
