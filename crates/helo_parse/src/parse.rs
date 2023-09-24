@@ -184,50 +184,44 @@ impl<'s, 'a> Context<'s, 'a> {
                     },
                 ..
             } => {
-                if name == *this_name {
-                    Some(ast::Expr::new_untyped(
-                        ast::ExprNode::ThisClosure,
-                        meta.clone(),
-                    ))
-                } else {
-                    current
-                        .locals
-                        .iter()
-                        .rfind(|(n, _)| *n == name)
-                        .map_or_else(
-                            // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
-                            || {
-                                parent.locals.iter().rfind(|(n, _)| *n == name).map_or(
-                                    None,
-                                    |(_, id)| {
-                                        // Found in parent namespace
-                                        if let Some(i) = captures.iter().position(|i| *i == *id) {
-                                            Some(ast::Expr::new_untyped(
-                                                ast::ExprNode::Captured(i.into()),
-                                                meta.clone(),
-                                            ))
-                                        } else {
-                                            captures.push(*id);
-                                            caputures_meta.push(meta.clone());
-                                            Some(ast::Expr::new_untyped(
-                                                ast::ExprNode::Captured(
-                                                    (captures.len() - 1).into(),
-                                                ),
-                                                meta.clone(),
-                                            ))
-                                        }
-                                    },
-                                )
-                            },
-                            // Local
-                            |(_, id)| {
-                                Some(ast::Expr::new_untyped(
-                                    ast::ExprNode::Local(*id),
-                                    meta.clone(),
-                                ))
-                            },
-                        )
-                }
+                current
+                    .locals
+                    .iter()
+                    .rfind(|(n, _)| *n == name)
+                    .map_or_else(
+                        // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
+                        || {
+                            parent.locals.iter().rfind(|(n, _)| *n == name).map_or(
+                                None,
+                                |(_, id)| {
+                                    // Found in parent namespace
+                                    if let Some(i) = captures.iter().position(|i| *i == *id) {
+                                        Some(ast::Expr::new_untyped(
+                                            ast::ExprNode::Captured(i.into(), *this_name == name),
+                                            meta.clone(),
+                                        ))
+                                    } else {
+                                        captures.push(*id);
+                                        caputures_meta.push(meta.clone());
+                                        Some(ast::Expr::new_untyped(
+                                            ast::ExprNode::Captured(
+                                                (captures.len() - 1).into(),
+                                                *this_name == name,
+                                            ),
+                                            meta.clone(),
+                                        ))
+                                    }
+                                },
+                            )
+                        },
+                        // Local
+                        |(_, id)| {
+                            Some(ast::Expr::new_untyped(
+                                ast::ExprNode::Local(*id),
+                                meta.clone(),
+                            ))
+                        },
+                    )
             }
         }
     }

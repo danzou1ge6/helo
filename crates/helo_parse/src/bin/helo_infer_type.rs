@@ -65,12 +65,12 @@ use std::env;
 use std::fs;
 
 fn main() -> miette::Result<()> {
-    let args: Vec<_> = env::args().collect();
-    let file_name = args
-        .get(1)
-        .unwrap_or_else(|| panic!("Usage: helo_infer_type <file_name>"))
-        .clone();
-    // let file_name = "helo_scripts/guard.helo".to_string();
+    // let args: Vec<_> = env::args().collect();
+    // let file_name = args
+    //     .get(1)
+    //     .unwrap_or_else(|| panic!("Usage: helo_infer_type <file_name>"))
+    //     .clone();
+    let file_name = "helo_scripts/recursion.helo".to_string();
     let mut file = fs::File::open(&file_name)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

@@ -74,8 +74,7 @@ pub fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::Captured(id) => infer_captured(*id, &expr.meta, symbols, typed_functions),
-        ExprNode::ThisClosure => infer_this_closure(&expr.meta, symbols, typed_functions),
+        ExprNode::Captured(id, _) => infer_captured(*id, &expr.meta, symbols, typed_functions),
         ExprNode::MakeClosure(closure) => infer_make_closure(
             closure,
             &expr.meta,

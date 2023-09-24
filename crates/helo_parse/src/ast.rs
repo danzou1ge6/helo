@@ -78,10 +78,10 @@ pub enum ExprNode<'s> {
         in_: ExprId,
     },
     MakeClosure(FunctionId),
-    ThisClosure,
     Global(&'s str),
     Tuple(Vec<ExprId>),
-    Captured(CapturedId),
+    /// .1 indicates whether this is the closure itself
+    Captured(CapturedId, bool),
     Constant(Constant<'s>),
     Local(LocalId),
 }
