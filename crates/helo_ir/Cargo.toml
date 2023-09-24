@@ -15,6 +15,7 @@ pretty_print = ["terminal_size", "pretty"]
 
 [dependencies]
 helo_parse = { path = "../helo_parse" }
+helo_runtime = { path = "../helo_runtime" }
 miette = "5.10"
 thiserror = "1.0"
 bitvec = "1.0"

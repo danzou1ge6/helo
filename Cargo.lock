@@ -126,6 +126,7 @@ version = "0.1.0"
 dependencies = [
  "bitvec",
  "helo_parse",
+ "helo_runtime",
  "miette",
  "pretty",
  "terminal_size 0.3.0",
@@ -140,6 +141,10 @@ dependencies = [
  "nom",
  "thiserror",
 ]
+
+[[package]]
+name = "helo_runtime"
+version = "0.1.0"
 
 [[package]]
 name = "hermit-abi"

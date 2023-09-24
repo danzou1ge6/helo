@@ -3,8 +3,16 @@ use std::collections::HashMap;
 pub use helo_parse::ast::LocalId;
 pub use helo_parse::typed::Tag;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub struct ExprId(pub usize);
+
+impl PartialEq for ExprId {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for ExprId {}
 
 impl From<usize> for ExprId {
     fn from(value: usize) -> Self {
@@ -29,6 +37,18 @@ pub enum Immediate {
     Float(f64),
     Bool(bool),
     Str(StrId),
+}
+
+impl std::hash::Hash for Immediate {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use Immediate::*;
+        match self {
+            Int(i) => state.write_i64(*i),
+            Bool(b) => state.write_u8(if *b { 1 } else { 0 }),
+            Str(s) => state.write_usize(s.0),
+            Float(s) => state.write_i64(((s * 1e5).floor()) as i64),
+        }
+    }
 }
 
 impl Immediate {
@@ -61,6 +81,15 @@ impl StrTable {
             self.cnt += 1;
             id
         })
+    }
+    pub fn add_str(&mut self, s: &'static str) -> StrId {
+        if self.tab.contains_key(s) {
+            return *self.tab.get(s).unwrap();
+        }
+        let id = StrId(self.cnt);
+        self.cnt += 1;
+        self.tab.insert(s.to_string(), id);
+        id
     }
     pub fn to_list(self) -> StrList {
         let mut v = Vec::new();
@@ -144,7 +173,7 @@ pub enum ExprNode<'s> {
     MakeTuple(Vec<ExprId>),
     MakeTagged(Tag<'s>, Vec<ExprId>),
     ThisClosure(FunctionId),
-    Panic(&'static str),
+    Panic(StrId),
 }
 
 #[derive(Debug, Clone)]

@@ -444,6 +444,7 @@ mod lower_case {
         rows: Vec<Row<'s>>,
         switch_meta: &ast::Meta,
         ir_nodes: &mut ir::ExprHeap<'s>,
+        str_table: &mut ir::StrTable,
     ) -> ir::ExprId {
         let mut cond_pairs = Vec::new();
         let mut default = None;
@@ -459,7 +460,7 @@ mod lower_case {
 
         let default = default.unwrap_or_else(|| {
             let r = ir::Expr::new(
-                ir::ExprNode::Panic("all conditions failed"),
+                ir::ExprNode::Panic(str_table.add_str("all conditions failed")),
                 switch_meta.into(),
             );
             ir_nodes.push(r)
@@ -512,12 +513,15 @@ mod lower_case {
     ) -> ir::ExprId {
         // no row: panic
         if rows.len() == 0 {
-            let r = ir::Expr::new(ir::ExprNode::Panic("all match failed"), switch_meta.into());
+            let r = ir::Expr::new(
+                ir::ExprNode::Panic(str_table.add_str("all match failed")),
+                switch_meta.into(),
+            );
             return ir_nodes.push(r);
         }
         // no col: use guards
         if rows[0].patterns.len() == 0 {
-            return build_guarded(rows, switch_meta, ir_nodes);
+            return build_guarded(rows, switch_meta, ir_nodes, str_table);
         }
 
         let col_index_with_least_binds = col_index_with_least_binds(&rows);
@@ -839,8 +843,5 @@ fn lower_this_closure<'s>(
     closure_meta: &ast::Meta,
     ir_nodes: &mut ir::ExprHeap,
 ) -> ir::ExprId {
-    ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::ThisClosure(fid.clone()),
-        closure_meta.into(),
-    ))
+    unimplemented!()
 }

@@ -7,7 +7,7 @@ impl From<usize> for ExprId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalId(pub usize);
 
 impl std::fmt::Display for LocalId {

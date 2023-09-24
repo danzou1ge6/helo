@@ -219,7 +219,7 @@ where
         Panic(msg) => allocator
             .text("(PANIC")
             .append(allocator.softline())
-            .append(allocator.text(*msg).nest(2))
+            .append(allocator.text(str_list.get(*msg).to_string()).nest(2))
             .append(allocator.text(")"))
             .align(),
     }
