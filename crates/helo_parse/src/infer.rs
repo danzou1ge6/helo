@@ -74,7 +74,9 @@ pub fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::Captured(id, _) => infer_captured(*id, &expr.meta, symbols, typed_functions),
+        ExprNode::Captured(id, is_self) => {
+            infer_captured(*id, *is_self, &expr.meta, symbols, typed_functions)
+        }
         ExprNode::MakeClosure(closure) => infer_make_closure(
             closure,
             &expr.meta,
@@ -752,6 +754,7 @@ fn infer_local(id: ast::LocalId, id_meta: &ast::Meta) -> typed::Expr<'static> {
 
 fn infer_captured<'s>(
     id: ast::CapturedId,
+    is_self: bool,
     id_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
@@ -760,7 +763,7 @@ fn infer_captured<'s>(
         .function(typed_functions.currently_infering().unwrap())
         .local_cnt;
     typed::Expr {
-        node: typed::ExprNode::Captured(id),
+        node: typed::ExprNode::Captured(id, is_self),
         type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id), id_meta.clone()),
         meta: id_meta.clone(),
     }
@@ -832,40 +835,6 @@ pub fn infer_function_type_renamed<'s>(
 
     e.push(errors::CircularInference::new(name, name_meta));
     None
-}
-
-/// Variables are renamed
-fn infer_this_closure<'s>(
-    name_meta: &ast::Meta,
-    symbols: &ast::Symbols<'s>,
-    typed_functions: &mut typed::FunctionTable<'s>,
-) -> typed::Expr<'s> {
-    let f = symbols.function(&typed_functions.currently_infering().unwrap());
-    let type_ = ast::CallableType {
-        params: (0..f.arity)
-            .map(|i| {
-                ast::Type::new_bounded_var(
-                    type_var_id_for_local(i.into()),
-                    f.param_metas[i].clone(),
-                )
-            })
-            .collect(),
-        ret: Box::new(ast::Type::new_bounded_var(
-            type_var_id_for_ret(f.local_cnt),
-            f.meta.clone(),
-        )),
-    };
-
-    typed::Expr {
-        node: typed::ExprNode::ThisClosure(
-            typed_functions.currently_infering().unwrap().to_string(),
-        ),
-        type_: ast::Type {
-            node: ast::TypeNode::Callable(type_),
-            meta: f.meta.clone(),
-        },
-        meta: name_meta.clone(),
-    }
 }
 
 /// Init the [`inferer::Inferer`] for infering function `f`.

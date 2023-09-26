@@ -30,12 +30,11 @@ pub enum ExprNode<'s> {
         in_: ExprId,
     },
     MakeClosure(FunctionId),
-    ThisClosure(FunctionId),
     Constructor(&'s str),
     UserFunction(&'s str),
     Builtin(&'s str),
     Tuple(Vec<ExprId>),
-    Captured(CapturedId),
+    Captured(CapturedId, bool),
     Constant(Constant<'s>),
     Local(LocalId),
 }

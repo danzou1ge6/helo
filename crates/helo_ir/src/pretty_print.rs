@@ -215,7 +215,7 @@ where
                     .group(),
             )
             .append(")"),
-        ThisClosure(f) => allocator.text(f.clone()),
+        ThisClosure(_) => allocator.text("THIS_CLOSURE"),
         Panic(msg) => allocator
             .text("(PANIC")
             .append(allocator.softline())

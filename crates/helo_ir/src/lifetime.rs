@@ -1,37 +1,30 @@
 use std::collections::HashSet;
 
-use crate::ir;
+use crate::lir;
 use bitvec::prelude as bv;
 
 type BitVec = bv::BitVec<u32, bv::Msb0>;
 
 #[derive(Clone)]
-pub struct Liveness(BitVec);
+struct Liveness(BitVec);
 
-pub struct LifetimeStore {
-    v: Vec<Liveness>,
-    expr_nodes_cnt: usize,
+struct LifetimeStore {
+    v: Vec<Vec<Liveness>>,
+    analyzed: Vec<BitVec>,
+    temp_cnt: usize,
 }
 
 impl Liveness {
-    pub fn unset(&mut self, id: ir::LocalId) {
+    pub fn unset(&mut self, id: lir::TempId) {
         self.0.set(id.0, false)
     }
-    pub fn set(&mut self, id: ir::LocalId) {
+    pub fn set(&mut self, id: lir::TempId) {
         self.0.set(id.0, true)
     }
     pub fn empty(cnt: usize) -> Self {
         Self(BitVec::repeat(false, cnt))
     }
-    pub fn with_set(cnt: usize, id: ir::LocalId) -> Self {
-        let mut r = Self::empty(cnt);
-        r.set(id);
-        r
-    }
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-    pub fn live_locals(&self) -> Vec<ir::LocalId> {
+    pub fn live_locals(&self) -> Vec<lir::TempId> {
         self.0.iter().enumerate().fold(vec![], |mut accu, (i, b)| {
             if bool::from(*b) {
                 accu.push(i.into());
@@ -53,105 +46,74 @@ impl From<BitVec> for Liveness {
     }
 }
 
-impl std::ops::Index<ir::ExprId> for LifetimeStore {
+impl std::ops::Index<(lir::BlockId, usize)> for LifetimeStore {
     type Output = Liveness;
-    fn index(&self, index: ir::ExprId) -> &Self::Output {
-        &self.v[index.0]
+    fn index(&self, (block_id, idx): (lir::BlockId, usize)) -> &Self::Output {
+        &self.v[block_id.0][idx]
     }
 }
 
-impl std::ops::IndexMut<ir::ExprId> for LifetimeStore {
-    fn index_mut(&mut self, index: ir::ExprId) -> &mut Self::Output {
-        &mut self.v[index.0]
+impl std::ops::IndexMut<(lir::BlockId, usize)> for LifetimeStore {
+    fn index_mut(&mut self, (block_id, idx): (lir::BlockId, usize)) -> &mut Self::Output {
+        &mut self.v[block_id.0][idx]
     }
 }
 
 impl LifetimeStore {
-    pub fn new(expr_nodes_cnt: usize) -> Self {
-        let mut v = Vec::new();
-        v.resize(expr_nodes_cnt, BitVec::EMPTY.into());
-        Self { v, expr_nodes_cnt }
+    pub fn new(blocks: &lir::BlockHeap, temp_cnt: usize) -> Self {
+        let v = blocks
+            .iter()
+            .map(|b| vec![Liveness::empty(temp_cnt); b.len()])
+            .collect();
+        let analyzed = blocks
+            .iter()
+            .map(|b| BitVec::repeat(false, b.len()))
+            .collect();
+        Self {
+            v,
+            analyzed,
+            temp_cnt,
+        }
     }
 
-    pub fn analyze(&mut self, expr: ir::ExprId, ir_nodes: &ir::ExprHeap) -> &Liveness {
-        use ir::ExprNode::*;
-        match ir_nodes[expr].node() {
-            LetBind { local, value, in_ } => {
-                let mut r = self.analyze(*value, ir_nodes).clone();
-                r |= self.analyze(*in_, ir_nodes);
-                r.unset(*local);
-                self[expr] = r;
+    fn analyzed_flags_for_block(&mut self, block_id: lir::BlockId) -> &mut BitVec {
+        &mut self.analyzed[block_id.0]
+    }
+
+    /// Assuming that the LIR control flow graph forms a DAG
+    fn analyze_instruction(&mut self, block_id: lir::BlockId, idx: usize, blocks: &lir::BlockHeap) {
+        for (susc_bid, susc_idx) in blocks.suscessive(block_id, idx) {
+            if !self.analyzed_flags_for_block(susc_bid)[susc_idx] {
+                self.analyze_instruction(susc_bid, susc_idx, blocks);
             }
-            SwitchTag(operand, v, default) => {
-                let mut r = self.analyze(*operand, ir_nodes).clone();
-                v.iter().for_each(|(_, e)| {
-                    r |= &self.analyze(*e, ir_nodes);
-                });
-                r |= &self.analyze(*default, ir_nodes);
-                self[expr] = r;
+
+            let mut susc_liveness = Liveness::empty(self.temp_cnt);
+            std::mem::swap(&mut self[(susc_bid, susc_idx)], &mut susc_liveness);
+            self[(block_id, idx)] |= &susc_liveness;
+            std::mem::swap(&mut self[(susc_bid, susc_idx)], &mut susc_liveness);
+
+            if let Some(out) = blocks[susc_bid][susc_idx].output() {
+                self[(block_id, idx)].unset(out);
             }
-            Switch(operand, v, default) => {
-                let mut r = self.analyze(*operand, ir_nodes).clone();
-                v.iter().for_each(|(_, e)| {
-                    r |= &self.analyze(*e, ir_nodes);
-                });
-                r |= &self.analyze(*default, ir_nodes);
-                self[expr] = r;
-            }
-            Cond(v, default) => {
-                let mut r = Liveness::empty(self.expr_nodes_cnt);
-                v.iter().for_each(|(c, e)| {
-                    r |= &self.analyze(*c, ir_nodes);
-                    r |= &self.analyze(*e, ir_nodes);
-                });
-                r |= &self[*default];
-                self[expr] = r;
-            }
-            IfElse { test, then, else_ } => {
-                let mut r = self.analyze(*test, ir_nodes).clone();
-                r |= &self.analyze(*then, ir_nodes);
-                r |= &self.analyze(*else_, ir_nodes);
-                self[expr] = r;
-            }
-            Call { callee, args } => {
-                let mut r = self.analyze(*callee, ir_nodes).clone();
-                args.iter()
-                    .for_each(|arg| r |= &self.analyze(*arg, ir_nodes));
-                self[expr] = r;
-            }
-            Immediate(_) => {}
-            MakeClosure(_, locals) => {
-                let mut r = Liveness::empty(self.expr_nodes_cnt);
-                locals.iter().for_each(|cap| r.set(*cap));
-                self[expr] = r;
-            }
-            Local(local) => {
-                self[expr] = Liveness::with_set(self.expr_nodes_cnt, *local);
-            }
-            UserFunction(_) => {}
-            Builtin(_) => {}
-            VariantField(local, _) | TupleField(local, _) => {
-                self[expr] = Liveness::with_set(self.expr_nodes_cnt, *local);
-            }
-            MakeTuple(elems) | MakeTagged(_, elems) => {
-                let mut r = Liveness::empty(self.expr_nodes_cnt);
-                elems
-                    .iter()
-                    .for_each(|arg| r |= &self.analyze(*arg, ir_nodes));
-                self[expr] = r;
-            }
-            ThisClosure(_) => {}
-            Panic(_) => {}
-        };
-        &self[expr]
+        }
+
+        for input in blocks[block_id][idx].input() {
+            self[(block_id, idx)].set(input);
+        }
+
+        self.analyzed_flags_for_block(block_id).set(idx, true);
+    }
+
+    pub fn analyze(&mut self, block_id: lir::BlockId, blocks: &lir::BlockHeap) {
+        self.analyze_instruction(block_id, 0, blocks)
     }
 
     pub fn liveness_iter(&self) -> impl Iterator<Item = &Liveness> {
-        self.v.iter()
+        self.v.iter().map(|bv| bv.iter()).flatten()
     }
 }
 
-pub struct Graph {
+struct Graph {
     adj: Vec<HashSet<usize>>,
 }
 
@@ -203,8 +165,8 @@ impl Graph {
     }
 }
 
-fn build_intefere_graph(life: &LifetimeStore, local_cnt: usize) -> Graph {
-    let mut g = Graph::new(local_cnt);
+fn build_intefere_graph(life: &LifetimeStore, temp_cnt: usize) -> Graph {
+    let mut g = Graph::new(temp_cnt);
 
     for liveness in life.liveness_iter() {
         let live_locals = liveness.live_locals();
@@ -216,4 +178,12 @@ fn build_intefere_graph(life: &LifetimeStore, local_cnt: usize) -> Graph {
     }
 
     g
+}
+
+pub fn compress_temps(entry: lir::BlockId, blocks: &mut lir::BlockHeap, temp_cnt: usize) {
+    let mut lifetime_store = LifetimeStore::new(blocks, temp_cnt);
+    lifetime_store.analyze(entry, blocks);
+    let interfere_graph = build_intefere_graph(&lifetime_store, temp_cnt);
+    let color_scheme = interfere_graph.color_graph();
+    blocks.execute_substitution(&color_scheme.into());
 }

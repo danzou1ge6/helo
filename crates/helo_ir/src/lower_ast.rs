@@ -117,7 +117,6 @@ fn lower_expr<'s>(
             lower_ctx,
         ),
         MakeClosure(fid) => lower_make_closure(fid, &expr.meta, symbols, ir_nodes),
-        ThisClosure(fid) => lower_this_closure(fid, &expr.meta, ir_nodes),
         Constructor(name) => {
             let tag = symbols.tag_for(&name);
             let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
@@ -134,7 +133,7 @@ fn lower_expr<'s>(
             str_table,
             lower_ctx,
         ),
-        Captured(id) => lower_captured(*id, &expr.meta, ir_nodes),
+        Captured(id, is_self) => lower_captured(*id, *is_self, &expr.meta, ir_nodes),
         Constant(c) => lower_constant(c.clone(), &expr.meta, ir_nodes, str_table),
         Local(id) => lower_local(*id, &expr.meta, ir_nodes, lower_ctx),
     }
@@ -804,13 +803,16 @@ fn lower_constant<'s>(
 /// to stack
 fn lower_captured<'s>(
     id: ast::CapturedId,
+    is_self: bool,
     captured_meta: &ast::Meta,
     ir_nodes: &mut ir::ExprHeap,
 ) -> ir::ExprId {
-    ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::Local(id.0.into()),
-        captured_meta.into(),
-    ))
+    let node = if is_self {
+        ir::ExprNode::ThisClosure(id.0.into())
+    } else {
+        ir::ExprNode::Local(id.0.into())
+    };
+    ir_nodes.push(ir::Expr::new(node, captured_meta.into()))
 }
 
 fn lower_local<'s>(
@@ -836,12 +838,4 @@ fn lower_make_closure<'s>(
         ir::ExprNode::MakeClosure(fid.clone(), f.captures.clone()),
         closure_meta.into(),
     ))
-}
-
-fn lower_this_closure<'s>(
-    fid: &ast::FunctionId,
-    closure_meta: &ast::Meta,
-    ir_nodes: &mut ir::ExprHeap,
-) -> ir::ExprId {
-    unimplemented!()
 }

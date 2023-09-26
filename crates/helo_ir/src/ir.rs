@@ -31,7 +31,7 @@ pub struct Function {
 
 use helo_parse::ast;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Immediate {
     Int(i64),
     Float(f64),
@@ -166,13 +166,14 @@ pub enum ExprNode<'s> {
     Immediate(Immediate),
     MakeClosure(FunctionId, Vec<LocalId>),
     Local(LocalId),
+    /// Indiacates that at .0 lies the closure being called. Distinguishes from [`ExprNode::Local`] for tail call optimization
+    ThisClosure(LocalId),
     UserFunction(FunctionId),
     Builtin(FunctionId),
     VariantField(LocalId, usize),
     TupleField(LocalId, usize),
     MakeTuple(Vec<ExprId>),
     MakeTagged(Tag<'s>, Vec<ExprId>),
-    ThisClosure(FunctionId),
     Panic(StrId),
 }
 
