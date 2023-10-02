@@ -29,9 +29,6 @@ impl Compiler {
     fn ret_temp(&self) -> lir::TempId {
         lir::TempId(self.local_cnt)
     }
-    fn is_ret_temp(&self, id: lir::TempId) -> bool {
-        id == self.ret_temp()
-    }
 }
 
 fn lower_expr<'s>(
@@ -123,7 +120,7 @@ fn lower_expr<'s>(
             functions,
             compiler,
         ),
-        Immediate(im) => lower_immediate(to, *im, block),
+        Immediate(im) => lower_immediate(to, im.clone(), block),
         MakeClosure(fid, captures) => lower_make_closure(
             to,
             fid,
@@ -132,22 +129,14 @@ fn lower_expr<'s>(
             ir_functions,
             builtins,
             block,
-            blocks,
             functions,
             compiler,
         ),
         Local(local) => lower_local(to, *local, block, compiler),
         ThisClosure(local) => lower_local(to, *local, block, compiler),
-        UserFunction(fid) => lower_user_function(
-            to,
-            fid,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            block,
-            blocks,
-            functions,
-        ),
+        UserFunction(fid) => {
+            lower_user_function(to, fid, ir_nodes, ir_functions, builtins, block, functions)
+        }
         Builtin(fid) => lower_builtin(to, fid, builtins, block),
         VariantField(local, pos) | TupleField(local, pos) => {
             lower_field(to, *local, *pos, block, compiler)
@@ -210,6 +199,7 @@ pub fn lower_function<'s>(
             body,
             blocks,
             arity: f.arity,
+            meta: f.meta.clone(),
         },
     )
 }
@@ -310,7 +300,7 @@ fn lower_switch_tag<'s>(
     let tag_cnt = arms.first().unwrap().0.possibilities();
     let mut cases: Vec<_> = (0..tag_cnt).map(|_| default).collect();
     arms.iter().for_each(|(tag, e)| {
-        cases[tag.code()] = *e;
+        cases[tag.code() as usize] = *e;
     });
 
     let operand_temp = compiler.new_temp();
@@ -534,8 +524,7 @@ fn lower_if_else<'s>(
     );
 
     use lir::Instruction::*;
-    block.push(JumpIf(test_temp, then_block));
-    block.push(Jump(else_block));
+    block.push(JumpIfElse(test_temp, then_block, else_block));
 
     block
 }
@@ -584,6 +573,14 @@ fn lower_call<'s>(
             block.push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
             block
         }
+        // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
+        // Instead, we call this user function directly
+        ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
+            let mut block = emit_arguments!(block);
+            let lir_fid = lower_function(name, ir_nodes, ir_functions, builtins, functions);
+            block.push(Call(to, lir_fid, args_temp));
+            block
+        }
         // Optimization: Tall call of closure
         ir::ExprNode::ThisClosure(local) if args.len() == compiler.arity => {
             let callee_temp = compiler.local_id_to_temp(*local);
@@ -593,20 +590,9 @@ fn lower_call<'s>(
         }
         // Optimization: Tail call of non-closure function
         ir::ExprNode::UserFunction(fid) if *fid == compiler.fid && args.len() == compiler.arity => {
-            let callee_temp = compiler.new_temp();
-            let block = lower_expr(
-                callee_temp,
-                callee,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                block,
-                blocks,
-                functions,
-                compiler,
-            );
+            let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
             let mut block = emit_arguments!(block);
-            block.push(TailCall(to, callee_temp, args_temp));
+            block.push(TailCallU(to, lir_fid, args_temp));
             block
         }
         _ => {
@@ -652,7 +638,6 @@ fn lower_make_closure<'s>(
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
     mut block: lir::Block,
-    blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
 ) -> lir::Block {
@@ -663,8 +648,9 @@ fn lower_make_closure<'s>(
         .collect();
 
     use lir::Instruction::*;
-    block.push(Function(to, lir_fid));
-    block.push(Push(to, temps));
+    let f_temp = compiler.new_temp();
+    block.push(Function(f_temp, lir_fid));
+    block.push(Push(to, f_temp, temps));
 
     block
 }
@@ -686,7 +672,6 @@ fn lower_user_function<'s>(
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
     mut block: lir::Block,
-    blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
 ) -> lir::Block {
     let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
@@ -722,7 +707,7 @@ fn lower_field<'s>(
 
 fn lower_make_tagged<'s>(
     to: lir::TempId,
-    tag_code: usize,
+    tag_code: u8,
     fields: &[ir::ExprId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,

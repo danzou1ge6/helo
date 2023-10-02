@@ -48,6 +48,7 @@ pub fn lower_function<'s>(
             local_cnt: lower_ctx.local_cnt,
             arity: f.type_.params.len(),
             body,
+            meta: f.meta.clone(),
         }
     })
 }

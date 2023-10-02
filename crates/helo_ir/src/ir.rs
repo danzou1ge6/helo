@@ -20,35 +20,24 @@ impl From<usize> for ExprId {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StrId(pub usize);
 
 pub struct Function {
     pub local_cnt: usize,
     pub arity: usize,
     pub body: ExprId,
+    pub meta: helo_parse::ast::Meta,
 }
 
 use helo_parse::ast;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Hash)]
 pub enum Immediate {
     Int(i64),
-    Float(f64),
+    Float(String),
     Bool(bool),
     Str(StrId),
-}
-
-impl std::hash::Hash for Immediate {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        use Immediate::*;
-        match self {
-            Int(i) => state.write_i64(*i),
-            Bool(b) => state.write_u8(if *b { 1 } else { 0 }),
-            Str(s) => state.write_usize(s.0),
-            Float(s) => state.write_i64(((s * 1e5).floor()) as i64),
-        }
-    }
 }
 
 impl Immediate {
@@ -104,7 +93,7 @@ impl StrTable {
     pub fn immediate_from_constant(&mut self, c: ast::Constant<'_>) -> Immediate {
         match c {
             ast::Constant::Int(i) => Immediate::Int(i),
-            ast::Constant::Float(i) => Immediate::Float(i),
+            ast::Constant::Float(i) => Immediate::Float(i.to_string()),
             ast::Constant::Bool(i) => Immediate::Bool(i),
             ast::Constant::Str(s) => Immediate::Str(self.add(s.to_string())),
         }

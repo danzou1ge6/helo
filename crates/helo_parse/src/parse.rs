@@ -469,7 +469,7 @@ fn num_literal_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, ast::Cons
         Ok((
             s2,
             (
-                ast::Constant::Float(s[0..d1.len() + 1 + d2.len()].parse().unwrap()),
+                ast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
                 ctx.meta(s, s2),
             ),
         ))

@@ -131,7 +131,7 @@ impl Graph {
     pub fn vertices_cnt(&self) -> usize {
         self.adj.len()
     }
-    pub fn color_graph(&self) -> Vec<usize> {
+    pub fn color_graph(&self) -> (Vec<usize>, usize) {
         let mut coloring_order = (0..self.vertices_cnt()).collect::<Vec<_>>();
         coloring_order.sort_unstable_by(|a, b| self.adj[*b].len().cmp(&self.adj[*a].len()));
 
@@ -161,7 +161,7 @@ impl Graph {
             }
             colored.set(i, true);
         }
-        colors
+        (colors, used_color_cnt)
     }
 }
 
@@ -180,10 +180,12 @@ fn build_intefere_graph(life: &LifetimeStore, temp_cnt: usize) -> Graph {
     g
 }
 
-pub fn compress_temps(entry: lir::BlockId, blocks: &mut lir::BlockHeap, temp_cnt: usize) {
+pub fn compress_temps(entry: lir::BlockId, blocks: &mut lir::BlockHeap, temp_cnt: usize) -> usize {
     let mut lifetime_store = LifetimeStore::new(blocks, temp_cnt);
     lifetime_store.analyze(entry, blocks);
     let interfere_graph = build_intefere_graph(&lifetime_store, temp_cnt);
-    let color_scheme = interfere_graph.color_graph();
-    blocks.execute_substitution(&color_scheme.into());
+    let (color_scheme, cnt) = interfere_graph.color_graph();
+    let subs = lir::TempSubstitutionMap::from(color_scheme);
+    blocks.execute_substitution(&subs);
+    cnt
 }

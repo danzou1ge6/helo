@@ -89,7 +89,7 @@ pub enum ExprNode<'s> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant<'s> {
     Int(i64),
-    Float(f64),
+    Float(&'s str),
     Str(&'s str),
     Bool(bool),
 }

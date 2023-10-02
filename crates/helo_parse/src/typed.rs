@@ -184,11 +184,11 @@ pub struct Symbols<'s> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Tag<'s>(usize, usize, &'s str);
+pub struct Tag<'s>(u8, u8, &'s str);
 
 impl<'s> std::hash::Hash for Tag<'s> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(self.0)
+        state.write_u8(self.0)
     }
 }
 
@@ -196,10 +196,10 @@ impl<'s> Tag<'s> {
     pub fn name(&self) -> &'s str {
         self.2
     }
-    pub fn code(&self) -> usize {
+    pub fn code(&self) -> u8 {
         self.0
     }
-    pub fn possibilities(&self) -> usize {
+    pub fn possibilities(&self) -> u8 {
         self.1
     }
 }
@@ -223,8 +223,8 @@ impl<'s> Symbols<'s> {
             data.constructors
                 .iter()
                 .position(|c| *c == constructor)
-                .unwrap(),
-            data.constructors.len(),
+                .unwrap() as u8,
+            data.constructors.len() as u8,
             constructor,
         )
     }

@@ -19,5 +19,6 @@ helo_runtime = { path = "../helo_runtime" }
 miette = "5.10"
 thiserror = "1.0"
 bitvec = "1.0"
+imbl = "2.0"
 pretty = { version = "0.12", optional = true }
 terminal_size = { version = "0.3", optional = true }
