@@ -10,4 +10,4 @@
 [x] Curried function
 [ ] More accurate parse-error position
 [x] Check number of variants of a type is at most 256
-[ ] Check number of parameters of a function is at most 256
+[x] Check number of parameters of a function is at most 256

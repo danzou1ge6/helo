@@ -906,11 +906,17 @@ fn data<'s>(
         constructor(s, ctx, data_name)
     })(s4)?;
 
+    let meta = ctx.meta(s, s5);
+
+    if constructors.len() > u8::MAX as usize {
+        ctx.push_error(errors::TooManyVariants::new(&meta, constructors.len()))
+    }
+
     let data = ast::Data {
         name: data_name,
         kind_arity,
         constructors: constructors.iter().map(|c| c.name).collect(),
-        meta: ctx.meta(s, s5),
+        meta,
         generic_metas,
     };
 
