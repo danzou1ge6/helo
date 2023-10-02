@@ -1,7 +1,9 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
 
+use helo_macro::{ChunkReaderReadArgs, Emit, ToOpCode};
+
 /// Takes 1 bytes
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct RegisterId(pub(crate) u8);
 /// Takes 3 bytes
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -40,6 +42,7 @@ impl From<u16> for BuiltinId {
     }
 }
 
+#[derive(Emit, ToOpCode, ChunkReaderReadArgs)]
 pub enum Instruction {
     /// Following is a table of relative jump distance. The `i`th entry is taken for tag `i` at .0.
     /// The relative jump distance is the difference of address of jump target and address of this instruction.
@@ -58,7 +61,7 @@ pub enum Instruction {
     /// Jump if .0 equals i64 stored in next 8 bytes.
     ///
     /// 4 of 8 bytes
-    JumpIfEqI64(RegisterId, u16, i64),
+    JumpIfEqI64(RegisterId, u16),
     /// Jump if .0 equals string at .1.
     ///
     /// 7 of 8 bytes
@@ -75,15 +78,15 @@ pub enum Instruction {
     /// Apply .2 to .1 and store result to .0
     ///
     /// 4 of 8 bytes
-    Apply1(RegisterId, RegisterId, Vec<RegisterId>),
+    Apply1(RegisterId, RegisterId, [RegisterId; 1]),
     /// 5 of 8 bytes
-    Apply2(RegisterId, RegisterId, Vec<RegisterId>),
+    Apply2(RegisterId, RegisterId, [RegisterId; 2]),
     /// 6 of 8 bytes
-    Apply3(RegisterId, RegisterId, Vec<RegisterId>),
+    Apply3(RegisterId, RegisterId, [RegisterId; 3]),
     /// 7 of 8 bytes
-    Apply4(RegisterId, RegisterId, Vec<RegisterId>),
+    Apply4(RegisterId, RegisterId, [RegisterId; 4]),
     /// 8 of 8 bytes
-    Apply5(RegisterId, RegisterId, Vec<RegisterId>),
+    Apply5(RegisterId, RegisterId, [RegisterId; 5]),
     /// Apply the following .2 number of register-ids to .1
     ///
     /// 4 of 8 bytes
@@ -92,9 +95,9 @@ pub enum Instruction {
     /// Call .1 with .2 and store result to .0
     ///
     /// 7 of 8 bytes
-    Call1(RegisterId, FunctionAddr, Vec<RegisterId>),
+    Call1(RegisterId, FunctionAddr, [RegisterId; 1]),
     /// 8 of 8 bytes
-    Call2(RegisterId, FunctionAddr, Vec<RegisterId>),
+    Call2(RegisterId, FunctionAddr, [RegisterId; 2]),
     /// Call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
@@ -103,9 +106,9 @@ pub enum Instruction {
     /// Tail call .1 with .2 and store result to .0
     ///
     /// 7 of 8 bytes
-    TailCallU1(RegisterId, FunctionAddr, Vec<RegisterId>),
+    TailCallU1(RegisterId, FunctionAddr, [RegisterId; 1]),
     /// 8 of 8 bytes
-    TailCallU2(RegisterId, FunctionAddr, Vec<RegisterId>),
+    TailCallU2(RegisterId, FunctionAddr, [RegisterId; 2]),
     /// Tail call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
@@ -114,15 +117,15 @@ pub enum Instruction {
     /// Tail call .1 with .2 and store result to .0
     ///
     /// 4 of 8 bytes
-    TailCall1(RegisterId, RegisterId, Vec<RegisterId>),
+    TailCall1(RegisterId, RegisterId, [RegisterId; 1]),
     /// 5 of 8 bytes
-    TailCall2(RegisterId, RegisterId, Vec<RegisterId>),
+    TailCall2(RegisterId, RegisterId, [RegisterId; 2]),
     /// 6 of 8 bytes
-    TailCall3(RegisterId, RegisterId, Vec<RegisterId>),
+    TailCall3(RegisterId, RegisterId, [RegisterId; 3]),
     /// 7 of 8 bytes
-    TailCall4(RegisterId, RegisterId, Vec<RegisterId>),
+    TailCall4(RegisterId, RegisterId, [RegisterId; 4]),
     /// 8 of 8 bytes
-    TailCall5(RegisterId, RegisterId, Vec<RegisterId>),
+    TailCall5(RegisterId, RegisterId, [RegisterId; 5]),
     /// Call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
@@ -131,13 +134,13 @@ pub enum Instruction {
     /// call builtin .1 with .2 and store result to .0
     ///
     /// 5 of 8 bytes
-    CallBuiltin1(RegisterId, BuiltinId, Vec<RegisterId>),
+    CallBuiltin1(RegisterId, BuiltinId, [RegisterId; 1]),
     /// 6 of 8 bytes
-    CallBuiltin2(RegisterId, BuiltinId, Vec<RegisterId>),
+    CallBuiltin2(RegisterId, BuiltinId, [RegisterId; 2]),
     /// 7 of 8 bytes
-    CallBuiltin3(RegisterId, BuiltinId, Vec<RegisterId>),
+    CallBuiltin3(RegisterId, BuiltinId, [RegisterId; 3]),
     /// 8 of 8 bytes
-    CallBuiltin4(RegisterId, BuiltinId, Vec<RegisterId>),
+    CallBuiltin4(RegisterId, BuiltinId, [RegisterId; 4]),
 
     /// Load immediate to register .0
     ///
@@ -150,24 +153,24 @@ pub enum Instruction {
     /// Load Immediate at following 8-bytes to .0
     ///
     /// 2 of 8 bytes
-    Int64(RegisterId, i64),
+    Int64(RegisterId),
     /// 2 of 8 bytes
-    Float(RegisterId, f64),
+    Float(RegisterId),
 
     /// Push .1 to list at .0. Variants, tuples and closures are both represented by lists.
     ///
     /// 3 of 8 bytes
-    Push1(RegisterId, Vec<RegisterId>),
+    Push1(RegisterId, [RegisterId; 1]),
     /// 4 of 8 bytes
-    Push2(RegisterId, Vec<RegisterId>),
+    Push2(RegisterId, [RegisterId; 2]),
     /// 5 of 8 bytes
-    Push3(RegisterId, Vec<RegisterId>),
+    Push3(RegisterId, [RegisterId; 3]),
     /// 6 of 8 bytes
-    Push4(RegisterId, Vec<RegisterId>),
+    Push4(RegisterId, [RegisterId; 4]),
     /// 7 of 8 bytes
-    Push5(RegisterId, Vec<RegisterId>),
+    Push5(RegisterId, [RegisterId; 5]),
     /// 8 of 8 bytes
-    Push6(RegisterId, Vec<RegisterId>),
+    Push6(RegisterId, [RegisterId; 6]),
 
     /// Load a user function
     ///
@@ -186,15 +189,15 @@ pub enum Instruction {
     /// Make a variant of tag .1 and fields .2
     ///
     /// 4 of 8 bytes
-    Tagged1(RegisterId, u8, Vec<RegisterId>),
+    Tagged1(RegisterId, u8, [RegisterId; 1]),
     /// 5 of 8 bytes
-    Tagged2(RegisterId, u8, Vec<RegisterId>),
+    Tagged2(RegisterId, u8, [RegisterId; 2]),
     /// 6 of 8 bytes
-    Tagged3(RegisterId, u8, Vec<RegisterId>),
+    Tagged3(RegisterId, u8, [RegisterId; 3]),
     /// 7 of 8 bytes
-    Tagged4(RegisterId, u8, Vec<RegisterId>),
+    Tagged4(RegisterId, u8, [RegisterId; 4]),
     /// 8 of 8 bytes
-    Tagged5(RegisterId, u8, Vec<RegisterId>),
+    Tagged5(RegisterId, u8, [RegisterId; 5]),
 
     /// Make a variant with no fields
     ///
@@ -287,147 +290,6 @@ impl OpCode {
     }
 }
 
-impl Instruction {
-    pub fn emit(self, chunk: &mut Chunk) {
-        use Instruction::*;
-        use OpCode::*;
-
-        let writer = chunk.writer();
-
-        match self {
-            JumpTable(r) => writer.op_code(JUMP_TABLE).register(r).finish(),
-            JumpIf(r, d) => writer.op_code(JUMP_IF).register(r).u16_(d).finish(),
-            JumpIfEqBool(r, v, d) => writer
-                .op_code(JUMP_IF_EQ_BOOL)
-                .register(r)
-                .bool_(v)
-                .u16_(d)
-                .finish(),
-            JumpIfEqI32(r, v, d) => writer
-                .op_code(JUMP_IF_EQ_I32)
-                .register(r)
-                .i32_(v)
-                .u16_(d)
-                .finish(),
-            JumpIfEqI64(r, d, v) => {
-                writer.op_code(JUMP_IF_EQ_I64).register(r).u16_(d).finish();
-                chunk.writer().i64_(v).finish()
-            }
-            JumpIfEqStr(r, v, d) => writer
-                .op_code(JUMP_IF_EQ_STR)
-                .register(r)
-                .str_id(v)
-                .u16_(d)
-                .finish(),
-            Jump(d) => writer.op_code(JUMP).u16_(d).finish(),
-            Apply1(re, c, arg)
-            | Apply2(re, c, arg)
-            | Apply3(re, c, arg)
-            | Apply4(re, c, arg)
-            | Apply5(re, c, arg) => writer
-                .op_code(APPLY1)
-                .register(re)
-                .register(c)
-                .registers(arg)
-                .finish(),
-            ApplyMany(re, c, cnt) => writer
-                .op_code(APPLY_MANY)
-                .register(re)
-                .register(c)
-                .byte(cnt)
-                .finish(),
-            Call1(re, c, arg) | Call2(re, c, arg) => writer
-                .op_code(CALL1)
-                .register(re)
-                .function_id(c)
-                .registers(arg)
-                .finish(),
-            CallMany(re, c, cnt) => writer
-                .op_code(CALL_MANY)
-                .register(re)
-                .function_id(c)
-                .byte(cnt)
-                .finish(),
-            TailCallU1(re, c, arg) | TailCallU2(re, c, arg) => writer
-                .op_code(TAIL_CALL_U1)
-                .register(re)
-                .function_id(c)
-                .registers(arg)
-                .finish(),
-            TailCallUMany(re, c, cnt) => writer
-                .op_code(TAIL_CALL_U_MANY)
-                .register(re)
-                .function_id(c)
-                .byte(cnt)
-                .finish(),
-            TailCall1(re, c, arg)
-            | TailCall2(re, c, arg)
-            | TailCall3(re, c, arg)
-            | TailCall4(re, c, arg)
-            | TailCall5(re, c, arg) => writer
-                .op_code(TAIL_CALL1)
-                .register(re)
-                .register(c)
-                .registers(arg)
-                .finish(),
-            TailCallMany(re, c, cnt) => writer
-                .op_code(TAIL_CALL_MANY)
-                .register(re)
-                .register(c)
-                .byte(cnt)
-                .finish(),
-            CallBuiltin1(re, c, arg)
-            | CallBuiltin2(re, c, arg)
-            | CallBuiltin3(re, c, arg)
-            | CallBuiltin4(re, c, arg) => writer
-                .op_code(CALL_BUILTIN1)
-                .register(re)
-                .builtin_id(c)
-                .registers(arg)
-                .finish(),
-            Int32(r, v) => writer.op_code(INT32).register(r).i32_(v).finish(),
-            Bool(r, v) => writer.op_code(BOOL).register(r).bool_(v).finish(),
-            Str(r, v) => writer.op_code(STR).register(r).str_id(v).finish(),
-            Int64(r, v) => {
-                writer.op_code(INT64).register(r).finish();
-                chunk.writer().i64_(v).finish();
-            }
-            Float(r, v) => {
-                writer.op_code(FLOAT).register(r).finish();
-                chunk.writer().f64_(v).finish();
-            }
-            Push1(r, arg)
-            | Push2(r, arg)
-            | Push3(r, arg)
-            | Push4(r, arg)
-            | Push5(r, arg)
-            | Push6(r, arg) => writer.op_code(PUSH1).register(r).registers(arg).finish(),
-            Function(r, f) => writer.op_code(FUNCTION).register(r).function_id(f).finish(),
-            Builtin(r, f) => writer.op_code(BUILTIN).register(r).builtin_id(f).finish(),
-            Field(re, o, n) => writer
-                .op_code(FIELD)
-                .register(re)
-                .register(o)
-                .byte(n)
-                .finish(),
-            Tagged1(r, t, arg)
-            | Tagged2(r, t, arg)
-            | Tagged3(r, t, arg)
-            | Tagged4(r, t, arg)
-            | Tagged5(r, t, arg) => writer
-                .op_code(TAGGED1)
-                .register(r)
-                .byte(t)
-                .registers(arg)
-                .finish(),
-            Tagged(r, t) => writer.op_code(TAGGED).register(r).byte(t).finish(),
-            Mov(re, r) => writer.op_code(MOV).register(re).register(r).finish(),
-            Ret(r) => writer.op_code(RET).register(r).finish(),
-            Panic(s) => writer.op_code(PANIC).str_id(s).finish(),
-        }
-    }
-}
-
 pub struct Chunk {
     code: Vec<u8>,
 }
@@ -437,113 +299,172 @@ pub struct ChunkWriter<'c> {
     cnt: usize,
 }
 
-fn u32_to_4u8(n: u32) -> [u8; 4] {
-    let t = ((n >> 24) & 0xff) as u8;
-    let h = ((n >> 16) & 0xff) as u8;
-    let m = ((n >> 8) & 0xff) as u8;
-    let l = (n & 0xff) as u8;
-    [t, h, m, l]
+pub trait ToBytes<const N: usize> {
+    fn to_bytes(self) -> [u8; N];
 }
-fn i32_to_4u8(n: i32) -> [u8; 4] {
-    let t = ((n >> 24) & 0xff) as u8;
-    let h = ((n >> 16) & 0xff) as u8;
-    let m = ((n >> 8) & 0xff) as u8;
-    let l = (n & 0xff) as u8;
-    [t, h, m, l]
+
+pub trait FromBytes<const N: usize> {
+    fn from_bytes(bytes: [u8; N]) -> Self;
 }
-fn i64_to_8u8(n: i64) -> [u8; 8] {
-    let a = ((n >> 56) & 0xff) as u8;
-    let b = ((n >> 48) & 0xff) as u8;
-    let c = ((n >> 40) & 0xff) as u8;
-    let d = ((n >> 32) & 0xff) as u8;
-    let e = ((n >> 24) & 0xff) as u8;
-    let f = ((n >> 16) & 0xff) as u8;
-    let g = ((n >> 8) & 0xff) as u8;
-    let h = (n & 0xff) as u8;
-    [a, b, c, d, e, f, g, h]
+
+impl ToBytes<8> for i64 {
+    fn to_bytes(self) -> [u8; 8] {
+        self.to_le_bytes()
+    }
 }
-fn f64_to_8u8(n: f64) -> [u8; 8] {
-    unsafe { std::mem::transmute::<_, _>(n) }
+
+impl FromBytes<8> for i64 {
+    fn from_bytes(bytes: [u8; 8]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
 }
-fn u16_to_2u8(n: u16) -> [u8; 2] {
-    let g = ((n >> 8) & 0xff) as u8;
-    let h = (n & 0xff) as u8;
-    [g, h]
+
+impl ToBytes<8> for f64 {
+    fn to_bytes(self) -> [u8; 8] {
+        self.to_le_bytes()
+    }
+}
+
+impl FromBytes<8> for f64 {
+    fn from_bytes(bytes: [u8; 8]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+}
+
+impl ToBytes<3> for StrId {
+    fn to_bytes(self) -> [u8; 3] {
+        let bytes = self.0.to_le_bytes();
+        [bytes[0], bytes[1], bytes[2]]
+    }
+}
+
+impl FromBytes<3> for StrId {
+    fn from_bytes(bytes: [u8; 3]) -> Self {
+        let bytes = [bytes[0], bytes[1], bytes[2], 0];
+        Self(u32::from_le_bytes(bytes))
+    }
+}
+
+impl ToBytes<4> for FunctionAddr {
+    fn to_bytes(self) -> [u8; 4] {
+        self.0.to_le_bytes()
+    }
+}
+
+impl FromBytes<4> for FunctionAddr {
+    fn from_bytes(bytes: [u8; 4]) -> Self {
+        Self(u32::from_le_bytes(bytes))
+    }
+}
+
+impl ToBytes<2> for BuiltinId {
+    fn to_bytes(self) -> [u8; 2] {
+        self.0.to_le_bytes()
+    }
+}
+
+impl FromBytes<2> for BuiltinId {
+    fn from_bytes(bytes: [u8; 2]) -> Self {
+        Self(u16::from_le_bytes(bytes))
+    }
+}
+
+impl ToBytes<2> for u16 {
+    fn to_bytes(self) -> [u8; 2] {
+        self.to_le_bytes()
+    }
+}
+
+impl FromBytes<2> for u16 {
+    fn from_bytes(bytes: [u8; 2]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+}
+
+impl ToBytes<1> for OpCode {
+    fn to_bytes(self) -> [u8; 1] {
+        [self.into()]
+    }
+}
+
+impl FromBytes<1> for OpCode {
+    fn from_bytes(bytes: [u8; 1]) -> Self {
+        Self::from_primitive(bytes[0])
+    }
+}
+
+impl ToBytes<1> for bool {
+    fn to_bytes(self) -> [u8; 1] {
+        [if self { 1 } else { 0 }]
+    }
+}
+
+impl FromBytes<1> for bool {
+    fn from_bytes(bytes: [u8; 1]) -> Self {
+        bytes[0] != 0
+    }
+}
+
+impl ToBytes<4> for i32 {
+    fn to_bytes(self) -> [u8; 4] {
+        self.to_le_bytes()
+    }
+}
+
+impl FromBytes<4> for i32 {
+    fn from_bytes(bytes: [u8; 4]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+}
+
+impl ToBytes<1> for RegisterId {
+    fn to_bytes(self) -> [u8; 1] {
+        [self.0]
+    }
+}
+
+impl FromBytes<1> for RegisterId {
+    fn from_bytes(bytes: [u8; 1]) -> Self {
+        Self(bytes[0])
+    }
+}
+
+impl<const N: usize> ToBytes<N> for [RegisterId; N] {
+    fn to_bytes(self) -> [u8; N] {
+        self.map(|x| x.0)
+    }
+}
+
+impl<const N: usize> FromBytes<N> for [RegisterId; N] {
+    fn from_bytes(bytes: [u8; N]) -> Self {
+        bytes.map(|x| RegisterId(x))
+    }
+}
+
+impl ToBytes<1> for u8 {
+    fn to_bytes(self) -> [u8; 1] {
+        [self]
+    }
+}
+
+impl FromBytes<1> for u8 {
+    fn from_bytes(bytes: [u8; 1]) -> Self {
+        bytes[0]
+    }
 }
 
 impl<'c> ChunkWriter<'c> {
-    pub fn i64_(mut self, n: i64) -> Self {
-        self.cnt += 8;
-        self.bytes(i64_to_8u8(n))
-    }
-
-    pub fn f64_(mut self, n: f64) -> Self {
-        self.cnt += 8;
-        self.bytes(f64_to_8u8(n))
-    }
-
-    pub fn str_id(mut self, str_id: StrId) -> Self {
-        let n = str_id.0;
-        let h = ((n >> 16) & 0xff) as u8;
-        let m = ((n >> 8) & 0xff) as u8;
-        let l = (n & 0xff) as u8;
-        self.cnt += 3;
-        self.bytes([h, m, l])
-    }
-
-    pub fn function_id(mut self, function_id: FunctionAddr) -> Self {
-        self.cnt += 4;
-        self.bytes(u32_to_4u8(function_id.0))
-    }
-
-    pub fn builtin_id(mut self, builtin_id: BuiltinId) -> Self {
-        let n = builtin_id.0;
-        self.cnt += 2;
-        self.bytes(u16_to_2u8(n))
-    }
-
-    pub fn u16_(mut self, value: u16) -> Self {
-        self.cnt += 2;
-        self.bytes(u16_to_2u8(value))
-    }
-
-    pub fn byte(mut self, x: u8) -> Self {
-        self.chunk.code.push(x);
-        self.cnt += 1;
-        self
-    }
-
-    pub fn op_code(mut self, op: OpCode) -> Self {
-        self.chunk.code.push(op.into());
-        self.cnt += 1;
-        self
-    }
-
-    pub fn bool_(mut self, value: bool) -> Self {
-        self.chunk.code.push(if value { 1 } else { 0 });
-        self.cnt += 1;
-        self
-    }
-
     pub fn bytes<const N: usize>(mut self, code: [u8; N]) -> Self {
         self.chunk.code.extend(code.into_iter());
-        self.cnt += code.len();
+        self.cnt += N;
         self
     }
 
-    pub fn i32_(mut self, value: i32) -> Self {
-        self.cnt += 4;
-        self.bytes(i32_to_4u8(value))
-    }
-
-    pub fn register(self, reg: RegisterId) -> Self {
-        self.byte(reg.0)
-    }
-
-    pub fn registers(mut self, regs: Vec<RegisterId>) -> Self {
-        self.cnt += regs.len();
-        regs.into_iter().for_each(|r| self.chunk.code.push(r.0));
-        self
+    pub fn push<T, const N: usize>(self, x: T) -> Self
+    where
+        T: ToBytes<N>,
+    {
+        self.bytes(x.to_bytes())
     }
 
     pub fn finish(self) {
@@ -552,6 +473,31 @@ impl<'c> ChunkWriter<'c> {
         for _ in 0..pad {
             self.chunk.code.push(0);
         }
+    }
+}
+
+pub struct ChunkReader<'c, const M: usize> {
+    code: &'c [u8],
+}
+
+fn collect_to_array<T, const N: usize>(mut it: impl Iterator<Item = T>) -> [T; N]
+where
+    T: Default + Copy,
+{
+    let mut r = [T::default(); N];
+    for i in 0..N {
+        r[i] = it.next().unwrap();
+    }
+    r
+}
+
+impl<'c, const M: usize> ChunkReader<'c, M> {
+    pub fn read<T, const N: usize>(self) -> (ChunkReader<'c, { M + N }>, T)
+    where
+        T: FromBytes<N>,
+    {
+        let r = T::from_bytes(collect_to_array(self.code[M..].iter().copied()));
+        (ChunkReader { code: self.code }, r)
     }
 }
 
@@ -567,12 +513,18 @@ impl Chunk {
         }
     }
 
+    pub fn fetch(&self, offset: usize) -> ChunkReader<0> {
+        ChunkReader {
+            code: &self.code[offset..],
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.code.len()
     }
 
     pub fn fill_back_jump(&mut self, addr: usize, distance: u16) {
-        let [h, l] = u16_to_2u8(distance);
+        let [h, l] = distance.to_le_bytes();
         self.code[addr] = h;
         self.code[addr + 1] = l;
     }

@@ -249,7 +249,7 @@ fn lower_jump_table(
 
     table
         .iter()
-        .fold(chunk.writer(), |writer, _| writer.byte(0))
+        .fold(chunk.writer(), |writer, _| writer.push(0))
         .finish();
 
     let branch_addrs: Vec<_> = table
@@ -455,6 +455,17 @@ fn lower_jump(
     );
 }
 
+fn collect_to_array<T, const N: usize>(mut it: impl Iterator<Item = T>) -> [T; N]
+where
+    T: Default + Copy,
+{
+    let mut r = [T::default(); N];
+    for i in 0..N {
+        r[i] = it.next().unwrap();
+    }
+    r
+}
+
 fn lower_apply(
     ret: lir::TempId,
     callee: lir::TempId,
@@ -467,18 +478,18 @@ fn lower_apply(
     let args = args.iter().map(|a| a.register());
 
     if args_len <= 5 {
-        let inst_constructor = match args_len {
-            1 => Instruction::Apply1,
-            2 => Instruction::Apply2,
-            3 => Instruction::Apply3,
-            4 => Instruction::Apply4,
-            5 => Instruction::Apply5,
+        let inst = match args_len {
+            1 => Instruction::Apply1(ret, callee, collect_to_array(args)),
+            2 => Instruction::Apply2(ret, callee, collect_to_array(args)),
+            3 => Instruction::Apply3(ret, callee, collect_to_array(args)),
+            4 => Instruction::Apply4(ret, callee, collect_to_array(args)),
+            5 => Instruction::Apply5(ret, callee, collect_to_array(args)),
             _ => unreachable!(),
         };
-        inst_constructor(ret, callee, args.collect()).emit(chunk);
+        inst.emit(chunk)
     } else {
         Instruction::ApplyMany(ret, callee, args_len as u8).emit(chunk);
-        args.fold(chunk.writer(), |writer, arg| writer.register(arg))
+        args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
 }
@@ -495,18 +506,18 @@ fn lower_tail_call(
     let args = args.iter().map(|a| a.register());
 
     if args_len <= 5 {
-        let inst_constructor = match args_len {
-            1 => Instruction::TailCall1,
-            2 => Instruction::TailCall2,
-            3 => Instruction::TailCall3,
-            4 => Instruction::TailCall4,
-            5 => Instruction::TailCall5,
+        let inst = match args_len {
+            1 => Instruction::TailCall1(ret, callee, collect_to_array(args)),
+            2 => Instruction::TailCall2(ret, callee, collect_to_array(args)),
+            3 => Instruction::TailCall3(ret, callee, collect_to_array(args)),
+            4 => Instruction::TailCall4(ret, callee, collect_to_array(args)),
+            5 => Instruction::TailCall5(ret, callee, collect_to_array(args)),
             _ => unreachable!(),
         };
-        inst_constructor(ret, callee, args.collect()).emit(chunk);
+        inst.emit(chunk)
     } else {
         Instruction::TailCallMany(ret, callee, args_len as u8).emit(chunk);
-        args.fold(chunk.writer(), |writer, arg| writer.register(arg))
+        args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
 }
@@ -526,15 +537,15 @@ fn lower_tail_call_u(
     let args = args.iter().map(|a| a.register());
 
     if args_len <= 2 {
-        let inst_constructor = match args_len {
-            1 => Instruction::TailCallU1,
-            2 => Instruction::TailCallU2,
+        let inst = match args_len {
+            1 => Instruction::TailCallU1(ret, callee, collect_to_array(args)),
+            2 => Instruction::TailCallU2(ret, callee, collect_to_array(args)),
             _ => unreachable!(),
         };
-        inst_constructor(ret, callee, args.collect()).emit(chunk);
+        inst.emit(chunk)
     } else {
         Instruction::TailCallUMany(ret, callee, args_len as u8).emit(chunk);
-        args.fold(chunk.writer(), |writer, arg| writer.register(arg))
+        args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
 }
@@ -550,14 +561,14 @@ fn lower_call_builtin(
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
-    let inst_constructor = match args_len {
-        1 => Instruction::CallBuiltin1,
-        2 => Instruction::CallBuiltin2,
-        3 => Instruction::CallBuiltin3,
-        4 => Instruction::CallBuiltin4,
+    let inst = match args_len {
+        1 => Instruction::CallBuiltin1(ret, callee, collect_to_array(args)),
+        2 => Instruction::CallBuiltin2(ret, callee, collect_to_array(args)),
+        3 => Instruction::CallBuiltin3(ret, callee, collect_to_array(args)),
+        4 => Instruction::CallBuiltin4(ret, callee, collect_to_array(args)),
         _ => panic!("we shouldnt have builtin with more than 4 arguments, or do we?"),
     };
-    inst_constructor(ret, callee, args.collect()).emit(chunk);
+    inst.emit(chunk)
 }
 
 fn lower_call(
@@ -575,15 +586,15 @@ fn lower_call(
     let args = args.iter().map(|a| a.register());
 
     if args_len <= 2 {
-        let inst_constructor = match args_len {
-            1 => Instruction::Call1,
-            2 => Instruction::Call2,
+        let inst = match args_len {
+            1 => Instruction::Call1(ret, callee, collect_to_array(args)),
+            2 => Instruction::Call2(ret, callee, collect_to_array(args)),
             _ => unreachable!(),
         };
-        inst_constructor(ret, callee, args.collect()).emit(chunk);
+        inst.emit(chunk)
     } else {
         Instruction::CallMany(ret, callee, args_len as u8).emit(chunk);
-        args.fold(chunk.writer(), |writer, arg| writer.register(arg))
+        args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
 }
@@ -623,22 +634,28 @@ fn lower_push(
     }
 
     while args.len() > 6 {
-        Instruction::Push6(to, args[0..6].iter().map(|a| a.register()).collect()).emit(chunk);
+        Instruction::Push6(
+            to,
+            collect_to_array(args[0..6].iter().map(|a| a.register())),
+        )
+        .emit(chunk);
         args = &args[6..];
     }
 
-    let inst_constructor = match args.len() {
+    let args = args.iter().map(|a| a.register());
+
+    let inst = match args.len() {
         0 => return,
-        1 => Instruction::Push1,
-        2 => Instruction::Push2,
-        3 => Instruction::Push3,
-        4 => Instruction::Push4,
-        5 => Instruction::Push5,
-        6 => Instruction::Push6,
+        1 => Instruction::Push1(to, collect_to_array(args)),
+        2 => Instruction::Push2(to, collect_to_array(args)),
+        3 => Instruction::Push3(to, collect_to_array(args)),
+        4 => Instruction::Push4(to, collect_to_array(args)),
+        5 => Instruction::Push5(to, collect_to_array(args)),
+        6 => Instruction::Push6(to, collect_to_array(args)),
         _ => unreachable!(),
     };
 
-    inst_constructor(to, args.iter().map(|a| a.register()).collect()).emit(chunk);
+    inst.emit(chunk)
 }
 
 fn lower_function_inst(
@@ -676,16 +693,17 @@ fn lower_tagged(to: lir::TempId, tag: u8, args: &[lir::TempId], chunk: &mut byte
         return;
     }
 
+    let args = args.iter().map(|a| a.register());
     if args.len() <= 5 {
-        let inst_constructor = match args.len() {
-            1 => Instruction::Tagged1,
-            2 => Instruction::Tagged2,
-            3 => Instruction::Tagged3,
-            4 => Instruction::Tagged4,
-            5 => Instruction::Tagged5,
+        let inst = match args.len() {
+            1 => Instruction::Tagged1(to, tag, collect_to_array(args)),
+            2 => Instruction::Tagged2(to, tag, collect_to_array(args)),
+            3 => Instruction::Tagged3(to, tag, collect_to_array(args)),
+            4 => Instruction::Tagged4(to, tag, collect_to_array(args)),
+            5 => Instruction::Tagged5(to, tag, collect_to_array(args)),
             _ => unreachable!(),
         };
-        inst_constructor(to, tag, args.iter().map(|a| a.register()).collect()).emit(chunk);
+        inst.emit(chunk);
         return;
     }
 }

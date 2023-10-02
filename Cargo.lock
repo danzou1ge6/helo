@@ -153,6 +153,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helo_macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "helo_parse"
 version = "0.1.0"
 dependencies = [
@@ -166,6 +175,7 @@ dependencies = [
 name = "helo_runtime"
 version = "0.1.0"
 dependencies = [
+ "helo_macro",
  "num_enum",
 ]
 
