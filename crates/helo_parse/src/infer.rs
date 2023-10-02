@@ -904,6 +904,10 @@ pub fn infer_function<'s>(
 ) -> Option<typed::Function<'s>> {
     let f = symbols.function(name);
 
+    if f.arity > u8::MAX as usize {
+        e.push(errors::TooManyParameters::new(&f.meta, f.arity));
+    }
+
     let mut inferer = inferer::Inferer::new();
 
     let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);

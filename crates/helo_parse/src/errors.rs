@@ -372,6 +372,26 @@ impl TooManyArguments {
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Too many parameters. A maximum of 256 is supported.")]
+pub struct TooManyParameters {
+    given: usize,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Function defined here has {} parameters", given)]
+    pub span: SourceSpan,
+}
+
+impl TooManyParameters {
+    pub fn new(meta: &ast::Meta, given: usize) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            given,
+        }
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {
