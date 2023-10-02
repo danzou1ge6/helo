@@ -14,12 +14,14 @@ pub enum Slot<'s> {
 #[derive(Debug, Clone)]
 /// A heap of type variables
 pub struct UnionFind<'s> {
-    heap: Vec<Slot<'s>>,
+    heap: imbl::Vector<Slot<'s>>,
 }
 
 impl<'s> UnionFind<'s> {
     pub fn new() -> Self {
-        UnionFind { heap: vec![] }
+        UnionFind {
+            heap: imbl::Vector::new(),
+        }
     }
 
     fn get(&self, addr: ast::TypeVarId) -> &Slot<'s> {
@@ -53,14 +55,14 @@ impl<'s> UnionFind<'s> {
     /// Allocate a new empty type variale on heap
     pub fn new_slot(&mut self) -> ast::TypeVarId {
         let addr = self.heap.len();
-        self.heap.push(Slot::Empty);
+        self.heap.push_back(Slot::Empty);
         addr.into()
     }
 
     /// Allocate a continuous series of empty type variables on heap, returning the index of the first one
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
         let addr = self.heap.len();
-        self.heap.resize_with(addr + cnt, || Slot::Empty);
+        (0..addr + cnt).for_each(|_| self.heap.push_back(Slot::Empty));
         addr.into()
     }
 }

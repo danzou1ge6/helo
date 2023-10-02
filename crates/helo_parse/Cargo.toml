@@ -14,5 +14,6 @@ fancy_miette = ["miette/fancy"]
 
 [dependencies]
 miette = "5.10"
+imbl = "2.0"
 thiserror = "1.0"
 nom = "7.1"

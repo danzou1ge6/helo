@@ -156,6 +156,7 @@ dependencies = [
 name = "helo_parse"
 version = "0.1.0"
 dependencies = [
+ "imbl",
  "miette",
  "nom",
  "thiserror",

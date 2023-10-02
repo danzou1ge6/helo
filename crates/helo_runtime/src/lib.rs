@@ -2,3 +2,4 @@
 
 pub mod builtins;
 pub mod byte_code;
+pub mod disassembler;
