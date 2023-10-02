@@ -288,13 +288,13 @@ fn lower_jump_table(
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
-    let inst = Instruction::JumpTable(test.register());
+    let inst = Instruction::JumpTable(test.register(), table.len() as u8);
     let inst_addr = chunk.len();
     inst.emit(chunk);
 
     table
         .iter()
-        .fold(chunk.writer(), |writer, _| writer.push(0))
+        .fold(chunk.writer(), |writer, _| writer.push::<u16, 2>(0))
         .finish();
 
     let branch_addrs: Vec<_> = table
@@ -314,7 +314,7 @@ fn lower_jump_table(
         .collect();
     branch_addrs
         .into_iter()
-        .zip(inst_addr + 1..inst_addr + 1 + table.len())
+        .zip((inst_addr + 8..inst_addr + 8 + 2 * table.len()).step_by(2))
         .for_each(|(branch_addr, entry_addr)| {
             // branch_addr must be bigger, as branches are inserted later
             let delta = branch_addr - inst_addr;
@@ -619,7 +619,6 @@ fn lower_call_builtin(
     chunk: &mut byte_code::Chunk,
 ) {
     let ret = ret.register();
-    let callee = callee.byte_code();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
@@ -744,7 +743,7 @@ fn lower_function_inst(
 }
 
 fn lower_builtin(to: lir::TempId, bid: lir::BuiltinId, chunk: &mut byte_code::Chunk) {
-    Instruction::Builtin(to.register(), bid.byte_code()).emit(chunk);
+    Instruction::Builtin(to.register(), bid).emit(chunk);
 }
 
 fn lower_field(to: lir::TempId, from: lir::TempId, n: usize, chunk: &mut byte_code::Chunk) {

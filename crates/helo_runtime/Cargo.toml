@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 num_enum = "0.7"
 helo_macro = { path = "../helo_macro" }
+tabled = "0.14"

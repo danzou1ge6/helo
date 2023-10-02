@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use miette::Context;
 use miette::IntoDiagnostic;
-
 fn compile(src: String, file_name: String) -> miette::Result<()> {
     use helo_parse::ast;
     use helo_parse::builtins;

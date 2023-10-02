@@ -81,7 +81,7 @@ fn camel_to_lower_snake(from: &str) -> String {
     for char in chars {
         if char.is_uppercase() {
             r.push_str("_");
-            r.push(char);
+            r.push_str(&char.to_lowercase().to_string());
         } else {
             r.push_str(&char.to_lowercase().to_string())
         }
@@ -164,6 +164,50 @@ pub fn derive_to_op_code(input: TokenStream) -> TokenStream {
                     match self {
                         #(
                             #variants_name(..) => #op_codes_name
+                        ),*
+                    }
+                }
+            }
+        }
+        .into()
+    } else {
+        panic!("only enum is supported")
+    }
+}
+
+#[proc_macro_derive(ConstStrName)]
+pub fn derive_const_str_name(input: TokenStream) -> TokenStream {
+    let ast: syn::DeriveInput = syn::parse_macro_input!(input);
+
+    let data_ident = ast.ident;
+
+    if let syn::Data::Enum(data_enum) = ast.data {
+        let arm = data_enum
+            .variants
+            .into_iter()
+            .map(|variant| {
+                let variant_ident = variant.ident;
+                let variant_name = variant_ident.to_string();
+                if variant.fields.len() == 0 {
+                    quote! {
+                        #variant_ident => #variant_name
+                    }
+                } else {
+                    quote! {
+                        #variant_ident(..) => #variant_name
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        quote! {
+            impl #data_ident {
+                pub fn to_str(&self) -> &'static str {
+                    use #data_ident::*;
+
+                    match self {
+                        #(
+                            #arm
                         ),*
                     }
                 }

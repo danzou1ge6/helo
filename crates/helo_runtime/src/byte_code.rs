@@ -1,19 +1,41 @@
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-use helo_macro::{ChunkReaderReadArgs, Emit, ToOpCode};
+use helo_macro::{ChunkReaderReadArgs, ConstStrName, Emit, ToOpCode};
 
+/// Takes 2 bytes
+use crate::builtins::BuiltinId;
 /// Takes 1 bytes
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct RegisterId(pub(crate) u8);
 /// Takes 4 bytes
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct StrAddr(pub(crate) u32);
-/// Take 2 bytes
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub struct BuiltinId(pub(crate) u16);
 /// Take 4 bytes
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct FunctionAddr(pub(crate) u32);
+
+impl std::fmt::Display for StrAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Display for FunctionAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::fmt::Display for BuiltinId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Display for RegisterId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "r{}", self.0)
+    }
+}
 
 impl From<u8> for RegisterId {
     fn from(value: u8) -> Self {
@@ -45,8 +67,8 @@ pub enum Instruction {
     /// The relative jump distance is the difference of address of jump target and address of this instruction.
     /// Relative jump distance takes one byte
     ///
-    /// 2 of 8 bytes
-    JumpTable(RegisterId),
+    /// 3 of 8 bytes
+    JumpTable(RegisterId, u8),
     /// Perform a relative jump if .0 is true.
     ///
     /// 4 of 8 bytes
@@ -215,7 +237,7 @@ pub enum Instruction {
     Panic(StrAddr),
 }
 
-#[derive(FromPrimitive, IntoPrimitive, PartialEq, Eq, Debug)]
+#[derive(FromPrimitive, IntoPrimitive, PartialEq, Eq, Debug, ConstStrName)]
 #[repr(u8)]
 pub enum OpCode {
     JUMP_TABLE,
@@ -272,6 +294,12 @@ pub enum OpCode {
     PANIC,
     #[num_enum(catch_all)]
     UNKNOWN(u8),
+}
+
+impl std::fmt::Display for OpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
 }
 
 impl OpCode {
@@ -510,9 +538,9 @@ impl Chunk {
         }
     }
 
-    pub fn fetch(&self, offset: usize) -> ChunkReader<0> {
+    pub fn fetch(&self, offset: u32) -> ChunkReader<0> {
         ChunkReader {
-            code: &self.code[offset..],
+            code: &self.code[offset as usize..],
         }
     }
 
