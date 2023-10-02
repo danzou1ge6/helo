@@ -573,6 +573,13 @@ fn lower_call<'s>(
             block.push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
             block
         }
+        // Optimization: Tail call of non-closure function
+        ir::ExprNode::UserFunction(fid) if *fid == compiler.fid && args.len() == compiler.arity => {
+            let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
+            let mut block = emit_arguments!(block);
+            block.push(TailCallU(to, lir_fid, args_temp));
+            block
+        }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
         // Instead, we call this user function directly
         ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
@@ -586,13 +593,6 @@ fn lower_call<'s>(
             let callee_temp = compiler.local_id_to_temp(*local);
             let mut block = emit_arguments!(block);
             block.push(TailCall(to, callee_temp, args_temp));
-            block
-        }
-        // Optimization: Tail call of non-closure function
-        ir::ExprNode::UserFunction(fid) if *fid == compiler.fid && args.len() == compiler.arity => {
-            let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
-            let mut block = emit_arguments!(block);
-            block.push(TailCallU(to, lir_fid, args_temp));
             block
         }
         _ => {
