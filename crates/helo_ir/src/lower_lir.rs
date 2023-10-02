@@ -9,22 +9,35 @@ use helo_parse::errors::ManyError;
 use helo_runtime::byte_code;
 
 use byte_code::Instruction;
+use helo_runtime::executable;
 
 pub struct FunctionTable {
     functions: HashMap<lir::FunctionId, byte_code::FunctionAddr>,
+    names: Vec<(byte_code::FunctionAddr, byte_code::StrAddr)>,
 }
 
 impl FunctionTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            names: Vec::new(),
         }
     }
     pub fn get(&self, fid: lir::FunctionId) -> Option<byte_code::FunctionAddr> {
         self.functions.get(&fid).copied()
     }
-    pub fn insert(&mut self, fid: lir::FunctionId, addr: byte_code::FunctionAddr) {
+    pub fn insert(
+        &mut self,
+        fid: lir::FunctionId,
+        addr: byte_code::FunctionAddr,
+        name: byte_code::StrAddr,
+    ) {
         self.functions.insert(fid, addr);
+        self.names.push((addr, name));
+    }
+
+    pub fn to_symbols(self) -> executable::Symbols {
+        executable::Symbols::new(self.names)
     }
 }
 
@@ -45,6 +58,7 @@ pub fn lower_function(
             e.push(errors::TooLongCode { current_len: addr });
         }
         let addr = byte_code::FunctionAddr::from(addr as u32);
+        functions.insert(fid, addr, str_index[f.name]);
         lower_block(
             f.body,
             &f.blocks,

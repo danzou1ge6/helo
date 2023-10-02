@@ -28,3 +28,7 @@ impl TooLongJump {
 pub struct TooLongCode {
     pub current_len: usize,
 }
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("No function `main` found, which is the entry point of the program.")]
+pub struct MainNotFound {}

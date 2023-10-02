@@ -200,6 +200,7 @@ pub fn lower_function<'s>(
             blocks,
             arity: f.arity,
             meta: f.meta.clone(),
+            name: f.name,
         },
     )
 }

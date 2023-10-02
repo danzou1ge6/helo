@@ -42,6 +42,7 @@ pub fn lower_function<'s>(
 ) -> ir::Function {
     let f = symbols.function(fid);
     let mut lower_ctx = Context::new();
+    let f_name_id = str_table.add(fid.clone());
     lower_ctx.with_new_function(f.local_cnt, f.captures.len(), |lower_ctx| {
         let body = lower_expr(f.body, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
         ir::Function {
@@ -49,6 +50,7 @@ pub fn lower_function<'s>(
             arity: f.type_.params.len(),
             body,
             meta: f.meta.clone(),
+            name: f_name_id,
         }
     })
 }

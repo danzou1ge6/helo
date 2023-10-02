@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use crate::errors;
 use crate::ir;
+
 use helo_runtime::byte_code;
 use helo_runtime::executable;
 
@@ -343,6 +345,7 @@ pub struct Function {
     pub blocks: BlockHeap,
     pub arity: usize,
     pub meta: helo_parse::ast::Meta,
+    pub name: ir::StrId,
 }
 
 pub struct FunctionTable {
@@ -351,6 +354,12 @@ pub struct FunctionTable {
 }
 
 impl FunctionTable {
+    pub fn new() -> Self {
+        Self {
+            tab: HashMap::new(),
+            store: Vec::new(),
+        }
+    }
     pub fn get(&self, id: &ir::FunctionId) -> Option<FunctionId> {
         self.tab.get(id).map(|i| *i)
     }
@@ -360,18 +369,29 @@ impl FunctionTable {
         self.tab.insert(fid, id);
         id
     }
-    pub fn to_list(self) -> FunctionList {
-        FunctionList { v: self.store }
+    pub fn to_list(self) -> Result<FunctionList, errors::MainNotFound> {
+        self.tab
+            .get("main")
+            .map_or(Err(errors::MainNotFound {}), |main_id| {
+                Ok(FunctionList {
+                    v: self.store,
+                    main_id: *main_id,
+                })
+            })
     }
 }
 
 pub struct FunctionList {
     v: Vec<Function>,
+    main_id: FunctionId,
 }
 
 impl FunctionList {
     pub fn get(&self, id: FunctionId) -> Option<&Function> {
         self.v.get(id.0)
+    }
+    pub fn main_id(&self) -> FunctionId {
+        self.main_id
     }
 }
 

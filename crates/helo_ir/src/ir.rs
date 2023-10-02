@@ -28,6 +28,7 @@ pub struct Function {
     pub arity: usize,
     pub body: ExprId,
     pub meta: helo_parse::ast::Meta,
+    pub name: StrId,
 }
 
 use helo_parse::ast;

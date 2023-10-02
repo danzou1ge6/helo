@@ -4,7 +4,7 @@ use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
 
-pub fn infer_expr<'s>(
+fn infer_expr<'s>(
     expr_id: ast::ExprId,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
@@ -120,7 +120,7 @@ pub fn infer_expr<'s>(
     typed_expr
 }
 
-pub fn infer_expr_many<'s, 'a>(
+fn infer_expr_many<'s, 'a>(
     expr_ids: impl Iterator<Item = &'a ast::ExprId>,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
@@ -600,7 +600,7 @@ fn infer_make_closure<'s>(
     }
 }
 
-pub fn infer_pattern_type<'s>(
+fn infer_pattern_type<'s>(
     pattern: &ast::Pattern<'s>,
     symbols: &ast::Symbols<'s>,
     inferer: &mut crate::inferer::Inferer<'s>,
@@ -770,7 +770,7 @@ fn infer_captured<'s>(
 }
 
 /// Infer type of a function and return its signature renamed
-pub fn infer_function_type_renamed<'s>(
+fn infer_function_type_renamed<'s>(
     name: &str,
     name_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
