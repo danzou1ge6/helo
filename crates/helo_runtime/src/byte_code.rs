@@ -5,9 +5,9 @@ use helo_macro::{ChunkReaderReadArgs, Emit, ToOpCode};
 /// Takes 1 bytes
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct RegisterId(pub(crate) u8);
-/// Takes 3 bytes
+/// Takes 4 bytes
 #[derive(PartialEq, Eq, Clone, Copy)]
-pub struct StrId(pub(crate) u32);
+pub struct StrAddr(pub(crate) u32);
 /// Take 2 bytes
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct BuiltinId(pub(crate) u16);
@@ -21,11 +21,8 @@ impl From<u8> for RegisterId {
     }
 }
 
-impl From<u32> for StrId {
+impl From<u32> for StrAddr {
     fn from(value: u32) -> Self {
-        if value > 2_u32.pow(24) - 1 {
-            panic!("StrId must be within 3 bytes")
-        }
         Self(value)
     }
 }
@@ -64,8 +61,8 @@ pub enum Instruction {
     JumpIfEqI64(RegisterId, u16),
     /// Jump if .0 equals string at .1.
     ///
-    /// 7 of 8 bytes
-    JumpIfEqStr(RegisterId, StrId, u16),
+    /// 8 of 8 bytes
+    JumpIfEqStr(RegisterId, StrAddr, u16),
     /// Jump if .0 equals bool at .1
     ///
     /// 5 of 8 bytes
@@ -148,8 +145,8 @@ pub enum Instruction {
     Int32(RegisterId, i32),
     /// 3 of 8 bytes
     Bool(RegisterId, bool),
-    /// 5 of 8 bytes
-    Str(RegisterId, StrId),
+    /// 6 of 8 bytes
+    Str(RegisterId, StrAddr),
     /// Load Immediate at following 8-bytes to .0
     ///
     /// 2 of 8 bytes
@@ -213,7 +210,9 @@ pub enum Instruction {
     Ret(RegisterId),
 
     /// Panic with static string at .0
-    Panic(StrId),
+    ///
+    /// 5 of 8 bytes
+    Panic(StrAddr),
 }
 
 #[derive(FromPrimitive, IntoPrimitive, PartialEq, Eq, Debug)]
@@ -331,16 +330,14 @@ impl FromBytes<8> for f64 {
     }
 }
 
-impl ToBytes<3> for StrId {
-    fn to_bytes(self) -> [u8; 3] {
-        let bytes = self.0.to_le_bytes();
-        [bytes[0], bytes[1], bytes[2]]
+impl ToBytes<4> for StrAddr {
+    fn to_bytes(self) -> [u8; 4] {
+        self.0.to_le_bytes()
     }
 }
 
-impl FromBytes<3> for StrId {
-    fn from_bytes(bytes: [u8; 3]) -> Self {
-        let bytes = [bytes[0], bytes[1], bytes[2], 0];
+impl FromBytes<4> for StrAddr {
+    fn from_bytes(bytes: [u8; 4]) -> Self {
         Self(u32::from_le_bytes(bytes))
     }
 }

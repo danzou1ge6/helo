@@ -31,6 +31,7 @@ impl FunctionTable {
 pub fn lower_function(
     fid: lir::FunctionId,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
@@ -48,6 +49,7 @@ pub fn lower_function(
             f.body,
             &f.blocks,
             lir_functions,
+            str_index,
             &f.meta,
             chunk,
             functions,
@@ -61,6 +63,7 @@ fn lower_block(
     block_id: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -72,6 +75,7 @@ fn lower_block(
             inst,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -85,6 +89,7 @@ fn lower_instruction(
     inst: &lir::Instruction,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -97,6 +102,7 @@ fn lower_instruction(
             &table,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -107,6 +113,7 @@ fn lower_instruction(
             *b,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -118,6 +125,7 @@ fn lower_instruction(
             *else_branch,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -129,6 +137,7 @@ fn lower_instruction(
             *b,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -140,6 +149,7 @@ fn lower_instruction(
             *b,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -151,6 +161,7 @@ fn lower_instruction(
             *b,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -160,6 +171,7 @@ fn lower_instruction(
             *b,
             blocks,
             lir_functions,
+            str_index,
             function_meta,
             chunk,
             functions,
@@ -167,22 +179,38 @@ fn lower_instruction(
         ),
         Apply(ret, callee, args) => lower_apply(*ret, *callee, &args, chunk),
         TailCall(ret, callee, args) => lower_tail_call(*ret, *callee, &args, chunk),
-        TailCallU(ret, callee, args) => {
-            lower_tail_call_u(*ret, *callee, &args, lir_functions, chunk, functions, e)
-        }
+        TailCallU(ret, callee, args) => lower_tail_call_u(
+            *ret,
+            *callee,
+            &args,
+            lir_functions,
+            str_index,
+            chunk,
+            functions,
+            e,
+        ),
         CallBuiltin(ret, callee, args) => lower_call_builtin(*ret, *callee, &args, chunk),
-        Call(ret, callee, args) => {
-            lower_call(*ret, *callee, &args, lir_functions, chunk, functions, e)
-        }
+        Call(ret, callee, args) => lower_call(
+            *ret,
+            *callee,
+            &args,
+            lir_functions,
+            str_index,
+            chunk,
+            functions,
+            e,
+        ),
         Int(to, v) => lower_int(*to, *v, chunk),
         Float(to, v) => lower_float(*to, v.parse().unwrap(), chunk),
         Bool(to, v) => lower_bool(*to, *v, chunk),
-        Str(to, v) => lower_str(*to, *v, chunk),
+        Str(to, v) => lower_str(*to, *v, str_index, chunk),
         Push(to, from, args) => lower_push(*to, *from, &args, chunk),
-        Function(to, fid) => lower_function_inst(*to, *fid, lir_functions, chunk, functions, e),
+        Function(to, fid) => {
+            lower_function_inst(*to, *fid, lir_functions, str_index, chunk, functions, e)
+        }
         Buitltin(to, bid) => lower_builtin(*to, *bid, chunk),
         Field(to, from, n) => lower_field(*to, *from, *n, chunk),
-        Panic(s) => lower_panic(*s, chunk),
+        Panic(s) => lower_panic(*s, str_index, chunk),
         Tagged(to, tag, args) => lower_tagged(*to, *tag, &args, chunk),
         Mov(to, from) => lower_mov(*to, *from, chunk),
         Ret(r) => lower_ret(*r, chunk),
@@ -208,6 +236,7 @@ fn lower_branch_and_fill_back(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -219,6 +248,7 @@ fn lower_branch_and_fill_back(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -238,6 +268,7 @@ fn lower_jump_table(
     table: &[lir::BlockId],
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -259,6 +290,7 @@ fn lower_jump_table(
                 *b,
                 blocks,
                 lir_functions,
+                str_index,
                 function_meta,
                 chunk,
                 functions,
@@ -281,6 +313,7 @@ fn lower_jump_if(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -294,6 +327,7 @@ fn lower_jump_if(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -307,6 +341,7 @@ fn lower_jump_if_else(
     else_branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -321,6 +356,7 @@ fn lower_jump_if_else(
         else_branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -330,6 +366,7 @@ fn lower_jump_if_else(
         then_branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -351,32 +388,36 @@ fn lower_jump_if_eq_int(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
-    let (inst, fill_back_addr) = if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
-        (
-            Instruction::JumpIfEqI32(test.register(), value as i32, 0),
-            byte_code::OpCode::JUMP_IF_EQ_I32.jump_distance_offset() + chunk.len(),
-        )
+    let inst_addr = chunk.len();
+    let fill_back_addr = if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
+        Instruction::JumpIfEqI32(test.register(), value as i32, 0).emit(chunk);
+        inst_addr + byte_code::OpCode::JUMP_IF_EQ_I32.jump_distance_offset()
     } else {
-        (
-            Instruction::JumpIfEqI64(test.register(), 0, value),
-            byte_code::OpCode::JUMP_IF_EQ_I64.jump_distance_offset() + chunk.len(),
-        )
+        Instruction::JumpIfEqI64(test.register(), 0).emit(chunk);
+        chunk.writer().push(value);
+        inst_addr + byte_code::OpCode::JUMP_IF_EQ_I64.jump_distance_offset()
     };
-
-    lower_branch_and_fill_back(
-        inst,
-        fill_back_addr,
+    let branch_addr = lower_block(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
+        e,
+    );
+    fill_back_jump(
+        branch_addr - inst_addr,
+        fill_back_addr,
+        chunk,
+        function_meta,
         e,
     );
 }
@@ -387,12 +428,13 @@ fn lower_jump_if_eq_str(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
-    let inst = Instruction::JumpIfEqStr(test.register(), value.byte_code(), 0);
+    let inst = Instruction::JumpIfEqStr(test.register(), str_index[value], 0);
     let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_STR.jump_distance_offset() + chunk.len();
 
     lower_branch_and_fill_back(
@@ -401,6 +443,7 @@ fn lower_jump_if_eq_str(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -414,6 +457,7 @@ fn lower_jump_if_eq_bool(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -428,6 +472,7 @@ fn lower_jump_if_eq_bool(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -439,6 +484,7 @@ fn lower_jump(
     branch: lir::BlockId,
     blocks: &lir::BlockHeap,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
@@ -448,6 +494,7 @@ fn lower_jump(
         branch,
         blocks,
         lir_functions,
+        str_index,
         function_meta,
         chunk,
         functions,
@@ -527,12 +574,13 @@ fn lower_tail_call_u(
     callee: lir::FunctionId,
     args: &[lir::TempId],
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
     let ret = ret.register();
-    let callee = lower_function(callee, lir_functions, chunk, functions, e);
+    let callee = lower_function(callee, lir_functions, str_index, chunk, functions, e);
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
@@ -576,12 +624,13 @@ fn lower_call(
     callee: lir::FunctionId,
     args: &[lir::TempId],
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
     let ret = ret.register();
-    let callee = lower_function(callee, lir_functions, chunk, functions, e);
+    let callee = lower_function(callee, lir_functions, str_index, chunk, functions, e);
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
@@ -601,24 +650,30 @@ fn lower_call(
 
 fn lower_int(to: lir::TempId, value: i64, chunk: &mut byte_code::Chunk) {
     let to = to.register();
-    let inst = if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
-        Instruction::Int32(to, value as i32)
+    if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
+        Instruction::Int32(to, value as i32).emit(chunk);
     } else {
-        Instruction::Int64(to, value)
+        Instruction::Int64(to).emit(chunk);
+        chunk.writer().push(value).finish();
     };
-    inst.emit(chunk);
 }
 
 fn lower_float(to: lir::TempId, value: f64, chunk: &mut byte_code::Chunk) {
-    Instruction::Float(to.register(), value).emit(chunk);
+    Instruction::Float(to.register()).emit(chunk);
+    chunk.writer().push(value).finish();
 }
 
 fn lower_bool(to: lir::TempId, value: bool, chunk: &mut byte_code::Chunk) {
     Instruction::Bool(to.register(), value).emit(chunk);
 }
 
-fn lower_str(to: lir::TempId, value: ir::StrId, chunk: &mut byte_code::Chunk) {
-    Instruction::Str(to.register(), value.byte_code()).emit(chunk);
+fn lower_str(
+    to: lir::TempId,
+    value: ir::StrId,
+    str_index: &lir::StrIndex,
+    chunk: &mut byte_code::Chunk,
+) {
+    Instruction::Str(to.register(), str_index[value]).emit(chunk);
 }
 
 fn lower_push(
@@ -662,13 +717,14 @@ fn lower_function_inst(
     to: lir::TempId,
     fid: lir::FunctionId,
     lir_functions: &lir::FunctionList,
+    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) {
     Instruction::Function(
         to.register(),
-        lower_function(fid, lir_functions, chunk, functions, e),
+        lower_function(fid, lir_functions, str_index, chunk, functions, e),
     )
     .emit(chunk);
 }
@@ -681,8 +737,8 @@ fn lower_field(to: lir::TempId, from: lir::TempId, n: usize, chunk: &mut byte_co
     Instruction::Field(to.register(), from.register(), n as u8).emit(chunk);
 }
 
-fn lower_panic(str_id: ir::StrId, chunk: &mut byte_code::Chunk) {
-    Instruction::Panic(str_id.byte_code()).emit(chunk)
+fn lower_panic(str_id: ir::StrId, str_index: &lir::StrIndex, chunk: &mut byte_code::Chunk) {
+    Instruction::Panic(str_index[str_id]).emit(chunk)
 }
 
 fn lower_tagged(to: lir::TempId, tag: u8, args: &[lir::TempId], chunk: &mut byte_code::Chunk) {

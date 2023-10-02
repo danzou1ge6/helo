@@ -108,6 +108,9 @@ impl StrList {
     pub fn get(&self, id: StrId) -> &str {
         &self.v[id.0]
     }
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.v.iter().map(|x| &x[..])
+    }
 }
 
 pub use ast::{CapturedId, FunctionId};

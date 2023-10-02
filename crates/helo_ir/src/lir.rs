@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::ir;
 use helo_runtime::byte_code;
+use helo_runtime::executable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TempId(pub(crate) usize);
@@ -45,16 +46,6 @@ impl TempId {
             byte_code::RegisterId::from(self.0 as u8)
         } else {
             panic!("TempId out of range of 256")
-        }
-    }
-}
-
-impl StrId {
-    pub fn byte_code(self) -> byte_code::StrId {
-        if self.0 <= 2_usize.pow(24) - 1 {
-            byte_code::StrId::from(self.0 as u32)
-        } else {
-            panic!("StrId out of range of 3 bytes")
         }
     }
 }
@@ -381,5 +372,22 @@ pub struct FunctionList {
 impl FunctionList {
     pub fn get(&self, id: FunctionId) -> Option<&Function> {
         self.v.get(id.0)
+    }
+}
+
+pub struct StrIndex(Vec<byte_code::StrAddr>);
+
+impl StrIndex {
+    pub fn new(list: ir::StrList) -> (Self, executable::StrChunk) {
+        let mut chunk = executable::StrChunk::new();
+        let index = list.iter().map(|s| chunk.push(s).unwrap()).collect();
+        (Self(index), chunk)
+    }
+}
+
+impl std::ops::Index<StrId> for StrIndex {
+    type Output = byte_code::StrAddr;
+    fn index(&self, index: StrId) -> &Self::Output {
+        &self.0[index.0]
     }
 }
