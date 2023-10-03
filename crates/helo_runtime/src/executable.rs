@@ -30,6 +30,13 @@ impl Symbols {
     pub fn find(&self, addr: byte_code::FunctionAddr) -> byte_code::StrAddr {
         self.f.iter().find(|(f_addr, _)| *f_addr == addr).unwrap().1
     }
+    pub fn try_find(&self, addr: byte_code::FunctionAddr) -> Option<byte_code::StrAddr> {
+        self.f
+            .iter()
+            .find(|(f_addr, _)| *f_addr == addr)
+            .map(|(_, name_addr)| name_addr)
+            .copied()
+    }
 }
 
 pub struct Executable {

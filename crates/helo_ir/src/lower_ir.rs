@@ -29,6 +29,16 @@ impl Compiler {
     fn ret_temp(&self) -> lir::TempId {
         lir::TempId(self.local_cnt)
     }
+    fn temp_cnt(&self) -> usize {
+        self.temp_cnt
+    }
+}
+
+fn tie_loose_ends(ends: Vec<lir::BlockId>, blocks: &mut lir::BlockHeap) -> lir::BlockId {
+    let next_block = blocks.new_block();
+    ends.into_iter()
+        .for_each(|b| blocks[b].push(lir::Instruction::Jump(next_block)));
+    next_block
 }
 
 fn lower_expr<'s>(
@@ -37,11 +47,11 @@ fn lower_expr<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> lir::BlockId {
     use ir::ExprNode::*;
     match ir_nodes[id].node() {
         LetBind { local, value, in_ } => lower_let_bind(
@@ -57,57 +67,69 @@ fn lower_expr<'s>(
             functions,
             compiler,
         ),
-        SwitchTag(operand, arms, default) => lower_switch_tag(
-            to,
-            *operand,
-            arms,
-            *default,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            block,
-            blocks,
-            functions,
-            compiler,
-        ),
-        Switch(operand, arms, default) => lower_switch(
-            to,
-            *operand,
-            arms,
-            *default,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            block,
-            blocks,
-            functions,
-            compiler,
-        ),
-        Cond(arms, default) => lower_cond(
-            to,
-            arms,
-            *default,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            block,
-            blocks,
-            functions,
-            compiler,
-        ),
-        IfElse { test, then, else_ } => lower_if_else(
-            to,
-            *test,
-            *then,
-            *else_,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            block,
-            blocks,
-            functions,
-            compiler,
-        ),
+        SwitchTag(operand, arms, default) => {
+            let loose_ends = lower_switch_tag(
+                to,
+                *operand,
+                arms,
+                *default,
+                ir_nodes,
+                ir_functions,
+                builtins,
+                block,
+                blocks,
+                functions,
+                compiler,
+            );
+            tie_loose_ends(loose_ends, blocks)
+        }
+        Switch(operand, arms, default) => {
+            let loose_ends = lower_switch(
+                to,
+                *operand,
+                arms,
+                *default,
+                ir_nodes,
+                ir_functions,
+                builtins,
+                block,
+                blocks,
+                functions,
+                compiler,
+            );
+            tie_loose_ends(loose_ends, blocks)
+        }
+        Cond(arms, default) => {
+            let loose_ends = lower_cond(
+                to,
+                arms,
+                *default,
+                ir_nodes,
+                ir_functions,
+                builtins,
+                block,
+                blocks,
+                functions,
+                compiler,
+            );
+            tie_loose_ends(loose_ends, blocks)
+        }
+        IfElse { test, then, else_ } => {
+            let loose_ends = lower_if_else(
+                to,
+                *test,
+                *then,
+                *else_,
+                ir_nodes,
+                ir_functions,
+                builtins,
+                block,
+                blocks,
+                functions,
+                compiler,
+            );
+            tie_loose_ends(loose_ends, blocks)
+        }
         Call { callee, args } => lower_call(
             to,
             *callee,
@@ -120,7 +142,7 @@ fn lower_expr<'s>(
             functions,
             compiler,
         ),
-        Immediate(im) => lower_immediate(to, im.clone(), block),
+        Immediate(im) => lower_immediate(to, im.clone(), block, blocks),
         MakeClosure(fid, captures) => lower_make_closure(
             to,
             fid,
@@ -129,17 +151,25 @@ fn lower_expr<'s>(
             ir_functions,
             builtins,
             block,
+            blocks,
             functions,
             compiler,
         ),
-        Local(local) => lower_local(to, *local, block, compiler),
-        ThisClosure(local) => lower_local(to, *local, block, compiler),
-        UserFunction(fid) => {
-            lower_user_function(to, fid, ir_nodes, ir_functions, builtins, block, functions)
-        }
-        Builtin(fid) => lower_builtin(to, fid, builtins, block),
+        Local(local) => lower_local(to, *local, block, blocks, compiler),
+        ThisClosure(local) => lower_local(to, *local, block, blocks, compiler),
+        UserFunction(fid) => lower_user_function(
+            to,
+            fid,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+        ),
+        Builtin(fid) => lower_builtin(to, fid, builtins, block, blocks),
         VariantField(local, pos) | TupleField(local, pos) => {
-            lower_field(to, *local, *pos, block, compiler)
+            lower_field(to, *local, *pos, block, blocks, compiler)
         }
         MakeTagged(tag, v) => lower_make_tagged(
             to,
@@ -165,7 +195,7 @@ fn lower_expr<'s>(
             functions,
             compiler,
         ),
-        Panic(s) => lower_panic(*s, block),
+        Panic(s) => lower_panic(*s, block, blocks),
     }
 }
 
@@ -180,29 +210,31 @@ pub fn lower_function<'s>(
         return id;
     }
 
-    let f = ir_functions.get(fid).unwrap();
-    let mut compiler = Compiler::new(f.local_cnt, f.arity, fid.clone());
-    let mut blocks = lir::BlockHeap::new();
-    let body = lower_expr_new_block(
-        compiler.ret_temp(),
-        f.body,
-        ir_nodes,
-        ir_functions,
-        builtins,
-        &mut blocks,
-        functions,
-        &mut compiler,
-    );
-    functions.insert(
-        fid.clone(),
+    functions.insert(fid.clone(), move |_, functions| {
+        let f = ir_functions.get(fid).unwrap();
+        let mut compiler = Compiler::new(f.local_cnt, f.arity, fid.clone());
+        let mut blocks = lir::BlockHeap::new();
+
+        let (body, ret_block) = lower_expr_new_block(
+            compiler.ret_temp(),
+            f.body,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            &mut blocks,
+            functions,
+            &mut compiler,
+        );
+        blocks[ret_block].push(lir::Instruction::Ret(compiler.ret_temp()));
         lir::Function {
             body,
             blocks,
             arity: f.arity,
             meta: f.meta.clone(),
             name: f.name,
-        },
-    )
+            temp_cnt: compiler.temp_cnt(),
+        }
+    })
 }
 
 fn lower_expr_new_block<'s>(
@@ -214,20 +246,20 @@ fn lower_expr_new_block<'s>(
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::BlockId {
-    let block = lir::Block::new();
-    let block = lower_expr(
+) -> (lir::BlockId, lir::BlockId) {
+    let begin = blocks.new_block();
+    let end = lower_expr(
         to,
         id,
         ir_nodes,
         ir_functions,
         builtins,
-        block,
+        begin,
         blocks,
         functions,
         compiler,
     );
-    blocks.push(block)
+    (begin, end)
 }
 
 fn lower_let_bind<'s>(
@@ -238,11 +270,11 @@ fn lower_let_bind<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> lir::BlockId {
     let temp_id = compiler.local_id_to_temp(local);
     let block = lower_expr(
         temp_id,
@@ -266,7 +298,6 @@ fn lower_let_bind<'s>(
         functions,
         compiler,
     );
-
     block
 }
 
@@ -278,11 +309,11 @@ fn lower_switch_tag<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> Vec<lir::BlockId> {
     if arms.len() == 0 {
         let block = lower_expr(
             to,
@@ -295,7 +326,7 @@ fn lower_switch_tag<'s>(
             functions,
             compiler,
         );
-        return block;
+        return vec![block];
     }
 
     let tag_cnt = arms.first().unwrap().0.possibilities();
@@ -305,7 +336,7 @@ fn lower_switch_tag<'s>(
     });
 
     let operand_temp = compiler.new_temp();
-    let mut block = lower_expr(
+    let block = lower_expr(
         to,
         operand,
         ir_nodes,
@@ -318,7 +349,7 @@ fn lower_switch_tag<'s>(
     );
 
     let mut expr_map = HashMap::new();
-    let cases = cases
+    let (branches, branches_end) = cases
         .into_iter()
         .map(|e| {
             *expr_map.entry(e).or_insert_with(|| {
@@ -334,12 +365,11 @@ fn lower_switch_tag<'s>(
                 )
             })
         })
-        .collect();
+        .unzip();
 
     use lir::Instruction::*;
-    block.push(JumpTable(operand_temp, cases));
-
-    block
+    blocks[block].push(JumpTable(operand_temp, branches));
+    branches_end
 }
 
 fn lower_switch<'s>(
@@ -350,16 +380,16 @@ fn lower_switch<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> Vec<lir::BlockId> {
     use ir::Immediate;
     use lir::Instruction::*;
 
     let operand_temp = compiler.new_temp();
-    let mut block = lower_expr(
+    let block = lower_expr(
         to,
         operand,
         ir_nodes,
@@ -373,29 +403,34 @@ fn lower_switch<'s>(
 
     let mut expr_map = HashMap::new();
 
-    arms.iter().for_each(|(value, e)| {
-        let e_block = *expr_map.entry(e).or_insert_with(|| {
-            lower_expr_new_block(
-                to,
-                *e,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                blocks,
-                functions,
-                compiler,
-            )
-        });
+    let mut branches_end = arms
+        .iter()
+        .map(|(value, e)| {
+            let (branch, branch_end) = *expr_map.entry(e).or_insert_with(|| {
+                lower_expr_new_block(
+                    to,
+                    *e,
+                    ir_nodes,
+                    ir_functions,
+                    builtins,
+                    blocks,
+                    functions,
+                    compiler,
+                )
+            });
 
-        block.push(match value {
-            Immediate::Bool(b) => JumpIfEqBool(operand_temp, *b, e_block),
-            Immediate::Int(i) => JumpIfEqInt(operand_temp, *i, e_block),
-            Immediate::Str(s) => JumpIfEqStr(operand_temp, *s, e_block),
-            Immediate::Float(_) => unreachable!(),
-        });
-    });
+            blocks[block].push(match value {
+                Immediate::Bool(b) => JumpIfEqBool(operand_temp, *b, branch),
+                Immediate::Int(i) => JumpIfEqInt(operand_temp, *i, branch),
+                Immediate::Str(s) => JumpIfEqStr(operand_temp, *s, branch),
+                Immediate::Float(_) => unreachable!(),
+            });
 
-    let default_block = *expr_map.entry(&default).or_insert_with(|| {
+            branch_end
+        })
+        .collect::<Vec<_>>();
+
+    let (default_branch, default_branch_end) = *expr_map.entry(&default).or_insert_with(|| {
         lower_expr_new_block(
             to,
             default,
@@ -408,9 +443,10 @@ fn lower_switch<'s>(
         )
     });
 
-    block.push(Jump(default_block));
+    blocks[block].push(Jump(default_branch));
 
-    block
+    branches_end.push(default_branch_end);
+    branches_end
 }
 
 fn lower_cond<'s>(
@@ -420,18 +456,19 @@ fn lower_cond<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> Vec<lir::BlockId> {
     let mut expr_map = HashMap::new();
 
     use lir::Instruction::*;
 
-    let mut block = arms.iter().fold(block, |mut block, (cond, e)| {
+    let mut branches_end = Vec::new();
+    let block = arms.iter().fold(block, |block, (cond, e)| {
         let test = compiler.new_temp();
-        block = lower_expr(
+        let block = lower_expr(
             test,
             *cond,
             ir_nodes,
@@ -443,7 +480,7 @@ fn lower_cond<'s>(
             compiler,
         );
 
-        let e_block = *expr_map.entry(e).or_insert_with(|| {
+        let (branch, branch_end) = *expr_map.entry(e).or_insert_with(|| {
             lower_expr_new_block(
                 to,
                 *e,
@@ -456,11 +493,12 @@ fn lower_cond<'s>(
             )
         });
 
-        block.push(JumpIf(test, e_block));
+        blocks[block].push(JumpIf(test, branch));
+        branches_end.push(branch_end);
         block
     });
 
-    let default_block = *expr_map.entry(&default).or_insert_with(|| {
+    let (default_branch, default_branch_end) = *expr_map.entry(&default).or_insert_with(|| {
         lower_expr_new_block(
             to,
             default,
@@ -472,9 +510,11 @@ fn lower_cond<'s>(
             compiler,
         )
     });
-    block.push(Jump(default_block));
 
-    block
+    blocks[block].push(Jump(default_branch));
+    branches_end.push(default_branch_end);
+
+    branches_end
 }
 
 fn lower_if_else<'s>(
@@ -485,13 +525,13 @@ fn lower_if_else<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> Vec<lir::BlockId> {
     let test_temp = compiler.new_temp();
-    let mut block = lower_expr(
+    let block = lower_expr(
         test_temp,
         test,
         ir_nodes,
@@ -503,7 +543,7 @@ fn lower_if_else<'s>(
         compiler,
     );
 
-    let then_block = lower_expr_new_block(
+    let (then_branch, then_branch_end) = lower_expr_new_block(
         to,
         then,
         ir_nodes,
@@ -513,7 +553,7 @@ fn lower_if_else<'s>(
         functions,
         compiler,
     );
-    let else_block = lower_expr_new_block(
+    let (else_branch, else_branch_end) = lower_expr_new_block(
         to,
         else_,
         ir_nodes,
@@ -525,9 +565,9 @@ fn lower_if_else<'s>(
     );
 
     use lir::Instruction::*;
-    block.push(JumpIfElse(test_temp, then_block, else_block));
+    blocks[block].push(JumpIfElse(test_temp, then_branch, else_branch));
 
-    block
+    vec![then_branch_end, else_branch_end]
 }
 
 fn lower_call<'s>(
@@ -537,11 +577,11 @@ fn lower_call<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> lir::BlockId {
     use lir::Instruction::*;
 
     let args_temp: Vec<_> = args.iter().map(|_| compiler.new_temp()).collect();
@@ -570,30 +610,36 @@ fn lower_call<'s>(
         // Optimization: we don't load a builtin and then apply arguments to it when we have enough arguments
         // Instead, we call the builtin directly.
         ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name) => {
-            let mut block = emit_arguments!(block);
-            block.push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
+            let block = emit_arguments!(block);
+            blocks[block].push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
             block
         }
         // Optimization: Tail call of non-closure function
-        ir::ExprNode::UserFunction(fid) if *fid == compiler.fid && args.len() == compiler.arity => {
+        ir::ExprNode::UserFunction(fid)
+            if *fid == compiler.fid
+                && args.len() == compiler.arity
+                && to == compiler.ret_temp() =>
+        {
             let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
-            let mut block = emit_arguments!(block);
-            block.push(TailCallU(to, lir_fid, args_temp));
+            let block = emit_arguments!(block);
+            blocks[block].push(TailCallU(to, lir_fid, args_temp));
             block
         }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
         // Instead, we call this user function directly
         ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
-            let mut block = emit_arguments!(block);
+            let block = emit_arguments!(block);
             let lir_fid = lower_function(name, ir_nodes, ir_functions, builtins, functions);
-            block.push(Call(to, lir_fid, args_temp));
+            blocks[block].push(Call(to, lir_fid, args_temp));
             block
         }
         // Optimization: Tall call of closure
-        ir::ExprNode::ThisClosure(local) if args.len() == compiler.arity => {
+        ir::ExprNode::ThisClosure(local)
+            if args.len() == compiler.arity && to == compiler.ret_temp() =>
+        {
             let callee_temp = compiler.local_id_to_temp(*local);
-            let mut block = emit_arguments!(block);
-            block.push(TailCall(to, callee_temp, args_temp));
+            let block = emit_arguments!(block);
+            blocks[block].push(TailCall(to, callee_temp, args_temp));
             block
         }
         _ => {
@@ -609,14 +655,19 @@ fn lower_call<'s>(
                 functions,
                 compiler,
             );
-            let mut block = emit_arguments!(block);
-            block.push(Apply(to, callee_temp, args_temp));
+            let block = emit_arguments!(block);
+            blocks[block].push(Apply(to, callee_temp, args_temp));
             block
         }
     }
 }
 
-fn lower_immediate<'s>(to: lir::TempId, imme: ir::Immediate, mut block: lir::Block) -> lir::Block {
+fn lower_immediate<'s>(
+    to: lir::TempId,
+    imme: ir::Immediate,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+) -> lir::BlockId {
     use ir::Immediate;
     use lir::Instruction::*;
 
@@ -627,7 +678,7 @@ fn lower_immediate<'s>(to: lir::TempId, imme: ir::Immediate, mut block: lir::Blo
         Immediate::Bool(b) => Bool(to, b),
     };
 
-    block.push(inst);
+    blocks[block].push(inst);
     block
 }
 
@@ -638,10 +689,11 @@ fn lower_make_closure<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    mut block: lir::Block,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> lir::BlockId {
     let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
     let temps: Vec<_> = captures
         .iter()
@@ -650,19 +702,19 @@ fn lower_make_closure<'s>(
 
     use lir::Instruction::*;
     let f_temp = compiler.new_temp();
-    block.push(Function(f_temp, lir_fid));
-    block.push(Push(to, f_temp, temps));
-
+    blocks[block].push(Function(f_temp, lir_fid));
+    blocks[block].push(Push(to, f_temp, temps));
     block
 }
 
 fn lower_local<'s>(
     to: lir::TempId,
     local: ir::LocalId,
-    mut block: lir::Block,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
     compiler: &mut Compiler,
-) -> lir::Block {
-    block.push(lir::Instruction::Mov(to, compiler.local_id_to_temp(local)));
+) -> lir::BlockId {
+    blocks[block].push(lir::Instruction::Mov(to, compiler.local_id_to_temp(local)));
     block
 }
 
@@ -672,11 +724,12 @@ fn lower_user_function<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    mut block: lir::Block,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
-) -> lir::Block {
+) -> lir::BlockId {
     let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
-    block.push(lir::Instruction::Function(to, lir_fid));
+    blocks[block].push(lir::Instruction::Function(to, lir_fid));
     block
 }
 
@@ -684,10 +737,11 @@ fn lower_builtin<'s>(
     to: lir::TempId,
     fid: &ir::FunctionId,
     builtins: &lir::Builtins,
-    mut block: lir::Block,
-) -> lir::Block {
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+) -> lir::BlockId {
     let builtin_id = builtins.id_by_name(fid);
-    block.push(lir::Instruction::Buitltin(to, builtin_id));
+    blocks[block].push(lir::Instruction::Buitltin(to, builtin_id));
     block
 }
 
@@ -695,10 +749,11 @@ fn lower_field<'s>(
     to: lir::TempId,
     local: ir::LocalId,
     field: usize,
-    mut block: lir::Block,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
     compiler: &mut Compiler,
-) -> lir::Block {
-    block.push(lir::Instruction::Field(
+) -> lir::BlockId {
+    blocks[block].push(lir::Instruction::Field(
         to,
         compiler.local_id_to_temp(local),
         field,
@@ -713,13 +768,13 @@ fn lower_make_tagged<'s>(
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::Builtins,
-    block: lir::Block,
+    block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::Block {
+) -> lir::BlockId {
     let fields_temp: Vec<_> = fields.iter().map(|_| compiler.new_temp()).collect();
-    let mut block = fields
+    let block = fields
         .iter()
         .copied()
         .zip(fields_temp.iter().copied())
@@ -737,11 +792,15 @@ fn lower_make_tagged<'s>(
             )
         });
 
-    block.push(lir::Instruction::Tagged(to, tag_code, fields_temp));
+    blocks[block].push(lir::Instruction::Tagged(to, tag_code, fields_temp));
     block
 }
 
-fn lower_panic<'s>(sid: ir::StrId, mut block: lir::Block) -> lir::Block {
-    block.push(lir::Instruction::Panic(sid));
+fn lower_panic<'s>(
+    sid: ir::StrId,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+) -> lir::BlockId {
+    blocks[block].push(lir::Instruction::Panic(sid));
     block
 }

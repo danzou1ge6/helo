@@ -11,11 +11,12 @@ pub struct Builtin {
     arity: usize,
 }
 
-const BUILTINS: [(&'static str, Builtin); 4] = [
+const BUILTINS: [(&'static str, Builtin); 5] = [
     ("+", Builtin { arity: 2 }),
     ("-", Builtin { arity: 2 }),
     ("*", Builtin { arity: 2 }),
     ("/", Builtin { arity: 2 }),
+    ("==", Builtin { arity: 2 }),
 ];
 
 impl Builtins {

@@ -255,6 +255,7 @@ impl Instruction {
     }
 }
 
+#[derive(Debug)]
 pub struct Block(Vec<Instruction>);
 
 impl std::ops::Index<usize> for Block {
@@ -290,6 +291,7 @@ impl Block {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockHeap(Vec<Block>);
 
 impl BlockHeap {
@@ -310,14 +312,19 @@ impl BlockHeap {
         idx: usize,
     ) -> Box<dyn Iterator<Item = (BlockId, usize)> + 'a> {
         use Instruction::*;
+        let seq_iter = if idx + 1 < self[block_id].len() {
+            vec![(block_id, idx + 1)].into_iter()
+        } else {
+            vec![].into_iter()
+        };
         match &self[block_id][idx] {
             Jump(b)
             | JumpIf(_, b)
             | JumpIfEqBool(_, _, b)
             | JumpIfEqInt(_, _, b)
-            | JumpIfEqStr(_, _, b) => Box::new([(*b, 0)].into_iter()),
-            JumpTable(_, branches) => Box::new(branches.iter().map(|b| (*b, 0))),
-            _ => Box::new([(block_id, idx + 1)].into_iter()),
+            | JumpIfEqStr(_, _, b) => Box::new([(*b, 0)].into_iter().chain(seq_iter)),
+            JumpTable(_, branches) => Box::new(branches.iter().map(|b| (*b, 0)).chain(seq_iter)),
+            _ => Box::new(seq_iter),
         }
     }
     pub fn execute_substitution(&mut self, subs: &impl TempSubstitution) {
@@ -325,6 +332,9 @@ impl BlockHeap {
             b.iter_mut()
                 .for_each(|inst| inst.execute_substitution(subs))
         }
+    }
+    pub fn new_block(&mut self) -> BlockId {
+        self.push(Block::new())
     }
 }
 
@@ -340,17 +350,19 @@ impl std::ops::IndexMut<BlockId> for BlockHeap {
     }
 }
 
+#[derive(Debug)]
 pub struct Function {
     pub body: BlockId,
     pub blocks: BlockHeap,
     pub arity: usize,
     pub meta: helo_parse::ast::Meta,
     pub name: ir::StrId,
+    pub temp_cnt: usize,
 }
 
 pub struct FunctionTable {
     tab: HashMap<ir::FunctionId, FunctionId>,
-    store: Vec<Function>,
+    store: Vec<Option<Function>>,
 }
 
 impl FunctionTable {
@@ -363,10 +375,18 @@ impl FunctionTable {
     pub fn get(&self, id: &ir::FunctionId) -> Option<FunctionId> {
         self.tab.get(id).map(|i| *i)
     }
-    pub fn insert(&mut self, fid: ir::FunctionId, f: Function) -> FunctionId {
+    pub fn insert(
+        &mut self,
+        fid: ir::FunctionId,
+        gen: impl FnOnce(FunctionId, &mut FunctionTable) -> Function,
+    ) -> FunctionId {
         let id = FunctionId(self.store.len());
-        self.store.push(f);
+        self.store.push(None);
         self.tab.insert(fid, id);
+
+        let f = gen(id, self);
+        self.store[id.0] = Some(f);
+
         id
     }
     pub fn to_list(self) -> Result<FunctionList, errors::MainNotFound> {
@@ -374,13 +394,14 @@ impl FunctionTable {
             .get("main")
             .map_or(Err(errors::MainNotFound {}), |main_id| {
                 Ok(FunctionList {
-                    v: self.store,
+                    v: self.store.into_iter().map(|x| x.unwrap()).collect(),
                     main_id: *main_id,
                 })
             })
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionList {
     v: Vec<Function>,
     main_id: FunctionId,
@@ -392,6 +413,9 @@ impl FunctionList {
     }
     pub fn main_id(&self) -> FunctionId {
         self.main_id
+    }
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Function> {
+        self.v.iter_mut()
     }
 }
 

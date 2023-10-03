@@ -1,6 +1,7 @@
 use helo_runtime::builtins as rt_builtins;
 use helo_runtime::{byte_code, executable};
 
+use crate::{elimination, lifetime};
 use crate::{ir, lir};
 use crate::{lower_ast, lower_ir, lower_lir};
 
@@ -105,6 +106,13 @@ pub fn compile_lir<'s>(
     }
     let f_list = lir_functions.to_list()?;
     Ok(f_list)
+}
+
+pub fn lir_transform(lir_functions: &mut lir::FunctionList) {
+    for f in lir_functions.iter_mut() {
+        elimination::common_expression_elimination(f.body, &mut f.blocks, f.temp_cnt);
+        lifetime::compress_temps(f.body, &mut f.blocks, f.temp_cnt);
+    }
 }
 
 pub fn compile_byte_code(
