@@ -51,7 +51,7 @@ impl std::fmt::Display for RegisterArray {
 
 const STR_TRUNC_LEN: usize = 128;
 
-fn trunc_str(s: &str) -> &str {
+pub fn trunc_str(s: &str) -> &str {
     if s.len() > STR_TRUNC_LEN {
         &s[0..STR_TRUNC_LEN]
     } else {
@@ -201,7 +201,7 @@ impl<'c> Iterator for RowIter<'c> {
                         .exe
                         .chunk
                         .fetch(self.ip + 8 + (i * 2) as u32)
-                        .read::<u16, _>();
+                        .read::<byte_code::JumpDistance, _>();
                     rows.push(mk_info_row(
                         self.ip + 8 + (i * 2) as u32,
                         delta.to_string(),

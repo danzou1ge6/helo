@@ -19,7 +19,7 @@ where
         .append(format!(" ({})", f.arity))
         .append(allocator.text(" ="))
         .append(allocator.hardline())
-        .append(pretty_ir(f.body, nodes, str_list, allocator).nest(2))
+        .append(pretty_ir(f.body, nodes, str_list, allocator).indent(2))
 }
 
 pub fn pretty_ir<'s, 'b, D, A>(
@@ -43,7 +43,7 @@ where
                     .text(local.to_string())
                     .append(allocator.text(" = "))
                     .append(pretty_ir(*value, nodes, str_list, allocator))
-                    .nest(2),
+                    .indent(2),
             )
             .append(allocator.space())
             .append("IN")
@@ -67,14 +67,14 @@ where
                         allocator.hardline(),
                     )
                     .align()
-                    .nest(2),
+                    .indent(2),
             )
             .append(allocator.hardline())
             .append(
                 allocator
                     .text("| _ -> ")
                     .append(pretty_ir(*default, nodes, str_list, allocator))
-                    .nest(2),
+                    .indent(2),
             ),
         Switch(operand, v, default) => allocator
             .text("SWITCH ")
@@ -93,14 +93,14 @@ where
                         allocator.hardline(),
                     )
                     .align()
-                    .nest(2),
+                    .indent(2),
             )
             .append(allocator.hardline())
             .append(
                 allocator
                     .text("| _ -> ")
                     .append(pretty_ir(*default, nodes, str_list, allocator))
-                    .nest(2),
+                    .indent(2),
             ),
         Cond(v, default) => allocator.text("COND").append(allocator.softline()).append(
             allocator
@@ -117,14 +117,14 @@ where
                             }),
                             allocator.hardline(),
                         )
-                        .nest(2),
+                        .indent(2),
                 )
                 .append(allocator.hardline())
                 .append(
                     allocator
                         .text("if true -> ")
                         .append(pretty_ir(*default, nodes, str_list, allocator))
-                        .nest(2),
+                        .indent(2),
                 )
                 .align(),
         ),
@@ -137,7 +137,7 @@ where
                 allocator
                     .softline()
                     .append(pretty_ir(*then, nodes, str_list, allocator))
-                    .nest(2),
+                    .indent(2),
             )
             .append(allocator.softline())
             .append("ELSE")
@@ -145,7 +145,7 @@ where
                 allocator
                     .softline()
                     .append(pretty_ir(*else_, nodes, str_list, allocator))
-                    .nest(2),
+                    .indent(2),
             ),
         Call { callee, args } => allocator
             .text("(")
@@ -158,7 +158,7 @@ where
                             .map(|arg| pretty_ir(*arg, nodes, str_list, allocator)),
                         allocator.softline(),
                     )
-                    .nest(2)
+                    .indent(2)
                     .group(),
             )
             .append(")")
@@ -166,7 +166,7 @@ where
         Immediate(im) => allocator.text(im.to_string(str_list)),
         MakeClosure(f, captures) => allocator
             .text("(MAKE_CLOSURE ")
-            .append(allocator.text(f.clone()).nest(2))
+            .append(allocator.text(f.clone()).indent(2))
             .append(allocator.space())
             .append(
                 allocator
@@ -174,7 +174,7 @@ where
                         captures.iter().map(|cap| allocator.text(cap.to_string())),
                         allocator.softline(),
                     )
-                    .nest(2)
+                    .indent(2)
                     .group(),
             )
             .append(")"),
@@ -194,14 +194,14 @@ where
                             .map(|elem| pretty_ir(*elem, nodes, str_list, allocator)),
                         allocator.softline(),
                     )
-                    .nest(2)
+                    .indent(2)
                     .group(),
             )
             .append(")"),
         MakeTagged(tag, elems) => allocator
             .text("(MAKE_TAGGED")
             .append(allocator.softline())
-            .append(allocator.text(tag.name().to_string()).nest(2))
+            .append(allocator.text(tag.name().to_string()).indent(2))
             .append(allocator.softline())
             .append(
                 allocator
@@ -211,7 +211,7 @@ where
                             .map(|elem| pretty_ir(*elem, nodes, str_list, allocator)),
                         allocator.softline(),
                     )
-                    .nest(2)
+                    .indent(2)
                     .group(),
             )
             .append(")"),
@@ -219,8 +219,236 @@ where
         Panic(msg) => allocator
             .text("(PANIC")
             .append(allocator.softline())
-            .append(allocator.text(str_list.get(*msg).to_string()).nest(2))
+            .append(allocator.text(str_list.get(*msg).to_string()).indent(2))
             .append(allocator.text(")"))
             .align(),
     }
+}
+
+use crate::lir;
+
+pub fn pretty_lir_instruction<'s, 'b, D, A>(
+    inst: &lir::Instruction,
+    str_list: &ir::StrList,
+    functions: &lir::FunctionList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    use lir::Instruction::*;
+    match inst {
+        Apply(ret, callee, args) => allocator
+            .text(format!("x{:<3} <- APPLY x{} ", ret, callee))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        TailCall(ret, callee, args) => allocator
+            .text(format!("x{:<3} <- TAIL_CALL x{} ", ret, callee))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        TailCallU(ret, callee, args) => {
+            let callee_name = functions.get(*callee).unwrap().name;
+            let callee_name = str_list.get(callee_name);
+            allocator
+                .text(format!(
+                    "x{:<3} <- TAIL_CALL_U f{}'{}' ",
+                    ret, callee, callee_name
+                ))
+                .append(
+                    allocator
+                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+                )
+        }
+        Call(ret, callee, args) => {
+            let callee_name = functions.get(*callee).unwrap().name;
+            let callee_name = str_list.get(callee_name);
+            allocator
+                .text(format!("x{:<3} <- CALL f{}'{}' ", ret, callee, callee_name))
+                .append(
+                    allocator
+                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+                )
+        }
+        CallBuiltin(ret, callee, args) => {
+            let callee_name = helo_runtime::builtins::Builtins::name_by_id(*callee);
+            allocator
+                .text(format!(
+                    "x{:<3} <- CALL_BUILTIN B{}'{}' ",
+                    ret, callee, callee_name
+                ))
+                .append(
+                    allocator
+                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+                )
+        }
+        Int(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
+        Bool(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
+        Float(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
+        Str(ret, value) => {
+            let s = str_list.get(*value);
+            allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, s))
+        }
+        Push(to, operand, args) => allocator
+            .text(format!("x{:<3} <- PUSH x{} ", to, operand))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        Function(ret, value) => {
+            let callee_name = functions.get(*value).unwrap().name;
+            let callee_name = str_list.get(callee_name);
+            allocator.text(format!("x{:<3} <- f{}'{}'", ret, value, callee_name))
+        }
+        Buitltin(ret, value) => {
+            let callee_name = helo_runtime::builtins::Builtins::name_by_id(*value);
+            allocator.text(format!("x{:<3} <- f{}'{}'", ret, value, callee_name))
+        }
+        Field(ret, operand, n) => allocator.text(format!("x{:<3} <- x{}~{}", ret, operand, n)),
+        Panic(value) => {
+            let s = str_list.get(*value);
+            allocator.text(format!("PANIC s{}'{}'", value, s))
+        }
+        Tagged(to, tag, args) => allocator
+            .text(format!("x{:<3} <- TAGGED {}", to, tag))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        Mov(to, from) => allocator.text(format!("x{:<3} <- x{}", to, from)),
+        Ret(t) => allocator.text(format!("RET x{}", t)),
+    }
+}
+
+pub fn pretty_lir_block<'s, 'b, D, A>(
+    block_id: lir::BlockId,
+    blocks: &lir::BlockHeap,
+    str_list: &ir::StrList,
+    functions: &lir::FunctionList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    allocator
+        .text(format!("Block {} [Predecessors ", block_id))
+        .append(allocator.intersperse(
+            blocks[block_id].predessorss().map(|b| format!("b{}", b)),
+            allocator.text(","),
+        ))
+        .append(allocator.text("]:"))
+        .append(allocator.hardline())
+        .append(
+            allocator
+                .intersperse(
+                    blocks[block_id]
+                        .iter()
+                        .map(|inst| pretty_lir_instruction(inst, str_list, functions, allocator)),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
+        .append(allocator.hardline())
+        .append({
+            use lir::Jump::*;
+            match blocks[block_id].exit() {
+                JumpTable(t, tab) => allocator
+                    .text(format!("JUMP_TABLE x{}", t))
+                    .append(allocator.space())
+                    .append(
+                        allocator
+                            .intersperse(
+                                tab.iter().map(|b| allocator.text(format!("b{}", *b))),
+                                allocator.hardline(),
+                            )
+                            .align()
+                            .indent(4),
+                    ),
+                JumpIfElse(test, then_, else_) => {
+                    allocator.text(format!("JUMP_IF_ELSE x{} b{} b{}", test, then_, else_))
+                }
+                JumpSwitchInt(t, arms, default) => allocator
+                    .text(format!("JUMP_SWITCH_INT x{}", t))
+                    .append(allocator.space())
+                    .append(
+                        allocator
+                            .intersperse(
+                                arms.iter()
+                                    .map(|(value, b)| {
+                                        allocator.text(format!("{} => b{}", *value, *b))
+                                    })
+                                    .chain(
+                                        [allocator.text(format!("_ => {}", *default))].into_iter(),
+                                    ),
+                                allocator.hardline(),
+                            )
+                            .align()
+                            .indent(4),
+                    ),
+                JumpSwitchStr(t, arms, default) => allocator
+                    .text(format!("JUMP_SWITCH_INT x{}", t))
+                    .append(allocator.space())
+                    .append(
+                        allocator
+                            .intersperse(
+                                arms.iter()
+                                    .map(|(value, b)| {
+                                        allocator.text(format!(
+                                            "{}'{}' => b{}",
+                                            *value,
+                                            str_list.get(*value),
+                                            *b
+                                        ))
+                                    })
+                                    .chain(
+                                        [allocator.text(format!("_ => {}", *default))].into_iter(),
+                                    ),
+                                allocator.hardline(),
+                            )
+                            .align()
+                            .indent(4),
+                    ),
+                Jump(to) => allocator.text(format!("JUMP b{}", to)),
+                Ret => allocator.nil(),
+            }
+            .indent(4)
+        })
+}
+
+pub fn pretty_lir_function<'s, 'b, D, A>(
+    f_id: lir::FunctionId,
+    str_list: &ir::StrList,
+    functions: &lir::FunctionList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    let f = functions.get(f_id).unwrap();
+    allocator
+        .text(format!(
+            "Function {}'{}' [Entry at Block {}, Arity {}]:",
+            f_id,
+            str_list.get(f.name),
+            f.body,
+            f.arity
+        ))
+        .append(allocator.hardline())
+        .append(
+            allocator
+                .intersperse(
+                    f.blocks
+                        .iter_id()
+                        .map(|b| pretty_lir_block(b, &f.blocks, str_list, functions, allocator)),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
 }

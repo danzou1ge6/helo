@@ -5,14 +5,12 @@ use std::collections::HashMap;
 #[derive(Clone)]
 struct UnionFind {
     store: imbl::Vector<usize>,
-    depth: imbl::Vector<usize>,
 }
 
 impl UnionFind {
     fn new(cnt: usize) -> Self {
         Self {
             store: (0..cnt).collect(),
-            depth: (0..cnt).map(|_| 1).collect(),
         }
     }
     fn is_root(&self, id: usize) -> bool {
@@ -27,18 +25,10 @@ impl UnionFind {
             root
         }
     }
-    fn union(&mut self, a: lir::TempId, b: lir::TempId) {
-        let a_root = self.find(a);
-        let b_root = self.find(b);
-        let a_depth = self.depth[a_root.0];
-        let b_depth = self.depth[b_root.0];
-        if a_depth < b_depth {
-            self.store[a.0] = b_root.0;
-            self.depth[b_root.0] = b_depth.min(a_depth + 1);
-        } else {
-            self.store[b.0] = a_root.0;
-            self.depth[a_root.0] = a_depth.min(b_depth + 1);
-        }
+    /// Make `from` points to `to`
+    fn union(&mut self, to: lir::TempId, from: lir::TempId) {
+        let a_root = self.find(to);
+        self.store[from.0] = a_root.0;
     }
     fn normalized(&self, mut inst: lir::Instruction) -> lir::Instruction {
         inst.execute_substite_args(self);
@@ -107,31 +97,42 @@ pub fn common_expression_elimination(
 }
 
 fn cee(block: lir::BlockId, idx: usize, blocks: &mut lir::BlockHeap, binds: &mut BindStack) {
+    let output = blocks[block][idx].def();
     let inst = binds.eqs().normalized(blocks[block][idx].clone());
 
     if inst.functional() {
-        if let lir::Instruction::Mov(to, from) = inst {
+        // A functional instruction must have output
+        let output = output.unwrap();
+        if let lir::Instruction::Mov(_, from) = inst {
             blocks[block].remove(idx);
-            binds.eqs_mut().union(to, from);
+            // Now all reference of `to` should be pointed to `from`
+            binds.eqs_mut().union(from, output);
+
+            return cee(block, idx, blocks, binds);
         } else {
-            let output = inst.output().unwrap();
             if let Some(temp) = binds.lookup(&inst) {
                 blocks[block].remove(idx);
-                binds.eqs_mut().union(output, temp);
+                binds.eqs_mut().union(temp, output);
+
+                return cee(block, idx, blocks, binds);
             } else {
                 binds.register(inst, output);
-                blocks[block][idx].execute_substite_args(binds.eqs());
             }
         }
     }
+    blocks[block][idx].execute_substite_args(binds.eqs());
 
-    for (susc_block, susc_idx) in blocks
-        .suscessive(block, idx)
-        .collect::<Vec<_>>()
-        .into_iter()
-    {
-        binds.scoped(|binds| {
-            cee(susc_block, susc_idx, blocks, binds);
-        })
-    }
+    // let mut suscs = blocks.suscessive(block, idx).collect::<Vec<_>>();
+
+    // if suscs.len() == 1 {
+    //     let (susc_block, susc_idx) = suscs.pop().unwrap();
+    //     return cee(susc_block, susc_idx, blocks, binds);
+    // }
+
+    // for (susc_block, susc_idx) in suscs.into_iter() {
+    //     binds.scoped(|binds| {
+    //         cee(susc_block, susc_idx, blocks, binds);
+    //     })
+    // }
+    unimplemented!()
 }

@@ -108,9 +108,14 @@ pub fn compile_lir<'s>(
     Ok(f_list)
 }
 
-pub fn lir_transform(lir_functions: &mut lir::FunctionList) {
+pub fn lir_optimize(lir_functions: &mut lir::FunctionList) {
     for f in lir_functions.iter_mut() {
         elimination::common_expression_elimination(f.body, &mut f.blocks, f.temp_cnt);
+    }
+}
+
+pub fn lir_compress_registers(lir_functions: &mut lir::FunctionList) {
+    for f in lir_functions.iter_mut() {
         lifetime::compress_temps(f.body, &mut f.blocks, f.temp_cnt);
     }
 }
@@ -121,18 +126,24 @@ pub fn compile_byte_code(
 ) -> miette::Result<executable::Executable> {
     let mut chunk = byte_code::Chunk::new();
     let mut e = errors::ManyError::new();
+    let mut f_relocations = lower_lir::FunctionRelocations::new();
     let mut functions = lower_lir::FunctionTable::new();
 
     let (str_index, str_chunk) = lir::StrIndex::new(str_list);
-    let entry = lower_lir::lower_function(
-        lir_functions.main_id(),
-        &lir_functions,
-        &str_index,
-        &mut chunk,
-        &mut functions,
-        &mut e,
-    );
+    for fid in lir_functions.iter_id() {
+        lower_lir::lower_function(
+            fid,
+            &lir_functions,
+            &str_index,
+            &mut chunk,
+            &mut f_relocations,
+            &mut functions,
+            &mut e,
+        );
+    }
 
+    f_relocations.relocate(&mut chunk, &mut functions);
+    let entry = functions.get(lir_functions.main_id()).unwrap();
     let symbols = functions.to_symbols();
 
     e.emit()?;

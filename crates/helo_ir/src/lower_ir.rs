@@ -37,7 +37,7 @@ impl Compiler {
 fn tie_loose_ends(ends: Vec<lir::BlockId>, blocks: &mut lir::BlockHeap) -> lir::BlockId {
     let next_block = blocks.new_block();
     ends.into_iter()
-        .for_each(|b| blocks[b].push(lir::Instruction::Jump(next_block)));
+        .for_each(|b| blocks.seal(b, lir::Jump::Jump(next_block)));
     next_block
 }
 
@@ -226,6 +226,8 @@ pub fn lower_function<'s>(
             &mut compiler,
         );
         blocks[ret_block].push(lir::Instruction::Ret(compiler.ret_temp()));
+        blocks.seal(ret_block, lir::Jump::Ret);
+
         lir::Function {
             body,
             blocks,
@@ -367,15 +369,14 @@ fn lower_switch_tag<'s>(
         })
         .unzip();
 
-    use lir::Instruction::*;
-    blocks[block].push(JumpTable(operand_temp, branches));
+    blocks.seal(block, lir::Jump::JumpTable(operand_temp, branches));
     branches_end
 }
 
 fn lower_switch<'s>(
     to: lir::TempId,
     operand: ir::ExprId,
-    arms: &Vec<(ir::Immediate, ir::ExprId)>,
+    arms: &[(ir::Immediate, ir::ExprId)],
     default: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -385,9 +386,6 @@ fn lower_switch<'s>(
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
-    use ir::Immediate;
-    use lir::Instruction::*;
-
     let operand_temp = compiler.new_temp();
     let block = lower_expr(
         to,
@@ -402,11 +400,10 @@ fn lower_switch<'s>(
     );
 
     let mut expr_map = HashMap::new();
-
-    let mut branches_end = arms
+    let (branches, mut branches_end) = arms
         .iter()
-        .map(|(value, e)| {
-            let (branch, branch_end) = *expr_map.entry(e).or_insert_with(|| {
+        .map(|(_, e)| {
+            *expr_map.entry(e).or_insert_with(|| {
                 lower_expr_new_block(
                     to,
                     *e,
@@ -417,18 +414,9 @@ fn lower_switch<'s>(
                     functions,
                     compiler,
                 )
-            });
-
-            blocks[block].push(match value {
-                Immediate::Bool(b) => JumpIfEqBool(operand_temp, *b, branch),
-                Immediate::Int(i) => JumpIfEqInt(operand_temp, *i, branch),
-                Immediate::Str(s) => JumpIfEqStr(operand_temp, *s, branch),
-                Immediate::Float(_) => unreachable!(),
-            });
-
-            branch_end
+            })
         })
-        .collect::<Vec<_>>();
+        .unzip::<_, _, Vec<_>, Vec<_>>();
 
     let (default_branch, default_branch_end) = *expr_map.entry(&default).or_insert_with(|| {
         lower_expr_new_block(
@@ -443,7 +431,42 @@ fn lower_switch<'s>(
         )
     });
 
-    blocks[block].push(Jump(default_branch));
+    match arms.first().unwrap().0 {
+        ir::Immediate::Int(_) => {
+            let cases = arms
+                .iter()
+                .map(|(value, _)| value.clone().unwrap_int())
+                .zip(branches.into_iter())
+                .collect();
+            blocks.seal(
+                block,
+                lir::Jump::JumpSwitchInt(operand_temp, cases, default_branch),
+            );
+        }
+        ir::Immediate::Bool(b) => {
+            let (true_branch, false_branch) = if b {
+                (branches[0], branches[1])
+            } else {
+                (branches[1], branches[0])
+            };
+            blocks.seal(
+                block,
+                lir::Jump::JumpIfElse(operand_temp, true_branch, false_branch),
+            );
+        }
+        ir::Immediate::Str(_) => {
+            let cases = arms
+                .iter()
+                .map(|(value, _)| value.clone().unwrap_str())
+                .zip(branches.into_iter())
+                .collect();
+            blocks.seal(
+                block,
+                lir::Jump::JumpSwitchStr(operand_temp, cases, default_branch),
+            );
+        }
+        ir::Immediate::Float(_) => unreachable!(),
+    }
 
     branches_end.push(default_branch_end);
     branches_end
@@ -462,8 +485,6 @@ fn lower_cond<'s>(
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     let mut expr_map = HashMap::new();
-
-    use lir::Instruction::*;
 
     let mut branches_end = Vec::new();
     let block = arms.iter().fold(block, |block, (cond, e)| {
@@ -493,27 +514,26 @@ fn lower_cond<'s>(
             )
         });
 
-        blocks[block].push(JumpIf(test, branch));
+        let next_block = blocks.new_block();
+
+        blocks.seal(block, lir::Jump::JumpIfElse(test, branch, next_block));
         branches_end.push(branch_end);
-        block
+        next_block
     });
 
-    let (default_branch, default_branch_end) = *expr_map.entry(&default).or_insert_with(|| {
-        lower_expr_new_block(
-            to,
-            default,
-            ir_nodes,
-            ir_functions,
-            builtins,
-            blocks,
-            functions,
-            compiler,
-        )
-    });
+    let default_branch_end = lower_expr(
+        to,
+        default,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        block,
+        blocks,
+        functions,
+        compiler,
+    );
 
-    blocks[block].push(Jump(default_branch));
     branches_end.push(default_branch_end);
-
     branches_end
 }
 
@@ -564,8 +584,10 @@ fn lower_if_else<'s>(
         compiler,
     );
 
-    use lir::Instruction::*;
-    blocks[block].push(JumpIfElse(test_temp, then_branch, else_branch));
+    blocks.seal(
+        block,
+        lir::Jump::JumpIfElse(test_temp, then_branch, else_branch),
+    );
 
     vec![then_branch_end, else_branch_end]
 }

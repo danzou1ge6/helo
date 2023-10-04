@@ -11,7 +11,7 @@ pub struct RegisterId(pub(crate) u8);
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct StrAddr(pub(crate) u32);
 /// Take 4 bytes
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct FunctionAddr(pub(crate) u32);
 
 impl std::fmt::Display for StrAddr {
@@ -61,6 +61,8 @@ impl From<u16> for BuiltinId {
     }
 }
 
+pub type JumpDistance = i16;
+
 #[derive(Emit, ToOpCode, ChunkReaderReadArgs)]
 pub enum Instruction {
     /// Following is a table of relative jump distance. The `i`th entry is taken for tag `i` at .0.
@@ -72,27 +74,27 @@ pub enum Instruction {
     /// Perform a relative jump if .0 is true.
     ///
     /// 4 of 8 bytes
-    JumpIf(RegisterId, u16),
+    JumpIf(RegisterId, JumpDistance),
     /// Jumps if .0 equals .1. .1 takes 4 bytes
     ///
     /// 8 of 8 bytes
-    JumpIfEqI32(RegisterId, i32, u16),
+    JumpIfEqI32(RegisterId, i32, JumpDistance),
     /// Jump if .0 equals i64 stored in next 8 bytes.
     ///
     /// 4 of 8 bytes
-    JumpIfEqI64(RegisterId, u16),
+    JumpIfEqI64(RegisterId, JumpDistance),
     /// Jump if .0 equals string at .1.
     ///
     /// 8 of 8 bytes
-    JumpIfEqStr(RegisterId, StrAddr, u16),
+    JumpIfEqStr(RegisterId, StrAddr, JumpDistance),
     /// Jump if .0 equals bool at .1
     ///
     /// 5 of 8 bytes
-    JumpIfEqBool(RegisterId, bool, u16),
+    JumpIfEqBool(RegisterId, bool, JumpDistance),
     /// Jump a relative distance
     ///
     /// 3 of 8 bytes
-    Jump(u16),
+    Jump(JumpDistance),
 
     /// Apply .2 to .1 and store result to .0
     ///
@@ -306,7 +308,7 @@ impl OpCode {
     pub fn jump_distance_offset(&self) -> usize {
         use OpCode::*;
         match self {
-            JUMP => 0,
+            JUMP => 1,
             JUMP_IF => 2,
             JUMP_IF_EQ_I32 => 6,
             JUMP_IF_EQ_I64 => 2,
@@ -314,6 +316,10 @@ impl OpCode {
             JUMP_IF_EQ_STR => 5,
             _ => panic!("Only jumps have jump distance offset"),
         }
+    }
+
+    pub fn callee_addr_offset() -> usize {
+        2
     }
 }
 
@@ -394,13 +400,13 @@ impl FromBytes<2> for BuiltinId {
     }
 }
 
-impl ToBytes<2> for u16 {
+impl ToBytes<2> for i16 {
     fn to_bytes(self) -> [u8; 2] {
         self.to_le_bytes()
     }
 }
 
-impl FromBytes<2> for u16 {
+impl FromBytes<2> for i16 {
     fn from_bytes(bytes: [u8; 2]) -> Self {
         Self::from_le_bytes(bytes)
     }
@@ -492,6 +498,10 @@ impl<'c> ChunkWriter<'c> {
         self.bytes(x.to_bytes())
     }
 
+    pub fn current(&self) -> usize {
+        self.chunk.code.len()
+    }
+
     pub fn finish(self) {
         let pad = self.cnt.div_ceil(8) * 8 - self.cnt;
 
@@ -536,6 +546,16 @@ impl Chunk {
             chunk: self,
             cnt: 0,
         }
+    }
+
+    pub fn write<T, const N: usize>(&mut self, addr: usize, value: T)
+    where
+        T: ToBytes<N>,
+    {
+        self.code[addr..addr + N]
+            .iter_mut()
+            .zip(value.to_bytes().into_iter())
+            .for_each(|(write, value)| *write = value)
     }
 
     pub fn fetch(&self, offset: u32) -> ChunkReader<0> {

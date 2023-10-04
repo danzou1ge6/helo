@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::errors;
 use crate::ir;
@@ -8,6 +9,12 @@ use helo_runtime::executable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TempId(pub(crate) usize);
+
+impl std::fmt::Display for TempId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 pub trait TempSubstitution {
     fn subs(&self, id: TempId) -> TempId;
@@ -57,23 +64,24 @@ pub struct BlockId(pub(crate) usize);
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct FunctionId(pub(crate) usize);
 
+impl std::fmt::Display for FunctionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::fmt::Display for BlockId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub use helo_runtime::builtins::{BuiltinId, Builtins};
 
 use ir::StrId;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Instruction {
-    /// Depending on the tag code `x` in .0, take the `x`th block
-    JumpTable(TempId, Vec<BlockId>),
-    /// Jump denpending on .0 is true or false
-    JumpIf(TempId, BlockId),
-    JumpIfElse(TempId, BlockId, BlockId),
-    /// Jump denpending on immediate equivalence
-    JumpIfEqInt(TempId, i64, BlockId),
-    JumpIfEqStr(TempId, StrId, BlockId),
-    JumpIfEqBool(TempId, bool, BlockId),
-    /// Jump with no condition
-    Jump(BlockId),
     /// Apply .2 to .1 and store result to .0
     Apply(TempId, TempId, Vec<TempId>),
     /// Tail call
@@ -107,17 +115,48 @@ pub enum Instruction {
     Ret(TempId),
 }
 
+#[derive(Debug, Clone)]
+pub enum Jump {
+    /// Depending on the tag code `x` in .0, take the `x`th block
+    JumpTable(TempId, Vec<BlockId>),
+    /// Jump denpending on .0 is true or false
+    JumpIfElse(TempId, BlockId, BlockId),
+    /// Jump denpending on immediate equivalence
+    JumpSwitchInt(TempId, Vec<(i64, BlockId)>, BlockId),
+    JumpSwitchStr(TempId, Vec<(StrId, BlockId)>, BlockId),
+    /// Unconditional jump
+    Jump(BlockId),
+    /// Return from function
+    Ret,
+}
+
+impl Jump {
+    pub fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
+        match self {
+            Jump::JumpTable(_, to) => Box::new(to.iter().copied()),
+            Jump::JumpIfElse(_, to1, to2) => Box::new([*to1, *to2].into_iter()),
+            Jump::JumpSwitchInt(_, v, default) => Box::new(
+                v.iter()
+                    .map(|(_, to)| to)
+                    .copied()
+                    .chain([*default].into_iter()),
+            ),
+            Jump::JumpSwitchStr(_, v, default) => Box::new(
+                v.iter()
+                    .map(|(_, to)| to)
+                    .copied()
+                    .chain([*default].into_iter()),
+            ),
+            Jump::Jump(to) => Box::new([*to].into_iter()),
+            Jump::Ret => Box::new([].into_iter()),
+        }
+    }
+}
+
 impl Instruction {
     pub fn functional(&self) -> bool {
         use Instruction::*;
         match self {
-            Jump(_)
-            | JumpIf(_, _)
-            | JumpIfElse(_, _, _)
-            | JumpIfEqBool(_, _, _)
-            | JumpIfEqInt(_, _, _)
-            | JumpIfEqStr(_, _, _)
-            | JumpTable(_, _) => false,
             Panic(_) | Ret(_) => false,
             Apply(_, _, _)
             | Call(_, _, _)
@@ -136,16 +175,9 @@ impl Instruction {
             | Mov(_, _) => true,
         }
     }
-    pub fn output(&self) -> Option<TempId> {
+    pub fn def(&self) -> Option<TempId> {
         use Instruction::*;
         match self {
-            Jump(_)
-            | JumpIf(_, _)
-            | JumpIfElse(_, _, _)
-            | JumpIfEqBool(_, _, _)
-            | JumpIfEqInt(_, _, _)
-            | JumpIfEqStr(_, _, _)
-            | JumpTable(_, _) => None,
             Call(out, _, _)
             | Apply(out, _, _)
             | TailCall(out, _, _)
@@ -160,19 +192,17 @@ impl Instruction {
             Mov(out, _) => Some(*out),
         }
     }
-    pub fn input<'a>(&'a self) -> Box<dyn Iterator<Item = TempId> + 'a> {
+    pub fn uses<'a>(&'a self) -> Box<dyn Iterator<Item = TempId> + 'a> {
         use Instruction::*;
         match self {
-            Jump(_)
-            | Int(_, _)
+            Int(_, _)
             | Float(_, _)
             | Bool(_, _)
             | Str(_, _)
             | Function(_, _)
             | Buitltin(_, _)
             | Panic(_)
-            | Ret(_)
-            | JumpTable(_, _) => Box::new([].iter().copied()),
+            | Ret(_) => Box::new([].iter().copied()),
             Apply(_, a, args) | TailCall(_, a, args) | Push(_, a, args) => {
                 Box::new([a].into_iter().copied().chain(args.iter().copied()))
             }
@@ -180,13 +210,7 @@ impl Instruction {
             | TailCallU(_, _, args)
             | CallBuiltin(_, _, args)
             | Tagged(_, _, args) => Box::new(args.iter().copied()),
-            Field(_, input, _)
-            | Mov(_, input)
-            | JumpIf(input, _)
-            | JumpIfElse(input, _, _)
-            | JumpIfEqBool(input, _, _)
-            | JumpIfEqInt(input, _, _)
-            | JumpIfEqStr(input, _, _) => Box::new([*input].into_iter()),
+            Field(_, input, _) | Mov(_, input) => Box::new([*input].into_iter()),
         }
     }
     pub fn execute_substitution(&mut self, subs: &impl TempSubstitution) {
@@ -196,14 +220,8 @@ impl Instruction {
     pub fn execute_substite_args(&mut self, subs: &impl TempSubstitution) {
         use Instruction::*;
         match self {
-            Jump(_) | Panic(_) => {}
-            Int(_, _)
-            | Float(_, _)
-            | Bool(_, _)
-            | Str(_, _)
-            | Function(_, _)
-            | Buitltin(_, _)
-            | JumpTable(_, _) => {}
+            Panic(_) => {}
+            Int(_, _) | Float(_, _) | Bool(_, _) | Str(_, _) | Function(_, _) | Buitltin(_, _) => {}
             Apply(_r, a, args) | TailCall(_r, a, args) | Push(_r, a, args) => {
                 *a = subs.subs(*a);
                 args.iter_mut().for_each(|arg| *arg = subs.subs(*arg));
@@ -214,40 +232,26 @@ impl Instruction {
             | CallBuiltin(_r, _, args) => {
                 args.iter_mut().for_each(|arg| *arg = subs.subs(*arg));
             }
-            Ret(input)
-            | Field(_, input, _)
-            | Mov(_, input)
-            | JumpIf(input, _)
-            | JumpIfElse(input, _, _)
-            | JumpIfEqBool(input, _, _)
-            | JumpIfEqInt(input, _, _)
-            | JumpIfEqStr(input, _, _) => *input = subs.subs(*input),
+            Ret(input) | Field(_, input, _) | Mov(_, input) => *input = subs.subs(*input),
         }
     }
     pub fn execute_substite_output(&mut self, subs: &impl TempSubstitution) {
         use Instruction::*;
         match self {
-            Jump(_) | Panic(_) => {}
-            JumpIf(_, _)
-            | JumpIfElse(_, _, _)
-            | JumpIfEqBool(_, _, _)
-            | JumpIfEqInt(_, _, _)
-            | JumpIfEqStr(_, _, _)
-            | Int(_, _)
-            | Float(_, _)
-            | Bool(_, _)
-            | Str(_, _)
-            | Function(_, _)
-            | Buitltin(_, _)
-            | Ret(_)
-            | JumpTable(_, _) => {}
-            Apply(r, _, _args)
-            | Call(r, _, _args)
-            | TailCall(r, _, _args)
-            | TailCallU(r, _, _args)
-            | CallBuiltin(r, _, _args)
-            | Push(r, _, _args)
-            | Tagged(r, _, _args) => {
+            Panic(_) | Ret(_) => {}
+            Apply(r, _, _)
+            | Int(r, _)
+            | Float(r, _)
+            | Bool(r, _)
+            | Str(r, _)
+            | Function(r, _)
+            | Buitltin(r, _)
+            | Call(r, _, _)
+            | TailCall(r, _, _)
+            | TailCallU(r, _, _)
+            | CallBuiltin(r, _, _)
+            | Push(r, _, _)
+            | Tagged(r, _, _) => {
                 *r = subs.subs(*r);
             }
             Field(r, _input, _) | Mov(r, _input) => *r = subs.subs(*r),
@@ -256,38 +260,64 @@ impl Instruction {
 }
 
 #[derive(Debug)]
-pub struct Block(Vec<Instruction>);
+pub struct Block {
+    body: Vec<Instruction>,
+    pred: HashSet<BlockId>,
+    exit: Option<Jump>,
+}
 
 impl std::ops::Index<usize> for Block {
     type Output = Instruction;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
+        &self.body[index]
     }
 }
 impl std::ops::IndexMut<usize> for Block {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
+        &mut self.body[index]
     }
 }
 
 impl Block {
     pub fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            body: Vec::new(),
+            pred: HashSet::new(),
+            exit: None,
+        }
     }
     pub fn push(&mut self, inst: Instruction) {
-        self.0.push(inst)
+        self.body.push(inst)
     }
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.body.len()
     }
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Instruction> {
-        self.0.iter_mut()
+        self.body.iter_mut()
     }
     pub fn iter(&self) -> impl Iterator<Item = &Instruction> {
-        self.0.iter()
+        self.body.iter()
     }
     pub fn remove(&mut self, idx: usize) {
-        self.0.remove(idx);
+        self.body.remove(idx);
+    }
+    fn seal(&mut self, jump: Jump) {
+        if self.exit.is_some() {
+            panic!("block already sealed")
+        }
+        self.exit = Some(jump);
+    }
+    pub fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
+        match &self.exit {
+            None => panic!("block not sealed, thus has no successors"),
+            Some(jump) => jump.successors(),
+        }
+    }
+    pub fn predessorss<'a>(&'a self) -> impl Iterator<Item = BlockId> + 'a {
+        self.pred.iter().copied()
+    }
+    pub fn exit(&self) -> &Jump {
+        self.exit.as_ref().expect("this block is not sealed yet")
     }
 }
 
@@ -306,25 +336,14 @@ impl BlockHeap {
     pub fn iter(&self) -> impl Iterator<Item = &Block> {
         self.0.iter()
     }
-    pub fn suscessive<'a>(
-        &'a self,
-        block_id: BlockId,
-        idx: usize,
-    ) -> Box<dyn Iterator<Item = (BlockId, usize)> + 'a> {
-        use Instruction::*;
-        let seq_iter = if idx + 1 < self[block_id].len() {
-            vec![(block_id, idx + 1)].into_iter()
+    pub fn iter_id(&self) -> impl Iterator<Item = BlockId> {
+        (0..self.0.len()).map(|i| BlockId(i))
+    }
+    pub fn suscessive<'a>(&'a self, block_id: BlockId, idx: usize) -> Option<(BlockId, usize)> {
+        if idx + 1 < self[block_id].len() {
+            Some((block_id, idx + 1))
         } else {
-            vec![].into_iter()
-        };
-        match &self[block_id][idx] {
-            Jump(b)
-            | JumpIf(_, b)
-            | JumpIfEqBool(_, _, b)
-            | JumpIfEqInt(_, _, b)
-            | JumpIfEqStr(_, _, b) => Box::new([(*b, 0)].into_iter().chain(seq_iter)),
-            JumpTable(_, branches) => Box::new(branches.iter().map(|b| (*b, 0)).chain(seq_iter)),
-            _ => Box::new(seq_iter),
+            None
         }
     }
     pub fn execute_substitution(&mut self, subs: &impl TempSubstitution) {
@@ -335,6 +354,12 @@ impl BlockHeap {
     }
     pub fn new_block(&mut self) -> BlockId {
         self.push(Block::new())
+    }
+    pub fn seal(&mut self, block_id: BlockId, jump: Jump) {
+        for susc in jump.successors() {
+            self[susc].pred.insert(block_id);
+        }
+        self[block_id].seal(jump);
     }
 }
 
@@ -416,6 +441,9 @@ impl FunctionList {
     }
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Function> {
         self.v.iter_mut()
+    }
+    pub fn iter_id(&self) -> impl Iterator<Item = FunctionId> {
+        (0..self.v.len()).map(|i| FunctionId(i))
     }
 }
 

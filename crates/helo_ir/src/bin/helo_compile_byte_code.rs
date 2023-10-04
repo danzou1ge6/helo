@@ -1,4 +1,5 @@
 use helo_ir::artifect;
+use helo_ir::pretty_print;
 use helo_runtime::disassembler;
 
 use miette::{Context, IntoDiagnostic};
@@ -7,6 +8,24 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::sync::Arc;
+
+fn pretty_lir_functions(
+    lir_functions: &helo_ir::lir::FunctionList,
+    str_list: &helo_ir::ir::StrList,
+) {
+    for lir_fid in lir_functions.iter_id() {
+        let term_width = 80;
+        let allocator = pretty::RcAllocator;
+        let doc_builder = pretty_print::pretty_lir_function::<_, ()>(
+            lir_fid,
+            &str_list,
+            &lir_functions,
+            &allocator,
+        );
+        let doc = doc_builder.pretty(term_width);
+        println!("{doc}");
+    }
+}
 
 fn compile(src: String, file_name: String) -> miette::Result<()> {
     let src = Arc::new(src);
@@ -18,8 +37,19 @@ fn compile(src: String, file_name: String) -> miette::Result<()> {
     let (ir_functions, ir_nodes, str_list) = artifect::compiler_ir(typed_symbols, typed_nodes);
 
     let mut lir_functions = artifect::compile_lir(ir_functions, ir_nodes)?;
-    dbg!(&lir_functions);
-    artifect::lir_transform(&mut lir_functions);
+    println!("Before optimization:");
+    pretty_lir_functions(&lir_functions, &str_list);
+    println!("");
+
+    // artifect::lir_optimize(&mut lir_functions);
+    // println!("After optimization:");
+    // pretty_lir_functions(&lir_functions, &str_list);
+    // println!("");
+
+    artifect::lir_compress_registers(&mut lir_functions);
+    println!("After registers:");
+    pretty_lir_functions(&lir_functions, &str_list);
+    println!("");
 
     let executable = artifect::compile_byte_code(lir_functions, str_list)?;
 

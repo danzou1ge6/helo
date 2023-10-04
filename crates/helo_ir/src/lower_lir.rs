@@ -4,7 +4,6 @@ use crate::errors;
 use crate::ir;
 use crate::lir;
 
-use helo_parse::ast::Meta;
 use helo_parse::errors::ManyError;
 use helo_runtime::byte_code;
 
@@ -41,187 +40,155 @@ impl FunctionTable {
     }
 }
 
+pub struct FunctionRelocations {
+    relocations: Vec<(usize, lir::FunctionId)>,
+}
+
+impl FunctionRelocations {
+    pub fn new() -> Self {
+        Self {
+            relocations: Vec::new(),
+        }
+    }
+    pub fn add(&mut self, addr: usize, fid: lir::FunctionId) {
+        self.relocations.push((addr, fid))
+    }
+
+    pub fn relocate(&self, chunk: &mut byte_code::Chunk, functions: &FunctionTable) {
+        for (addr, fid) in self.relocations.iter() {
+            let f_addr = functions.get(*fid).unwrap();
+            chunk.write(*addr, f_addr);
+        }
+    }
+}
+
+struct ChunkRelocations {
+    relocations: Vec<(usize, usize, lir::BlockId)>,
+}
+
+impl ChunkRelocations {
+    pub fn new() -> Self {
+        Self {
+            relocations: Vec::new(),
+        }
+    }
+    pub fn add(&mut self, addr: usize, origin: usize, bid: lir::BlockId) {
+        self.relocations.push((addr, origin, bid))
+    }
+    pub fn relocate(
+        &self,
+        chunk: &mut byte_code::Chunk,
+        block_addrs: &[usize],
+    ) -> Result<(), usize> {
+        for (addr, origin, block_id) in self.relocations.iter() {
+            let block_addr = block_addrs[block_id.0];
+            let delta = if block_addr > *origin {
+                block_addr - *origin
+            } else {
+                *origin - block_addr
+            };
+            if let Ok(delta) = byte_code::JumpDistance::try_from(delta) {
+                chunk.write(*addr, delta);
+            } else {
+                return Err(delta);
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn lower_function(
     fid: lir::FunctionId,
     lir_functions: &lir::FunctionList,
     str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
+    f_relocations: &mut FunctionRelocations,
     functions: &mut FunctionTable,
     e: &mut ManyError,
 ) -> byte_code::FunctionAddr {
-    if let Some(addr) = functions.get(fid) {
-        addr
-    } else {
-        let f = lir_functions.get(fid).unwrap();
-        let addr = chunk.len();
-        if addr > u32::MAX as usize {
-            e.push(errors::TooLongCode { current_len: addr });
-        }
-        let addr = byte_code::FunctionAddr::from(addr as u32);
-        functions.insert(fid, addr, str_index[f.name]);
-        lower_block(
-            f.body,
-            &f.blocks,
-            lir_functions,
-            str_index,
-            &f.meta,
-            chunk,
-            functions,
-            e,
-        );
-        addr
+    let f = lir_functions.get(fid).unwrap();
+    let addr = chunk.len();
+    let addr = byte_code::FunctionAddr::from(addr as u32);
+    functions.insert(fid, addr, str_index[f.name]);
+
+    let mut chunk_relocations = ChunkRelocations::new();
+    let block_addrs = f
+        .blocks
+        .iter_id()
+        .map(|block_id| {
+            lower_block(
+                block_id,
+                &f.blocks,
+                str_index,
+                &mut chunk_relocations,
+                chunk,
+                f_relocations,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if let Err(distance) = chunk_relocations.relocate(chunk, &block_addrs) {
+        e.push(errors::TooLongJump::new(&f.meta, distance))
     }
+
+    if chunk.len() > u32::MAX as usize {
+        e.push(errors::TooLongCode {
+            current_len: chunk.len(),
+        });
+    }
+    addr
 }
 
 fn lower_block(
     block_id: lir::BlockId,
     blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
     str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
+    f_relocations: &mut FunctionRelocations,
 ) -> usize {
     let addr = chunk.len();
     for inst in blocks[block_id].iter() {
-        lower_instruction(
-            inst,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        );
+        lower_instruction(inst, str_index, chunk, f_relocations);
     }
+
+    use lir::Jump::*;
+    match blocks[block_id].exit() {
+        JumpTable(test, table) => lower_jump_table(*test, &table, chunk_relocations, chunk),
+        JumpIfElse(test, then, else_) => {
+            lower_jump_if_else(*test, *then, *else_, chunk_relocations, chunk)
+        }
+        JumpSwitchInt(test, arms, default) => {
+            lower_jump_switch_int(*test, &arms, *default, chunk_relocations, chunk)
+        }
+        JumpSwitchStr(test, arms, default) => {
+            lower_jump_switch_str(*test, &arms, *default, str_index, chunk_relocations, chunk)
+        }
+        Jump(block) => lower_jump(*block, chunk_relocations, chunk),
+        Ret => {}
+    };
     addr
 }
 
 fn lower_instruction(
     inst: &lir::Instruction,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
     str_index: &lir::StrIndex,
-    function_meta: &Meta,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
+    functions: &mut FunctionRelocations,
 ) {
     use lir::Instruction::*;
     match inst {
-        JumpTable(t, table) => lower_jump_table(
-            *t,
-            &table,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        JumpIf(t, b) => lower_jump_if(
-            *t,
-            *b,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        JumpIfElse(t, then_branch, else_branch) => lower_jump_if_else(
-            *t,
-            *then_branch,
-            *else_branch,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        JumpIfEqInt(t, v, b) => lower_jump_if_eq_int(
-            *t,
-            *v,
-            *b,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        JumpIfEqBool(t, v, b) => lower_jump_if_eq_bool(
-            *t,
-            *v,
-            *b,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        JumpIfEqStr(t, v, b) => lower_jump_if_eq_str(
-            *t,
-            *v,
-            *b,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
-        Jump(b) => lower_jump(
-            *b,
-            blocks,
-            lir_functions,
-            str_index,
-            function_meta,
-            chunk,
-            functions,
-            e,
-        ),
         Apply(ret, callee, args) => lower_apply(*ret, *callee, &args, chunk),
         TailCall(ret, callee, args) => lower_tail_call(*ret, *callee, &args, chunk),
-        TailCallU(ret, callee, args) => lower_tail_call_u(
-            *ret,
-            *callee,
-            &args,
-            lir_functions,
-            str_index,
-            chunk,
-            functions,
-            e,
-        ),
+        TailCallU(ret, callee, args) => lower_tail_call_u(*ret, *callee, &args, chunk, functions),
         CallBuiltin(ret, callee, args) => lower_call_builtin(*ret, *callee, &args, chunk),
-        Call(ret, callee, args) => lower_call(
-            *ret,
-            *callee,
-            &args,
-            lir_functions,
-            str_index,
-            chunk,
-            functions,
-            e,
-        ),
+        Call(ret, callee, args) => lower_call(*ret, *callee, &args, chunk, functions),
         Int(to, v) => lower_int(*to, *v, chunk),
         Float(to, v) => lower_float(*to, v.parse().unwrap(), chunk),
         Bool(to, v) => lower_bool(*to, *v, chunk),
         Str(to, v) => lower_str(*to, *v, str_index, chunk),
         Push(to, from, args) => lower_push(*to, *from, &args, chunk),
-        Function(to, fid) => {
-            lower_function_inst(*to, *fid, lir_functions, str_index, chunk, functions, e)
-        }
+        Function(to, fid) => lower_function_inst(*to, *fid, chunk, functions),
         Buitltin(to, bid) => lower_builtin(*to, *bid, chunk),
         Field(to, from, n) => lower_field(*to, *from, *n, chunk),
         Panic(s) => lower_panic(*s, str_index, chunk),
@@ -231,182 +198,77 @@ fn lower_instruction(
     }
 }
 
-fn fill_back_jump(
-    delta: usize,
-    addr: usize,
-    chunk: &mut byte_code::Chunk,
-    function_meta: &Meta,
-    e: &mut ManyError,
-) {
-    if delta > u16::MAX as usize {
-        e.push(errors::TooLongJump::new(function_meta, delta));
-    }
-    chunk.fill_back_jump(addr, delta as u16);
-}
-
-fn lower_branch_and_fill_back(
-    inst: Instruction,
-    fill_back_addr: usize,
-    branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
-    chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
-) {
-    let inst_addr = chunk.len();
-    inst.emit(chunk);
-    let branch_addr = lower_block(
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
-    fill_back_jump(
-        branch_addr - inst_addr,
-        fill_back_addr,
-        chunk,
-        function_meta,
-        e,
-    );
-}
-
 fn lower_jump_table(
     test: lir::TempId,
     table: &[lir::BlockId],
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
 ) {
-    let inst = Instruction::JumpTable(test.register(), table.len() as u8);
     let inst_addr = chunk.len();
-    inst.emit(chunk);
+    Instruction::JumpTable(test.register(), table.len() as u8).emit(chunk);
 
     table
         .iter()
-        .fold(chunk.writer(), |writer, _| writer.push::<u16, 2>(0))
-        .finish();
-
-    let branch_addrs: Vec<_> = table
-        .iter()
-        .map(|b| {
-            lower_block(
-                *b,
-                blocks,
-                lir_functions,
-                str_index,
-                function_meta,
-                chunk,
-                functions,
-                e,
-            )
+        .fold(chunk.writer(), |writer, b| {
+            chunk_relocations.add(writer.current(), inst_addr, *b);
+            writer.push::<byte_code::JumpDistance, _>(0)
         })
-        .collect();
-    branch_addrs
-        .into_iter()
-        .zip((inst_addr + 8..inst_addr + 8 + 2 * table.len()).step_by(2))
-        .for_each(|(branch_addr, entry_addr)| {
-            // branch_addr must be bigger, as branches are inserted later
-            let delta = branch_addr - inst_addr;
-            fill_back_jump(delta, entry_addr, chunk, function_meta, e)
-        });
-}
-
-fn lower_jump_if(
-    test: lir::TempId,
-    branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
-    chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
-) {
-    let inst = Instruction::JumpIf(test.register(), 0);
-    let fill_back_addr = byte_code::OpCode::JUMP_IF.jump_distance_offset() + chunk.len();
-    lower_branch_and_fill_back(
-        inst,
-        fill_back_addr,
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
+        .finish();
 }
 
 fn lower_jump_if_else(
     test: lir::TempId,
     then_branch: lir::BlockId,
     else_branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
 ) {
-    let inst = Instruction::JumpIf(test.register(), 0);
     let inst_addr = chunk.len();
-    let fill_back_addr = byte_code::OpCode::JUMP_IF.jump_distance_offset() + chunk.len();
-    inst.emit(chunk);
+    Instruction::JumpIf(test.register(), 0).emit(chunk);
+    let fill_back_addr = byte_code::OpCode::JUMP_IF.jump_distance_offset() + inst_addr;
 
-    lower_block(
-        else_branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
-    let then_branch_addr = lower_block(
-        then_branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
+    chunk_relocations.add(fill_back_addr, inst_addr, then_branch);
 
-    fill_back_jump(
-        then_branch_addr - inst_addr,
-        fill_back_addr,
-        chunk,
-        function_meta,
-        e,
-    )
+    let inst_addr = chunk.len();
+    Instruction::Jump(0).emit(chunk);
+    let fill_back_addr = byte_code::OpCode::JUMP.jump_distance_offset() + inst_addr;
+
+    chunk_relocations.add(fill_back_addr, inst_addr, else_branch);
+}
+
+fn lower_jump_switch_int(
+    test: lir::TempId,
+    arms: &[(i64, lir::BlockId)],
+    default: lir::BlockId,
+    chunk_relocations: &mut ChunkRelocations,
+    chunk: &mut byte_code::Chunk,
+) {
+    for (value, branch) in arms {
+        lower_jump_if_eq_int(test, *value, *branch, chunk_relocations, chunk);
+    }
+    lower_jump(default, chunk_relocations, chunk);
+}
+
+fn lower_jump_switch_str(
+    test: lir::TempId,
+    arms: &[(ir::StrId, lir::BlockId)],
+    default: lir::BlockId,
+    str_index: &lir::StrIndex,
+    chunk_relocations: &mut ChunkRelocations,
+    chunk: &mut byte_code::Chunk,
+) {
+    for (value, branch) in arms {
+        lower_jump_if_eq_str(test, *value, *branch, str_index, chunk_relocations, chunk);
+    }
+    lower_jump(default, chunk_relocations, chunk);
 }
 
 fn lower_jump_if_eq_int(
     test: lir::TempId,
     value: i64,
     branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
 ) {
     let inst_addr = chunk.len();
     let fill_back_addr = if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
@@ -417,103 +279,34 @@ fn lower_jump_if_eq_int(
         chunk.writer().push(value);
         inst_addr + byte_code::OpCode::JUMP_IF_EQ_I64.jump_distance_offset()
     };
-    let branch_addr = lower_block(
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
-    fill_back_jump(
-        branch_addr - inst_addr,
-        fill_back_addr,
-        chunk,
-        function_meta,
-        e,
-    );
+    chunk_relocations.add(fill_back_addr, inst_addr, branch);
 }
 
 fn lower_jump_if_eq_str(
     test: lir::TempId,
     value: ir::StrId,
     branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
     str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
 ) {
-    let inst = Instruction::JumpIfEqStr(test.register(), str_index[value], 0);
-    let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_STR.jump_distance_offset() + chunk.len();
+    let inst_addr = chunk.len();
+    Instruction::JumpIfEqStr(test.register(), str_index[value], 0).emit(chunk);
+    let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_STR.jump_distance_offset() + inst_addr;
 
-    lower_branch_and_fill_back(
-        inst,
-        fill_back_addr,
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
-}
-
-fn lower_jump_if_eq_bool(
-    test: lir::TempId,
-    value: bool,
-    branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
-    chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
-) {
-    let inst = Instruction::JumpIfEqBool(test.register(), value, 0);
-    let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_BOOL.jump_distance_offset() + chunk.len();
-
-    lower_branch_and_fill_back(
-        inst,
-        fill_back_addr,
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
+    chunk_relocations.add(fill_back_addr, inst_addr, branch);
 }
 
 fn lower_jump(
     branch: lir::BlockId,
-    blocks: &lir::BlockHeap,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
-    function_meta: &Meta,
+    chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
 ) {
-    lower_block(
-        branch,
-        blocks,
-        lir_functions,
-        str_index,
-        function_meta,
-        chunk,
-        functions,
-        e,
-    );
+    let inst_addr = chunk.len();
+    Instruction::Jump(0).emit(chunk);
+    let fill_back_addr = byte_code::OpCode::JUMP.jump_distance_offset() + inst_addr;
+
+    chunk_relocations.add(fill_back_addr, inst_addr, branch);
 }
 
 fn collect_to_array<T, const N: usize>(mut it: impl Iterator<Item = T>) -> [T; N]
@@ -587,26 +380,28 @@ fn lower_tail_call_u(
     ret: lir::TempId,
     callee: lir::FunctionId,
     args: &[lir::TempId],
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
+    functions: &mut FunctionRelocations,
 ) {
     let ret = ret.register();
-    let callee = lower_function(callee, lir_functions, str_index, chunk, functions, e);
+    let callee_addr = byte_code::FunctionAddr::default();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
+    functions.add(
+        chunk.len() + byte_code::OpCode::callee_addr_offset(),
+        callee,
+    );
+
     if args_len <= 2 {
         let inst = match args_len {
-            1 => Instruction::TailCallU1(ret, callee, collect_to_array(args)),
-            2 => Instruction::TailCallU2(ret, callee, collect_to_array(args)),
+            1 => Instruction::TailCallU1(ret, callee_addr, collect_to_array(args)),
+            2 => Instruction::TailCallU2(ret, callee_addr, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::TailCallUMany(ret, callee, args_len as u8).emit(chunk);
+        Instruction::TailCallUMany(ret, callee_addr, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
@@ -636,26 +431,28 @@ fn lower_call(
     ret: lir::TempId,
     callee: lir::FunctionId,
     args: &[lir::TempId],
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
+    functions: &mut FunctionRelocations,
 ) {
     let ret = ret.register();
-    let callee = lower_function(callee, lir_functions, str_index, chunk, functions, e);
+    let callee_addr = byte_code::FunctionAddr::default();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
+    functions.add(
+        chunk.len() + byte_code::OpCode::callee_addr_offset(),
+        callee,
+    );
+
     if args_len <= 2 {
         let inst = match args_len {
-            1 => Instruction::Call1(ret, callee, collect_to_array(args)),
-            2 => Instruction::Call2(ret, callee, collect_to_array(args)),
+            1 => Instruction::Call1(ret, callee_addr, collect_to_array(args)),
+            2 => Instruction::Call2(ret, callee_addr, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::CallMany(ret, callee, args_len as u8).emit(chunk);
+        Instruction::CallMany(ret, callee_addr, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
@@ -729,17 +526,11 @@ fn lower_push(
 fn lower_function_inst(
     to: lir::TempId,
     fid: lir::FunctionId,
-    lir_functions: &lir::FunctionList,
-    str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
-    functions: &mut FunctionTable,
-    e: &mut ManyError,
+    functions: &mut FunctionRelocations,
 ) {
-    Instruction::Function(
-        to.register(),
-        lower_function(fid, lir_functions, str_index, chunk, functions, e),
-    )
-    .emit(chunk);
+    functions.add(chunk.len() + byte_code::OpCode::callee_addr_offset(), fid);
+    Instruction::Function(to.register(), byte_code::FunctionAddr::default()).emit(chunk);
 }
 
 fn lower_builtin(to: lir::TempId, bid: lir::BuiltinId, chunk: &mut byte_code::Chunk) {

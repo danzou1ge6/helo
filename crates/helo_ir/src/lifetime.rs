@@ -92,12 +92,12 @@ impl LifetimeStore {
             self[(block_id, idx)] |= &susc_liveness;
             std::mem::swap(&mut self[(susc_bid, susc_idx)], &mut susc_liveness);
 
-            if let Some(out) = blocks[susc_bid][susc_idx].output() {
+            if let Some(out) = blocks[susc_bid][susc_idx].def() {
                 self[(block_id, idx)].unset(out);
             }
         }
 
-        for input in blocks[block_id][idx].input() {
+        for input in blocks[block_id][idx].uses() {
             self[(block_id, idx)].set(input);
         }
 

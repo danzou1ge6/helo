@@ -23,6 +23,12 @@ impl From<usize> for ExprId {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StrId(pub usize);
 
+impl std::fmt::Display for StrId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub struct Function {
     pub local_cnt: usize,
     pub arity: usize,
@@ -49,6 +55,30 @@ impl Immediate {
             Float(f) => f.to_string(),
             Bool(b) => if *b { "true" } else { "false" }.to_string(),
             Str(id) => str_list.get(*id).to_string(),
+        }
+    }
+    pub fn unwrap_int(self) -> i64 {
+        match self {
+            Self::Int(i) => i,
+            _ => panic!("called `unwrap_int` on Immediate that is {:?}", self),
+        }
+    }
+    pub fn unwrap_float(self) -> String {
+        match self {
+            Self::Float(i) => i,
+            _ => panic!("called `unwrap_float` on Immediate that is {:?}", self),
+        }
+    }
+    pub fn unwrap_bool(self) -> bool {
+        match self {
+            Self::Bool(i) => i,
+            _ => panic!("called `unwrap_bool` on Immediate that is {:?}", self),
+        }
+    }
+    pub fn unwrap_str(self) -> StrId {
+        match self {
+            Self::Str(i) => i,
+            _ => panic!("called `unwrap_str` on Immediate that is {:?}", self),
         }
     }
 }
