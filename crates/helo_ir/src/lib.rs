@@ -1,6 +1,5 @@
 #![feature(generic_arg_infer)]
 pub mod artifect;
-pub mod elimination;
 pub mod errors;
 pub mod ir;
 pub mod lifetime;

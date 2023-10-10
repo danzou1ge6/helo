@@ -165,7 +165,8 @@ fn lower_block(
             lower_jump_switch_str(*test, &arms, *default, str_index, chunk_relocations, chunk)
         }
         Jump(block) => lower_jump(*block, chunk_relocations, chunk),
-        Ret => {}
+        Ret(r) => lower_ret(*r, chunk),
+        Panic(s) => lower_panic(*s, str_index, chunk),
     };
     addr
 }
@@ -191,10 +192,8 @@ fn lower_instruction(
         Function(to, fid) => lower_function_inst(*to, *fid, chunk, functions),
         Buitltin(to, bid) => lower_builtin(*to, *bid, chunk),
         Field(to, from, n) => lower_field(*to, *from, *n, chunk),
-        Panic(s) => lower_panic(*s, str_index, chunk),
         Tagged(to, tag, args) => lower_tagged(*to, *tag, &args, chunk),
         Mov(to, from) => lower_mov(*to, *from, chunk),
-        Ret(r) => lower_ret(*r, chunk),
     }
 }
 

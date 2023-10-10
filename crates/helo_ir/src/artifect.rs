@@ -1,7 +1,6 @@
 use helo_runtime::builtins as rt_builtins;
 use helo_runtime::{byte_code, executable};
 
-use crate::{elimination, lifetime};
 use crate::{ir, lir};
 use crate::{lower_ast, lower_ir, lower_lir};
 
@@ -92,7 +91,7 @@ pub fn compiler_ir<'s>(
 pub fn compile_lir<'s>(
     ir_functions: ir::FunctionTable,
     ir_nodes: ir::ExprHeap<'s>,
-) -> miette::Result<lir::FunctionList> {
+) -> lir::FunctionTable {
     let mut lir_functions = lir::FunctionTable::new();
     let rt_builtins = rt_builtins::Builtins::new();
     for fid in ir_functions.function_names() {
@@ -104,25 +103,13 @@ pub fn compile_lir<'s>(
             &mut lir_functions,
         );
     }
-    let f_list = lir_functions.to_list()?;
-    Ok(f_list)
-}
-
-pub fn lir_optimize(lir_functions: &mut lir::FunctionList) {
-    for f in lir_functions.iter_mut() {
-        elimination::common_expression_elimination(f.body, &mut f.blocks, f.temp_cnt);
-    }
-}
-
-pub fn lir_compress_registers(lir_functions: &mut lir::FunctionList) {
-    for f in lir_functions.iter_mut() {
-        lifetime::compress_temps(f.body, &mut f.blocks, f.temp_cnt);
-    }
+    lir_functions
 }
 
 pub fn compile_byte_code(
     lir_functions: lir::FunctionList,
     str_list: ir::StrList,
+    main_function_id: lir::FunctionId,
 ) -> miette::Result<executable::Executable> {
     let mut chunk = byte_code::Chunk::new();
     let mut e = errors::ManyError::new();
@@ -143,7 +130,7 @@ pub fn compile_byte_code(
     }
 
     f_relocations.relocate(&mut chunk, &mut functions);
-    let entry = functions.get(lir_functions.main_id()).unwrap();
+    let entry = functions.get(main_function_id).unwrap();
     let symbols = functions.to_symbols();
 
     e.emit()?;

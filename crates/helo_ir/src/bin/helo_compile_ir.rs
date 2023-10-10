@@ -87,7 +87,7 @@ fn compile(src: String, file_name: String) -> miette::Result<()> {
         #[cfg(not(feature = "term_width"))]
         let term_width = 80;
         let allocator = pretty::RcAllocator;
-        let doc_builder = pretty_print::pretty_function::<_, ()>(
+        let doc_builder = pretty_print::pretty_ir_function::<_, ()>(
             ir_functions.get(f_name).unwrap(),
             &f_name,
             &ir_nodes,

@@ -1,7 +1,7 @@
 use crate::ir;
 use pretty::{self};
 
-pub fn pretty_function<'s, 'b, D, A>(
+pub fn pretty_ir_function<'s, 'b, D, A>(
     f: &ir::Function,
     name: &str,
     nodes: &ir::ExprHeap<'s>,
@@ -306,17 +306,83 @@ where
             let callee_name = helo_runtime::builtins::Builtins::name_by_id(*value);
             allocator.text(format!("x{:<3} <- f{}'{}'", ret, value, callee_name))
         }
-        Field(ret, operand, n) => allocator.text(format!("x{:<3} <- x{}~{}", ret, operand, n)),
-        Panic(value) => {
-            let s = str_list.get(*value);
-            allocator.text(format!("PANIC s{}'{}'", value, s))
-        }
+        Field(ret, operand, n) => allocator.text(format!("x{:<3} <- x{}.{}", ret, operand, n)),
         Tagged(to, tag, args) => allocator
-            .text(format!("x{:<3} <- TAGGED {}", to, tag))
+            .text(format!("x{:<3} <- TAGGED {} ", to, tag))
             .append(
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),
         Mov(to, from) => allocator.text(format!("x{:<3} <- x{}", to, from)),
+    }
+}
+
+pub fn pretty_lir_jump<'s, 'b, D, A>(
+    jump: &lir::Jump,
+    str_list: &ir::StrList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    use lir::Jump::*;
+    match jump {
+        JumpTable(t, tab) => allocator
+            .text(format!("JUMP_TABLE x{}", t))
+            .append(allocator.space())
+            .append(
+                allocator
+                    .intersperse(
+                        tab.iter().map(|b| allocator.text(format!("b{}", *b))),
+                        allocator.hardline(),
+                    )
+                    .align()
+                    .indent(4),
+            ),
+        JumpIfElse(test, then_, else_) => {
+            allocator.text(format!("JUMP_IF_ELSE x{} b{} b{}", test, then_, else_))
+        }
+        JumpSwitchInt(t, arms, default) => allocator
+            .text(format!("JUMP_SWITCH_INT x{}", t))
+            .append(allocator.space())
+            .append(
+                allocator
+                    .intersperse(
+                        arms.iter()
+                            .map(|(value, b)| allocator.text(format!("{} => b{}", *value, *b)))
+                            .chain([allocator.text(format!("_ => {}", *default))].into_iter()),
+                        allocator.hardline(),
+                    )
+                    .align()
+                    .indent(4),
+            ),
+        JumpSwitchStr(t, arms, default) => allocator
+            .text(format!("JUMP_SWITCH_INT x{}", t))
+            .append(allocator.space())
+            .append(
+                allocator
+                    .intersperse(
+                        arms.iter()
+                            .map(|(value, b)| {
+                                allocator.text(format!(
+                                    "{}'{}' => b{}",
+                                    *value,
+                                    str_list.get(*value),
+                                    *b
+                                ))
+                            })
+                            .chain([allocator.text(format!("_ => {}", *default))].into_iter()),
+                        allocator.hardline(),
+                    )
+                    .align()
+                    .indent(4),
+            ),
+        Jump(to) => allocator.text(format!("JUMP b{}", to)),
+        Panic(value) => {
+            let s = str_list.get(*value);
+            allocator.text(format!("PANIC s{}'{}'", value, s))
+        }
         Ret(t) => allocator.text(format!("RET x{}", t)),
     }
 }
@@ -353,70 +419,124 @@ where
                 .indent(4),
         )
         .append(allocator.hardline())
-        .append({
-            use lir::Jump::*;
-            match blocks[block_id].exit() {
-                JumpTable(t, tab) => allocator
-                    .text(format!("JUMP_TABLE x{}", t))
-                    .append(allocator.space())
-                    .append(
-                        allocator
-                            .intersperse(
-                                tab.iter().map(|b| allocator.text(format!("b{}", *b))),
-                                allocator.hardline(),
-                            )
-                            .align()
-                            .indent(4),
-                    ),
-                JumpIfElse(test, then_, else_) => {
-                    allocator.text(format!("JUMP_IF_ELSE x{} b{} b{}", test, then_, else_))
-                }
-                JumpSwitchInt(t, arms, default) => allocator
-                    .text(format!("JUMP_SWITCH_INT x{}", t))
-                    .append(allocator.space())
-                    .append(
-                        allocator
-                            .intersperse(
-                                arms.iter()
-                                    .map(|(value, b)| {
-                                        allocator.text(format!("{} => b{}", *value, *b))
-                                    })
-                                    .chain(
-                                        [allocator.text(format!("_ => {}", *default))].into_iter(),
-                                    ),
-                                allocator.hardline(),
-                            )
-                            .align()
-                            .indent(4),
-                    ),
-                JumpSwitchStr(t, arms, default) => allocator
-                    .text(format!("JUMP_SWITCH_INT x{}", t))
-                    .append(allocator.space())
-                    .append(
-                        allocator
-                            .intersperse(
-                                arms.iter()
-                                    .map(|(value, b)| {
-                                        allocator.text(format!(
-                                            "{}'{}' => b{}",
-                                            *value,
-                                            str_list.get(*value),
-                                            *b
-                                        ))
-                                    })
-                                    .chain(
-                                        [allocator.text(format!("_ => {}", *default))].into_iter(),
-                                    ),
-                                allocator.hardline(),
-                            )
-                            .align()
-                            .indent(4),
-                    ),
-                Jump(to) => allocator.text(format!("JUMP b{}", to)),
-                Ret => allocator.nil(),
-            }
-            .indent(4)
+        .append(pretty_lir_jump(blocks[block_id].exit(), str_list, allocator).indent(4))
+}
+
+pub fn pretty_ssa_block<'s, 'b, D, A>(
+    block_id: lir::BlockId,
+    blocks: &lir::ssa::SsaBlockHeap,
+    str_list: &ir::StrList,
+    functions: &lir::FunctionList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    allocator
+        .text(format!("Block {} [Predecessors ", block_id))
+        .append(allocator.intersperse(
+            blocks[block_id].pred.iter().map(|b| format!("b{}", b)),
+            allocator.text(","),
+        ))
+        .append(allocator.text("]:"))
+        .append(if blocks[block_id].phis.len() != 0 {
+            allocator.hardline()
+        } else {
+            allocator.nil()
         })
+        .append(
+            allocator
+                .intersperse(
+                    blocks[block_id]
+                        .phis
+                        .iter()
+                        .map(|lir::ssa::Phi(ret, args)| {
+                            allocator.text(format!("x{:<3} <- PHI ", ret)).append(
+                                allocator.intersperse(
+                                    args.iter().map(|arg| allocator.text(format!("x{}", arg))),
+                                    allocator.text(","),
+                                ),
+                            )
+                        }),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
+        .append(if blocks[block_id].body.len() != 0 {
+            allocator.hardline()
+        } else {
+            allocator.nil()
+        })
+        .append(
+            allocator
+                .intersperse(
+                    blocks[block_id]
+                        .body
+                        .iter()
+                        .map(|inst| pretty_lir_instruction(inst, str_list, functions, allocator)),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
+        .append(if blocks[block_id].tail_copies.len() != 0 {
+            allocator
+                .hardline()
+                .append(allocator.text("COPY").indent(4))
+        } else {
+            allocator.nil()
+        })
+        .append(
+            allocator.intersperse(
+                blocks[block_id]
+                    .tail_copies
+                    .iter()
+                    .map(|(from, to)| allocator.text(format!("x{} -> x{}", from, to))),
+                allocator.text(", "),
+            ),
+        )
+        .append(allocator.hardline())
+        .append(pretty_lir_jump(&blocks[block_id].exit, str_list, allocator).indent(4))
+}
+
+pub fn pretty_ssa_function<'s, 'b, D, A>(
+    f_id: lir::FunctionId,
+    f_name: ir::StrId,
+    entry: lir::BlockId,
+    blocks: &lir::ssa::SsaBlockHeap,
+    arity: usize,
+    str_list: &ir::StrList,
+    functions: &lir::FunctionList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    allocator
+        .text(format!(
+            "Function {}'{}' [Entry at Block {}, Arity {}]:",
+            f_id,
+            str_list.get(f_name),
+            entry,
+            arity
+        ))
+        .append(allocator.hardline())
+        .append(
+            allocator
+                .intersperse(
+                    blocks
+                        .iter_id()
+                        .map(|b| pretty_ssa_block(b, &blocks, str_list, functions, allocator)),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
 }
 
 pub fn pretty_lir_function<'s, 'b, D, A>(

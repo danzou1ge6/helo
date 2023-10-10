@@ -1,7 +1,4 @@
-let fn sum x : [Int] -> Int =
-    if x == 0
-    then 0
-    else let sum (x - 1) of rest in
-         x + rest
-
-let fn main = sum 10
+let fn filter predicate,xs =
+    case xs of Con y,ys if predicate y -> Con y,(filter predicate,ys)
+             | Con y,ys                -> filter predicate,ys
+             | Nil                     -> Nil

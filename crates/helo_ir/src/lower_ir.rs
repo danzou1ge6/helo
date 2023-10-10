@@ -225,8 +225,7 @@ pub fn lower_function<'s>(
             functions,
             &mut compiler,
         );
-        blocks[ret_block].push(lir::Instruction::Ret(compiler.ret_temp()));
-        blocks.seal(ret_block, lir::Jump::Ret);
+        blocks.seal(ret_block, lir::Jump::Ret(compiler.ret_temp()));
 
         lir::Function {
             body,
@@ -823,6 +822,6 @@ fn lower_panic<'s>(
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
 ) -> lir::BlockId {
-    blocks[block].push(lir::Instruction::Panic(sid));
+    blocks.seal(block, lir::Jump::Panic(sid));
     block
 }
