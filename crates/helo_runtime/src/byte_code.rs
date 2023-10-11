@@ -178,7 +178,7 @@ pub enum Instruction {
     /// 2 of 8 bytes
     Float(RegisterId),
 
-    /// Push .1 to list at .0. Variants, tuples and closures are both represented by lists.
+    /// Push .1 to list at .0. Variants, tuples and closures are both represented by arrays.
     ///
     /// 3 of 8 bytes
     Push1(RegisterId, [RegisterId; 1]),

@@ -1,3 +1,5 @@
+use crate::lir::BlockId;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Site {
     Phi(BlockId, usize),
@@ -12,7 +14,7 @@ mod dead_code_elimination {
 
     use super::Site;
 
-    use lir::{BlockId, TempId};
+    use lir::TempId;
     fn collect_uses_defs(
         blocks: &ssa::SsaBlockHeap,
         temp_cnt: usize,

@@ -6,4 +6,7 @@
 pub mod builtins;
 pub mod byte_code;
 pub mod disassembler;
+pub mod errors;
 pub mod executable;
+pub mod mem;
+pub mod vm;

@@ -2,7 +2,6 @@
 pub mod artifect;
 pub mod errors;
 pub mod ir;
-pub mod lifetime;
 pub mod lir;
 pub mod lower_ast;
 pub mod lower_ir;
