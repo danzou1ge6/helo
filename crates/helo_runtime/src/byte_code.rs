@@ -12,7 +12,9 @@ pub struct RegisterId(pub(crate) u8);
 pub struct StrAddr(pub(crate) u32);
 /// Take 4 bytes
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
-pub struct FunctionAddr(pub(crate) u32);
+pub struct Addr(pub(crate) u32);
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+pub struct JumpDistance(pub(crate) i16);
 
 impl std::fmt::Display for StrAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -20,11 +22,6 @@ impl std::fmt::Display for StrAddr {
     }
 }
 
-impl std::fmt::Display for FunctionAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 impl std::fmt::Display for BuiltinId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -34,6 +31,50 @@ impl std::fmt::Display for BuiltinId {
 impl std::fmt::Display for RegisterId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "r{}", self.0)
+    }
+}
+
+impl std::fmt::Display for JumpDistance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Add<u32> for Addr {
+    type Output = Addr;
+    fn add(self, rhs: u32) -> Self::Output {
+        Addr(self.0 + rhs)
+    }
+}
+
+impl std::ops::Add<JumpDistance> for Addr {
+    type Output = Addr;
+    fn add(self, rhs: JumpDistance) -> Self::Output {
+        Addr((self.0 as i64 + rhs.0 as i64) as u32)
+    }
+}
+
+impl From<Addr> for usize {
+    fn from(value: Addr) -> Self {
+        value.0 as usize
+    }
+}
+
+impl std::ops::AddAssign<u32> for Addr {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs
+    }
+}
+
+impl std::ops::AddAssign<JumpDistance> for Addr {
+    fn add_assign(&mut self, rhs: JumpDistance) {
+        self.0 = (self.0 as i64 + rhs.0 as i64) as u32
+    }
+}
+
+impl std::fmt::Display for Addr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#010x}", self.0)
     }
 }
 
@@ -49,9 +90,22 @@ impl From<u32> for StrAddr {
     }
 }
 
-impl From<u32> for FunctionAddr {
+impl From<u32> for Addr {
     fn from(value: u32) -> Self {
         Self(value)
+    }
+}
+
+impl JumpDistance {
+    pub fn bytes_len() -> u8 {
+        2
+    }
+}
+
+impl TryFrom<usize> for JumpDistance {
+    type Error = std::num::TryFromIntError;
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        i16::try_from(value).map(|i| Self(i))
     }
 }
 
@@ -60,8 +114,6 @@ impl From<u16> for BuiltinId {
         Self(value)
     }
 }
-
-pub type JumpDistance = i16;
 
 #[derive(Emit, ToOpCode, ChunkReaderReadArgs)]
 pub enum Instruction {
@@ -116,41 +168,45 @@ pub enum Instruction {
     /// Call .1 with .2 and store result to .0
     ///
     /// 7 of 8 bytes
-    Call1(RegisterId, FunctionAddr, [RegisterId; 1]),
+    Call1(RegisterId, Addr, [RegisterId; 1]),
     /// 8 of 8 bytes
-    Call2(RegisterId, FunctionAddr, [RegisterId; 2]),
+    Call2(RegisterId, Addr, [RegisterId; 2]),
     /// Call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
-    CallMany(RegisterId, FunctionAddr, u8),
+    CallMany(RegisterId, Addr, u8),
 
-    /// Tail call .1 with .2 and store result to .0
+    /// Tail call .1 with .2
     ///
+    /// 6 of 8 bytes
+    TailCallU1(Addr, [RegisterId; 1]),
     /// 7 of 8 bytes
-    TailCallU1(RegisterId, FunctionAddr, [RegisterId; 1]),
-    /// 8 of 8 bytes
-    TailCallU2(RegisterId, FunctionAddr, [RegisterId; 2]),
+    TailCallU2(Addr, [RegisterId; 2]),
+    /// 7 of 8 bytes
+    TailCallU3(Addr, [RegisterId; 3]),
     /// Tail call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
-    TailCallUMany(RegisterId, FunctionAddr, u8),
+    TailCallUMany(Addr, u8),
 
-    /// Tail call .1 with .2 and store result to .0
+    /// Tail call .1 with .2
     ///
+    /// 3 of 8 bytes
+    TailCall1(RegisterId, [RegisterId; 1]),
     /// 4 of 8 bytes
-    TailCall1(RegisterId, RegisterId, [RegisterId; 1]),
+    TailCall2(RegisterId, [RegisterId; 2]),
     /// 5 of 8 bytes
-    TailCall2(RegisterId, RegisterId, [RegisterId; 2]),
+    TailCall3(RegisterId, [RegisterId; 3]),
     /// 6 of 8 bytes
-    TailCall3(RegisterId, RegisterId, [RegisterId; 3]),
+    TailCall4(RegisterId, [RegisterId; 4]),
     /// 7 of 8 bytes
-    TailCall4(RegisterId, RegisterId, [RegisterId; 4]),
+    TailCall5(RegisterId, [RegisterId; 5]),
     /// 8 of 8 bytes
-    TailCall5(RegisterId, RegisterId, [RegisterId; 5]),
+    TailCall6(RegisterId, [RegisterId; 7]),
     /// Call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
-    TailCallMany(RegisterId, RegisterId, u8),
+    TailCallMany(RegisterId, u8),
 
     /// call builtin .1 with .2 and store result to .0
     ///
@@ -178,7 +234,7 @@ pub enum Instruction {
     /// 2 of 8 bytes
     Float(RegisterId),
 
-    /// Push .1 to list at .0. Variants, tuples and closures are both represented by arrays.
+    /// Push .1 to array at .0. Variants, tuples are both represented by arrays.
     ///
     /// 3 of 8 bytes
     Push1(RegisterId, [RegisterId; 1]),
@@ -196,7 +252,7 @@ pub enum Instruction {
     /// Load a user function
     ///
     /// 6 of 8 bytes
-    Function(RegisterId, FunctionAddr),
+    Function(RegisterId, Addr),
     /// Load a builtin
     ///
     /// 5 of 8 bytes
@@ -260,12 +316,14 @@ pub enum OpCode {
     CALL_MANY,
     TAIL_CALL_U1,
     TAIL_CALL_U2,
+    TAIL_CALL_U3,
     TAIL_CALL_U_MANY,
     TAIL_CALL1,
     TAIL_CALL2,
     TAIL_CALL3,
     TAIL_CALL4,
     TAIL_CALL5,
+    TAIL_CALL6,
     TAIL_CALL_MANY,
     CALL_BUILTIN1,
     CALL_BUILTIN2,
@@ -352,6 +410,18 @@ impl FromBytes<8> for i64 {
     }
 }
 
+impl ToBytes<8> for u64 {
+    fn to_bytes(self) -> [u8; 8] {
+        self.to_le_bytes()
+    }
+}
+
+impl FromBytes<8> for u64 {
+    fn from_bytes(bytes: [u8; 8]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+}
+
 impl ToBytes<8> for f64 {
     fn to_bytes(self) -> [u8; 8] {
         self.to_le_bytes()
@@ -376,13 +446,13 @@ impl FromBytes<4> for StrAddr {
     }
 }
 
-impl ToBytes<4> for FunctionAddr {
+impl ToBytes<4> for Addr {
     fn to_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
     }
 }
 
-impl FromBytes<4> for FunctionAddr {
+impl FromBytes<4> for Addr {
     fn from_bytes(bytes: [u8; 4]) -> Self {
         Self(u32::from_le_bytes(bytes))
     }
@@ -400,15 +470,15 @@ impl FromBytes<2> for BuiltinId {
     }
 }
 
-impl ToBytes<2> for i16 {
+impl ToBytes<2> for JumpDistance {
     fn to_bytes(self) -> [u8; 2] {
-        self.to_le_bytes()
+        self.0.to_le_bytes()
     }
 }
 
-impl FromBytes<2> for i16 {
+impl FromBytes<2> for JumpDistance {
     fn from_bytes(bytes: [u8; 2]) -> Self {
-        Self::from_le_bytes(bytes)
+        Self(i16::from_le_bytes(bytes))
     }
 }
 
@@ -443,6 +513,18 @@ impl ToBytes<4> for i32 {
 }
 
 impl FromBytes<4> for i32 {
+    fn from_bytes(bytes: [u8; 4]) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+}
+
+impl ToBytes<4> for u32 {
+    fn to_bytes(self) -> [u8; 4] {
+        self.to_le_bytes()
+    }
+}
+
+impl FromBytes<4> for u32 {
     fn from_bytes(bytes: [u8; 4]) -> Self {
         Self::from_le_bytes(bytes)
     }
@@ -558,10 +640,28 @@ impl Chunk {
             .for_each(|(write, value)| *write = value)
     }
 
-    pub fn fetch(&self, offset: u32) -> ChunkReader<0> {
+    pub fn read<T, const N: usize>(&self, addr: Addr) -> T
+    where
+        T: FromBytes<N>,
+    {
+        let r = T::from_bytes(collect_to_array(
+            self.code[usize::from(addr)..].iter().copied(),
+        ));
+        r
+    }
+
+    pub fn reader(&self, addr: Addr) -> ChunkReader<0> {
         ChunkReader {
-            code: &self.code[offset as usize..],
+            code: &self.code[addr.0 as usize..],
         }
+    }
+
+    pub fn fetch_registers<'a>(
+        &'a self,
+        at: Addr,
+        cnt: usize,
+    ) -> impl Iterator<Item = RegisterId> + 'a {
+        (0..cnt).map(move |i| self.read::<RegisterId, _>(at + i as u32))
     }
 
     pub fn len(&self) -> usize {

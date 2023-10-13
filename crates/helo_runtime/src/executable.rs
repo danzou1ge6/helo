@@ -20,17 +20,17 @@ impl StrChunk {
 }
 
 pub struct Symbols {
-    f: Vec<(byte_code::FunctionAddr, byte_code::StrAddr)>,
+    f: Vec<(byte_code::Addr, byte_code::StrAddr)>,
 }
 
 impl Symbols {
-    pub fn new(function_names: Vec<(byte_code::FunctionAddr, byte_code::StrAddr)>) -> Self {
+    pub fn new(function_names: Vec<(byte_code::Addr, byte_code::StrAddr)>) -> Self {
         Self { f: function_names }
     }
-    pub fn find(&self, addr: byte_code::FunctionAddr) -> byte_code::StrAddr {
+    pub fn find(&self, addr: byte_code::Addr) -> byte_code::StrAddr {
         self.f.iter().find(|(f_addr, _)| *f_addr == addr).unwrap().1
     }
-    pub fn try_find(&self, addr: byte_code::FunctionAddr) -> Option<byte_code::StrAddr> {
+    pub fn try_find(&self, addr: byte_code::Addr) -> Option<byte_code::StrAddr> {
         self.f
             .iter()
             .find(|(f_addr, _)| *f_addr == addr)
@@ -41,7 +41,7 @@ impl Symbols {
 
 pub struct Executable {
     pub(crate) chunk: byte_code::Chunk,
-    pub(crate) entry: byte_code::FunctionAddr,
+    pub(crate) entry: byte_code::Addr,
     pub(crate) str_chunk: StrChunk,
     pub(crate) symbols: Symbols,
 }
@@ -49,7 +49,7 @@ pub struct Executable {
 impl Executable {
     pub fn new(
         chunk: byte_code::Chunk,
-        entry: byte_code::FunctionAddr,
+        entry: byte_code::Addr,
         str_chunk: StrChunk,
         symbols: Symbols,
     ) -> Self {

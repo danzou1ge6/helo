@@ -230,7 +230,7 @@ use crate::lir;
 pub fn pretty_lir_instruction<'s, 'b, D, A>(
     inst: &lir::Instruction,
     str_list: &ir::StrList,
-    functions: &lir::FunctionList,
+    functions: &lir::FunctionNameList,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -251,7 +251,7 @@ where
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),
         TailCallU(ret, callee, args) => {
-            let callee_name = functions.get(*callee).unwrap().name;
+            let callee_name = functions.get(*callee);
             let callee_name = str_list.get(callee_name);
             allocator
                 .text(format!(
@@ -264,7 +264,7 @@ where
                 )
         }
         Call(ret, callee, args) => {
-            let callee_name = functions.get(*callee).unwrap().name;
+            let callee_name = functions.get(*callee);
             let callee_name = str_list.get(callee_name);
             allocator
                 .text(format!("x{:<3} <- CALL f{}'{}' ", ret, callee, callee_name))
@@ -274,7 +274,7 @@ where
                 )
         }
         CallBuiltin(ret, callee, args) => {
-            let callee_name = helo_runtime::builtins::Builtins::name_by_id(*callee);
+            let callee_name = helo_runtime::builtins::name_by_id(*callee);
             allocator
                 .text(format!(
                     "x{:<3} <- CALL_BUILTIN B{}'{}' ",
@@ -298,12 +298,12 @@ where
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),
         Function(ret, value) => {
-            let callee_name = functions.get(*value).unwrap().name;
+            let callee_name = functions.get(*value);
             let callee_name = str_list.get(callee_name);
             allocator.text(format!("x{:<3} <- f{}'{}'", ret, value, callee_name))
         }
         Buitltin(ret, value) => {
-            let callee_name = helo_runtime::builtins::Builtins::name_by_id(*value);
+            let callee_name = helo_runtime::builtins::name_by_id(*value);
             allocator.text(format!("x{:<3} <- f{}'{}'", ret, value, callee_name))
         }
         Field(ret, operand, n) => allocator.text(format!("x{:<3} <- x{}.{}", ret, operand, n)),
@@ -391,7 +391,7 @@ pub fn pretty_lir_block<'s, 'b, D, A>(
     block_id: lir::BlockId,
     blocks: &lir::BlockHeap,
     str_list: &ir::StrList,
-    functions: &lir::FunctionList,
+    functions: &lir::FunctionNameList,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -426,7 +426,7 @@ pub fn pretty_ssa_block<'s, 'b, D, A>(
     block_id: lir::BlockId,
     blocks: &lir::ssa::SsaBlockHeap,
     str_list: &ir::StrList,
-    functions: &lir::FunctionList,
+    functions: &lir::FunctionNameList,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -504,12 +504,9 @@ where
 
 pub fn pretty_ssa_function<'s, 'b, D, A>(
     f_id: lir::FunctionId,
-    f_name: ir::StrId,
-    entry: lir::BlockId,
-    blocks: &lir::ssa::SsaBlockHeap,
-    arity: usize,
+    f: &lir::ssa::Function,
     str_list: &ir::StrList,
-    functions: &lir::FunctionList,
+    functions: &lir::FunctionNameList,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -517,40 +514,6 @@ where
     D::Doc: Clone,
     A: Clone,
 {
-    allocator
-        .text(format!(
-            "Function {}'{}' [Entry at Block {}, Arity {}]:",
-            f_id,
-            str_list.get(f_name),
-            entry,
-            arity
-        ))
-        .append(allocator.hardline())
-        .append(
-            allocator
-                .intersperse(
-                    blocks
-                        .iter_id()
-                        .map(|b| pretty_ssa_block(b, &blocks, str_list, functions, allocator)),
-                    allocator.hardline(),
-                )
-                .align()
-                .indent(4),
-        )
-}
-
-pub fn pretty_lir_function<'s, 'b, D, A>(
-    f_id: lir::FunctionId,
-    str_list: &ir::StrList,
-    functions: &lir::FunctionList,
-    allocator: &'b D,
-) -> pretty::DocBuilder<'b, D, A>
-where
-    D: pretty::DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let f = functions.get(f_id).unwrap();
     allocator
         .text(format!(
             "Function {}'{}' [Entry at Block {}, Arity {}]:",
@@ -565,7 +528,41 @@ where
                 .intersperse(
                     f.blocks
                         .iter_id()
-                        .map(|b| pretty_lir_block(b, &f.blocks, str_list, functions, allocator)),
+                        .map(|b| pretty_ssa_block(b, &f.blocks, str_list, functions, allocator)),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
+}
+
+pub fn pretty_lir_function<'s, 'b, D, A>(
+    f_id: lir::FunctionId,
+    f: &lir::Function,
+    str_list: &ir::StrList,
+    functions_names: &lir::FunctionNameList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    allocator
+        .text(format!(
+            "Function {}'{}' [Entry at Block {}, Arity {}]:",
+            f_id,
+            str_list.get(f.name),
+            f.body,
+            f.arity
+        ))
+        .append(allocator.hardline())
+        .append(
+            allocator
+                .intersperse(
+                    f.blocks.iter_id().map(|b| {
+                        pretty_lir_block(b, &f.blocks, str_list, functions_names, allocator)
+                    }),
                     allocator.hardline(),
                 )
                 .align()

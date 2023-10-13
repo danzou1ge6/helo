@@ -71,7 +71,7 @@ impl std::fmt::Display for BlockId {
     }
 }
 
-pub use helo_runtime::builtins::{BuiltinId, Builtins};
+pub use helo_runtime::builtins::{BuiltinId, BuiltinTable};
 
 use ir::StrId;
 
@@ -323,7 +323,10 @@ impl<T, I> AltIdxVec<T, I> {
     pub fn into_iter(self) -> impl Iterator<Item = T> {
         self.0.into_iter()
     }
-    pub fn iter_index(&self) -> impl Iterator<Item = I> where I: From<usize> {
+    pub fn iter_index(&self) -> impl Iterator<Item = I>
+    where
+        I: From<usize>,
+    {
         (0..self.len()).map(|i| i.into())
     }
 }
@@ -503,7 +506,8 @@ impl FunctionTable {
         id
     }
     pub fn main_id(&self) -> Result<FunctionId, errors::MainNotFound> {
-        self.tab.get("main")
+        self.tab
+            .get("main")
             .map_or_else(|| Err(errors::MainNotFound {}), |x| Ok(*x))
     }
     pub fn to_list(self) -> FunctionList {
@@ -530,6 +534,36 @@ impl FunctionList {
     }
     pub fn iter_id(&self) -> impl Iterator<Item = FunctionId> {
         (0..self.v.len()).map(|i| FunctionId(i))
+    }
+    pub fn into_iter(self) -> impl Iterator<Item = Function> {
+        self.v.into_iter()
+    }
+    pub fn into_iter_id(self) -> impl Iterator<Item = (FunctionId, Function)> {
+        self.v
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| (FunctionId(i), f))
+    }
+    pub fn function_name_list(&self) -> FunctionNameList {
+        let v = self.v.iter().map(|f| f.name).collect();
+        FunctionNameList { v }
+    }
+}
+
+impl FromIterator<Function> for FunctionList {
+    fn from_iter<T: IntoIterator<Item = Function>>(iter: T) -> Self {
+        let v = iter.into_iter().collect();
+        Self { v }
+    }
+}
+
+pub struct FunctionNameList {
+    v: Vec<StrId>,
+}
+
+impl FunctionNameList {
+    pub fn get(&self, id: FunctionId) -> StrId {
+        self.v[id.0]
     }
 }
 

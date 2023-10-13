@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 fn pretty_lir_functions(
     lir_functions: &helo_ir::lir::FunctionList,
+    function_names: &lir::FunctionNameList,
     str_list: &helo_ir::ir::StrList,
 ) {
     for lir_fid in lir_functions.iter_id() {
@@ -18,8 +19,9 @@ fn pretty_lir_functions(
         let allocator = pretty::RcAllocator;
         let doc_builder = pretty_print::pretty_lir_function::<_, ()>(
             lir_fid,
+            lir_functions.get(lir_fid).unwrap(),
             &str_list,
-            &lir_functions,
+            function_names,
             &allocator,
         );
         let doc = doc_builder.pretty(term_width);
@@ -29,25 +31,14 @@ fn pretty_lir_functions(
 
 fn print_ssa_blocks(
     f_id: lir::FunctionId,
-    f_name: helo_ir::ir::StrId,
-    entry: lir::BlockId,
-    arity: usize,
-    ssa_blocks: &ssa::SsaBlockHeap,
+    f: &ssa::Function,
     str_list: &helo_ir::ir::StrList,
-    lir_functions: &helo_ir::lir::FunctionList,
+    function_names: &helo_ir::lir::FunctionNameList,
 ) {
     let term_width = 80;
     let allocator = pretty::RcAllocator;
-    let doc_builder = pretty_print::pretty_ssa_function::<_, ()>(
-        f_id,
-        f_name,
-        entry,
-        ssa_blocks,
-        arity,
-        str_list,
-        lir_functions,
-        &allocator,
-    );
+    let doc_builder =
+        pretty_print::pretty_ssa_function::<_, ()>(f_id, f, str_list, function_names, &allocator);
     let doc = doc_builder.pretty(term_width);
     println!("{doc}");
 }
@@ -63,80 +54,42 @@ fn compile(src: String, file_name: String) -> miette::Result<()> {
 
     let lir_functions = artifect::compile_lir(ir_functions, ir_nodes);
     let main_fid = lir_functions.main_id();
-    let mut lir_functions = lir_functions.to_list();
+    let lir_functions = lir_functions.to_list();
+    let function_names = lir_functions.function_name_list();
     println!("Before optimization:");
-    pretty_lir_functions(&lir_functions, &str_list);
+    pretty_lir_functions(&lir_functions, &function_names, &str_list);
     println!("");
 
-    for fid in lir_functions.iter_id() {
-        let f = lir_functions.get_mut(fid).unwrap();
-        let arity = f.arity;
-        let f_entry = f.body;
-        let f_name = f.name;
-        let blocks = std::mem::take(&mut f.blocks);
+    let lir_functions = lir_functions
+        .into_iter_id()
+        .map(|(fid, f)| (fid, artifect::compile_ssa(f)))
+        .map(|(fid, (f, dom_tree))| {
+            println!("\nFresh SSA");
+            print_ssa_blocks(fid, &f, &str_list, &function_names);
+            (fid, f, dom_tree)
+        })
+        .map(|(fid, f, dom_tree)| {
+            let f = artifect::dead_code_elimination(f);
+            println!("\nAfter dead code elimination");
+            print_ssa_blocks(fid, &f, &str_list, &function_names);
+            (fid, f, dom_tree)
+        })
+        .map(|(fid, f, dom_tree)| {
+            let f = artifect::common_expression_elimination(f, &dom_tree);
+            println!("\nAfter common expression elimination");
+            print_ssa_blocks(fid, &f, &str_list, &function_names);
+            f
+        })
+        .map(|f| artifect::deconstruct_ssa(f))
+        .collect::<lir::FunctionList>();
 
-        let post_order = ssa::BlocksOrder::post_order_of(&blocks, f_entry);
-        let idom = ssa::ImmediateDominators::build(&blocks, f_entry, &post_order);
-        let dom_tree = ssa::DominanceTree::from_idoms(&idom);
-        let dom_frontier = ssa::DominanceFrontier::build(&blocks, &idom);
-
-        let (mut ssa_blocks, temp_cnt) =
-            ssa::construct_ssa(blocks, f.body, &dom_frontier, &dom_tree, f.temp_cnt);
-        f.temp_cnt = temp_cnt;
-
-        println!("Fresh SSA");
-        print_ssa_blocks(
-            fid,
-            f_name,
-            f_entry,
-            arity,
-            &ssa_blocks,
-            &str_list,
-            &lir_functions,
-        );
-
-        lir::optimizations::dead_code_elimination(&mut ssa_blocks, temp_cnt);
-        println!("After dead code elimination");
-        print_ssa_blocks(
-            fid,
-            f_name,
-            f_entry,
-            arity,
-            &ssa_blocks,
-            &str_list,
-            &lir_functions,
-        );
-
-        lir::optimizations::common_expression_elimination(
-            &mut ssa_blocks,
-            &dom_tree,
-            f_entry,
-            temp_cnt,
-        );
-        println!("After common expression elimination");
-        print_ssa_blocks(
-            fid,
-            f_name,
-            f_entry,
-            arity,
-            &ssa_blocks,
-            &str_list,
-            &lir_functions,
-        );
-
-        let (blocks, _) = ssa::deconstruct_ssa(ssa_blocks, temp_cnt, arity);
-        lir_functions.get_mut(fid).unwrap().blocks = blocks;
-    }
-
-    // artifect::lir_optimize(&mut lir_functions);
-    println!("After optimization:");
-    pretty_lir_functions(&lir_functions, &str_list);
-    println!("");
+    println!("\nAfter optimization:");
+    pretty_lir_functions(&lir_functions, &function_names, &str_list);
 
     let executable = artifect::compile_byte_code(lir_functions, str_list, main_fid?)?;
 
     let pretty_table = disassembler::disassemble(&executable);
-    println!("{pretty_table}");
+    println!("\n{pretty_table}");
     Ok(())
 }
 

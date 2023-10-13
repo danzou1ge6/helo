@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::lir::{self, TempIdVec, ssa};
+use crate::lir::{self, ssa, TempIdVec};
 use lir::BlockId;
 
 use bitvec::prelude as bv;
@@ -731,6 +731,8 @@ fn liveness_analysis(blocks: &SsaBlockHeap, temp_cnt: usize) -> (Graph, BlockIdV
     (graph, swap_temps)
 }
 
+/// Deconstruct SSA form, converting back to LIR.
+/// Returns blocks for LIR and number of registers used
 pub fn deconstruct_ssa(
     mut ssa_blocks: SsaBlockHeap,
     temp_cnt: usize,
@@ -773,4 +775,13 @@ pub fn deconstruct_ssa(
     let blocks = lir::BlockHeap_(blocks);
 
     (blocks, reg_cnt)
+}
+
+pub struct Function {
+    pub body: BlockId,
+    pub blocks: SsaBlockHeap,
+    pub arity: usize,
+    pub meta: helo_parse::ast::Meta,
+    pub name: crate::ir::StrId,
+    pub temp_cnt: usize,
 }

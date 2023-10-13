@@ -1,12 +1,11 @@
-use crate::builtins::Builtins;
+use crate::builtins;
 use crate::{byte_code, executable};
 
 use tabled::{Table, Tabled};
 
 #[derive(Tabled)]
 struct Row {
-    #[tabled(display_with = "hex_ref")]
-    addr: u32,
+    addr: byte_code::Addr,
     op_code: String,
     to: String,
     args: String,
@@ -15,20 +14,13 @@ struct Row {
 
 struct RowIter<'c> {
     exe: &'c executable::Executable,
-    ip: u32,
+    ip: byte_code::Addr,
 }
 
 impl<'c> RowIter<'c> {
     fn new(exe: &'c executable::Executable) -> Self {
-        Self { exe, ip: 0 }
+        Self { exe, ip: 0.into() }
     }
-}
-
-fn hex(x: u32) -> String {
-    format!("{:#010x}", x)
-}
-fn hex_ref(x: &u32) -> String {
-    format!("{:#010x}", x)
 }
 
 struct RegisterArray(Vec<byte_code::RegisterId>);
@@ -62,36 +54,58 @@ pub fn trunc_str(s: &str) -> &str {
 impl<'c> Iterator for RowIter<'c> {
     type Item = Vec<Row>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.ip as usize == self.exe.chunk.len() {
+        // Ending
+        if usize::from(self.ip) == self.exe.chunk.len() {
             return None;
         }
 
-        let reader = self.exe.chunk.fetch(self.ip);
+        // Printing utils
+        let es = || String::new();
+        let mk_info_row = |addr, op_code, args, extra| Row {
+            addr,
+            op_code,
+            to: es(),
+            args,
+            extra,
+        };
+
+        // Check if `ip` points to begining of a function
+        let mut rows = if let Some(f_name_addr) = self.exe.symbols.try_find(self.ip.into()) {
+            let f_name = self.exe.str_chunk.read(f_name_addr).to_string();
+            let (reader, arity) = self.exe.chunk.reader(self.ip).read::<u32, _>();
+            let (_, reg_cnt) = reader.read::<u32, _>();
+            self.ip += 8;
+            vec![mk_info_row(
+                self.ip,
+                "== FUNCTION BEGIN ==".to_string(),
+                f_name,
+                format!("Arity {}, Reg {}", arity, reg_cnt),
+            )]
+        } else {
+            Vec::new()
+        };
+
+        // Create reader at `ip`, and read the op-code
+        let reader = self.exe.chunk.reader(self.ip);
         let (reader, op_code) = reader.read::<byte_code::OpCode, _>();
 
-        let es = || String::new();
+        // Printing utils
         let mk_row = |to: byte_code::RegisterId, args, extra| Row {
-            addr: self.ip as u32,
+            addr: self.ip,
             op_code: op_code.to_string(),
             to: to.to_string(),
             args,
             extra,
         };
         let mk_row1 = |args, extra| Row {
-            addr: self.ip as u32,
+            addr: self.ip,
             op_code: op_code.to_string(),
             to: es(),
             args,
             extra,
         };
-        let mk_info_row = |addr, args, extra| Row {
-            addr,
-            op_code: es(),
-            to: es(),
-            args,
-            extra,
-        };
 
+        // Macros for common cases
         macro_rules! arm_apply {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, args) = reader.$f();
@@ -103,7 +117,27 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_apply_with_name {
+        macro_rules! arm_tail_call {
+            ($f:ident, $rows:ident) => {{
+                let (callee, args) = reader.$f();
+                $rows.push(mk_row1(
+                    format!("{}, {}", callee, RegisterArray::from(args)),
+                    es(),
+                ));
+            }};
+        }
+        macro_rules! arm_tail_call_u {
+            ($f:ident, $rows:ident) => {{
+                let (callee, args) = reader.$f();
+                let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                $rows.push(mk_row1(
+                    format!("{}, {}", callee, RegisterArray::from(args)),
+                    name.to_string(),
+                ));
+            }};
+        }
+
+        macro_rules! arm_call {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, args) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
@@ -118,7 +152,7 @@ impl<'c> Iterator for RowIter<'c> {
         macro_rules! arm_call_builtin {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, args) = reader.$f();
-                let name = Builtins::name_by_id(callee);
+                let name = builtins::name_by_id(callee);
                 $rows.push(mk_row(
                     ret,
                     format!("{}, {}", callee, RegisterArray::from(args)),
@@ -130,14 +164,10 @@ impl<'c> Iterator for RowIter<'c> {
         macro_rules! arm_apply_many {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, cnt) = reader.$f();
-                let registers = (0..cnt)
-                    .map(|i| {
-                        self.exe
-                            .chunk
-                            .fetch(self.ip + 8 + i as u32)
-                            .read::<byte_code::RegisterId, _>()
-                            .1
-                    })
+                let registers = self
+                    .exe
+                    .chunk
+                    .fetch_registers(self.ip + 8, cnt as usize)
                     .collect::<Vec<_>>();
                 $rows.push(mk_row(
                     ret,
@@ -148,7 +178,25 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_apply_many_with_name {
+        macro_rules! arm_tail_call_many {
+            ($f:ident, $rows:ident) => {{
+                let (callee, cnt) = reader.$f();
+                let registers = (0..cnt)
+                    .map(|i| {
+                        self.exe
+                            .chunk
+                            .read::<byte_code::RegisterId, _>(self.ip + 8 + i as u32)
+                    })
+                    .collect::<Vec<_>>();
+                $rows.push(mk_row1(
+                    format!("{}, {}", callee, cnt),
+                    RegisterArray(registers).to_string(),
+                ));
+                self.ip += (cnt.div_ceil(8) * 8) as u32;
+            }};
+        }
+
+        macro_rules! arm_call_many {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, cnt) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
@@ -156,13 +204,30 @@ impl<'c> Iterator for RowIter<'c> {
                     .map(|i| {
                         self.exe
                             .chunk
-                            .fetch(self.ip + 8 + i as u32)
-                            .read::<byte_code::RegisterId, _>()
-                            .1
+                            .read::<byte_code::RegisterId, _>(self.ip + 8 + i as u32)
                     })
                     .collect::<Vec<_>>();
                 $rows.push(mk_row(
                     ret,
+                    format!("{}, {}", callee, cnt),
+                    format!("{}, {}", name, RegisterArray(registers)),
+                ));
+                self.ip += (cnt.div_ceil(8) * 8) as u32;
+            }};
+        }
+
+        macro_rules! arm_tail_call_u_many {
+            ($f:ident, $rows:ident) => {{
+                let (callee, cnt) = reader.$f();
+                let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                let registers = (0..cnt)
+                    .map(|i| {
+                        self.exe
+                            .chunk
+                            .read::<byte_code::RegisterId, _>(self.ip + 8 + i as u32)
+                    })
+                    .collect::<Vec<_>>();
+                $rows.push(mk_row1(
                     format!("{}, {}", callee, cnt),
                     format!("{}, {}", name, RegisterArray(registers)),
                 ));
@@ -180,63 +245,52 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        let mut rows = if let Some(f_name_addr) = self.exe.symbols.try_find(self.ip.into()) {
-            let f_name = self.exe.str_chunk.read(f_name_addr).to_string();
-            vec![mk_info_row(
-                self.ip,
-                "== FUNCTION BEGIN ==".to_string(),
-                f_name,
-            )]
-        } else {
-            Vec::new()
-        };
-
         use byte_code::OpCode::*;
         match op_code {
             JUMP_TABLE => {
                 let (r, size) = reader.jump_table();
                 rows.push(mk_row1(r.to_string(), es()));
                 for i in 0..size {
-                    let (_, delta) = self
+                    let delta: byte_code::JumpDistance = self
                         .exe
                         .chunk
-                        .fetch(self.ip + 8 + (i * 2) as u32)
-                        .read::<byte_code::JumpDistance, _>();
+                        .read(self.ip + 8 + (i * byte_code::JumpDistance::bytes_len()) as u32);
                     rows.push(mk_info_row(
-                        self.ip + 8 + (i * 2) as u32,
+                        self.ip + 8 + (i * byte_code::JumpDistance::bytes_len()) as u32,
+                        es(),
                         delta.to_string(),
-                        hex(self.ip + delta as u32),
+                        (self.ip + delta).to_string(),
                     ));
                 }
-                self.ip += ((size * 2).div_ceil(8) * 8) as u32;
+                self.ip += ((size * byte_code::JumpDistance::bytes_len()).div_ceil(8) * 8) as u32;
             }
             JUMP_IF => {
                 let (r, branch) = reader.jump_if();
                 rows.push(mk_row1(
                     format!("{}, {}", r, branch),
-                    hex(branch as u32 + self.ip),
+                    (self.ip + branch).to_string(),
                 ));
             }
             JUMP_IF_EQ_BOOL => {
                 let (r, value, branch) = reader.jump_if_eq_bool();
                 rows.push(mk_row1(
                     format!("{}, {}, {}", r, value, branch),
-                    hex(branch as u32 + self.ip),
+                    (self.ip + branch).to_string(),
                 ));
             }
             JUMP_IF_EQ_I32 => {
                 let (r, value, branch) = reader.jump_if_eq_i32();
                 rows.push(mk_row1(
                     format!("{}, {}, {}", r, value, branch),
-                    hex(branch as u32 + self.ip),
+                    (self.ip + branch).to_string(),
                 ));
             }
             JUMP_IF_EQ_I64 => {
                 let (r, branch) = reader.jump_if_eq_i64();
-                let (_, value) = self.exe.chunk.fetch(self.ip + 8).read::<i64, _>();
+                let (_, value) = self.exe.chunk.reader(self.ip + 8).read::<i64, _>();
                 rows.push(mk_row1(
                     format!("{}, {}, {}", r, value, branch),
-                    hex(branch as u32 + self.ip),
+                    (self.ip + branch).to_string(),
                 ));
                 self.ip += 8;
             }
@@ -245,12 +299,12 @@ impl<'c> Iterator for RowIter<'c> {
                 let s = trunc_str(self.exe.str_chunk.read(value));
                 rows.push(mk_row1(
                     format!("{}, {}, {}", r, value, branch),
-                    format!("{}, {}", s, hex(branch as u32 + self.ip)),
+                    format!("{}, {}", s, (self.ip + branch).to_string()),
                 ));
             }
             JUMP => {
                 let branch = reader.jump();
-                rows.push(mk_row1(es(), hex(self.ip + branch as u32)));
+                rows.push(mk_row1(es(), (self.ip + branch).to_string()));
             }
             APPLY1 => arm_apply!(apply1, rows),
             APPLY2 => arm_apply!(apply2, rows),
@@ -258,18 +312,20 @@ impl<'c> Iterator for RowIter<'c> {
             APPLY4 => arm_apply!(apply4, rows),
             APPLY5 => arm_apply!(apply5, rows),
             APPLY_MANY => arm_apply_many!(apply_many, rows),
-            CALL1 => arm_apply_with_name!(call1, rows),
-            CALL2 => arm_apply_with_name!(call2, rows),
-            CALL_MANY => arm_apply_many_with_name!(call_many, rows),
-            TAIL_CALL_U1 => arm_apply_with_name!(tail_call_u1, rows),
-            TAIL_CALL_U2 => arm_apply_with_name!(tail_call_u2, rows),
-            TAIL_CALL_U_MANY => arm_apply_many_with_name!(tail_call_u_many, rows),
-            TAIL_CALL1 => arm_apply!(tail_call1, rows),
-            TAIL_CALL2 => arm_apply!(tail_call2, rows),
-            TAIL_CALL3 => arm_apply!(tail_call3, rows),
-            TAIL_CALL4 => arm_apply!(tail_call4, rows),
-            TAIL_CALL5 => arm_apply!(tail_call5, rows),
-            TAIL_CALL_MANY => arm_apply_many!(tail_call_many, rows),
+            CALL1 => arm_call!(call1, rows),
+            CALL2 => arm_call!(call2, rows),
+            CALL_MANY => arm_call_many!(call_many, rows),
+            TAIL_CALL_U1 => arm_tail_call_u!(tail_call_u1, rows),
+            TAIL_CALL_U2 => arm_tail_call_u!(tail_call_u2, rows),
+            TAIL_CALL_U3 => arm_tail_call_u!(tail_call_u3, rows),
+            TAIL_CALL_U_MANY => arm_tail_call_u_many!(tail_call_u_many, rows),
+            TAIL_CALL1 => arm_tail_call!(tail_call1, rows),
+            TAIL_CALL2 => arm_tail_call!(tail_call2, rows),
+            TAIL_CALL3 => arm_tail_call!(tail_call3, rows),
+            TAIL_CALL4 => arm_tail_call!(tail_call4, rows),
+            TAIL_CALL5 => arm_tail_call!(tail_call5, rows),
+            TAIL_CALL6 => arm_tail_call!(tail_call6, rows),
+            TAIL_CALL_MANY => arm_tail_call_many!(tail_call_many, rows),
             CALL_BUILTIN1 => arm_call_builtin!(call_builtin1, rows),
             CALL_BUILTIN2 => arm_call_builtin!(call_builtin2, rows),
             CALL_BUILTIN3 => arm_call_builtin!(call_builtin3, rows),
@@ -289,14 +345,14 @@ impl<'c> Iterator for RowIter<'c> {
             }
             INT64 => {
                 let to = reader.int64();
-                let (_, value) = self.exe.chunk.fetch(self.ip + 8).read::<i64, _>();
+                let (_, value) = self.exe.chunk.reader(self.ip + 8).read::<i64, _>();
                 let r = rows.push(mk_row(to, value.to_string(), es()));
                 self.ip += 8;
                 r
             }
             FLOAT => {
                 let to = reader.float();
-                let (_, value) = self.exe.chunk.fetch(self.ip + 8).read::<f64, _>();
+                let (_, value) = self.exe.chunk.reader(self.ip + 8).read::<f64, _>();
                 let r = rows.push(mk_row(to, value.to_string(), es()));
                 self.ip += 8;
                 r
@@ -314,7 +370,7 @@ impl<'c> Iterator for RowIter<'c> {
             }
             BUILTIN => {
                 let (to, id) = reader.builtin();
-                let name = Builtins::name_by_id(id);
+                let name = builtins::name_by_id(id);
                 rows.push(mk_row(to, id.to_string(), name.to_string()))
             }
             FIELD => {

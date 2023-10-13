@@ -1,7 +1,7 @@
 use helo_runtime::builtins as rt_builtins;
 use helo_runtime::{byte_code, executable};
 
-use crate::{ir, lir};
+use crate::{ir, lir, lir::ssa};
 use crate::{lower_ast, lower_ir, lower_lir};
 
 use helo_parse::builtins;
@@ -93,7 +93,7 @@ pub fn compile_lir<'s>(
     ir_nodes: ir::ExprHeap<'s>,
 ) -> lir::FunctionTable {
     let mut lir_functions = lir::FunctionTable::new();
-    let rt_builtins = rt_builtins::Builtins::new();
+    let rt_builtins = rt_builtins::BuiltinTable::new();
     for fid in ir_functions.function_names() {
         lower_ir::lower_function(
             fid,
@@ -104,6 +104,82 @@ pub fn compile_lir<'s>(
         );
     }
     lir_functions
+}
+
+pub fn compile_ssa(f: lir::Function) -> (ssa::Function, ssa::DominanceTree) {
+    let lir::Function {
+        body,
+        blocks,
+        arity,
+        meta,
+        name,
+        temp_cnt,
+    } = f;
+
+    let post_order = ssa::BlocksOrder::post_order_of(&blocks, body);
+    let idom = ssa::ImmediateDominators::build(&blocks, body, &post_order);
+    let dom_tree = ssa::DominanceTree::from_idoms(&idom);
+    let dom_frontier = ssa::DominanceFrontier::build(&blocks, &idom);
+
+    let (ssa_blocks, temp_cnt) =
+        ssa::construct_ssa(blocks, body, &dom_frontier, &dom_tree, temp_cnt);
+
+    let f = ssa::Function {
+        body,
+        blocks: ssa_blocks,
+        arity,
+        meta,
+        name,
+        temp_cnt,
+    };
+
+    (f, dom_tree)
+}
+
+pub fn dead_code_elimination(mut f: ssa::Function) -> ssa::Function {
+    lir::optimizations::dead_code_elimination(&mut f.blocks, f.temp_cnt);
+    f
+}
+
+pub fn common_expression_elimination(
+    mut f: ssa::Function,
+    dom_tree: &ssa::DominanceTree,
+) -> ssa::Function {
+    lir::optimizations::common_expression_elimination(&mut f.blocks, dom_tree, f.body, f.temp_cnt);
+    f
+}
+
+pub fn deconstruct_ssa(f: ssa::Function) -> lir::Function {
+    let ssa::Function {
+        body,
+        blocks,
+        arity,
+        meta,
+        name,
+        temp_cnt,
+    } = f;
+
+    let (blocks, temp_cnt) = ssa::deconstruct_ssa(blocks, temp_cnt, arity);
+
+    let f = lir::Function {
+        body,
+        blocks,
+        arity,
+        meta,
+        name,
+        temp_cnt,
+    };
+    f
+}
+
+pub fn optimize_lir<'s>(lir_functions: lir::FunctionList) -> lir::FunctionList {
+    lir_functions
+        .into_iter()
+        .map(|f| compile_ssa(f))
+        .map(|(f, dom_tree)| (dead_code_elimination(f), dom_tree))
+        .map(|(f, dom_tree)| common_expression_elimination(f, &dom_tree))
+        .map(|f| deconstruct_ssa(f))
+        .collect()
 }
 
 pub fn compile_byte_code(

@@ -8,11 +8,12 @@ use helo_parse::errors::ManyError;
 use helo_runtime::byte_code;
 
 use byte_code::Instruction;
+use helo_runtime::byte_code::JumpDistance;
 use helo_runtime::executable;
 
 pub struct FunctionTable {
-    functions: HashMap<lir::FunctionId, byte_code::FunctionAddr>,
-    names: Vec<(byte_code::FunctionAddr, byte_code::StrAddr)>,
+    functions: HashMap<lir::FunctionId, byte_code::Addr>,
+    names: Vec<(byte_code::Addr, byte_code::StrAddr)>,
 }
 
 impl FunctionTable {
@@ -22,13 +23,13 @@ impl FunctionTable {
             names: Vec::new(),
         }
     }
-    pub fn get(&self, fid: lir::FunctionId) -> Option<byte_code::FunctionAddr> {
+    pub fn get(&self, fid: lir::FunctionId) -> Option<byte_code::Addr> {
         self.functions.get(&fid).copied()
     }
     pub fn insert(
         &mut self,
         fid: lir::FunctionId,
-        addr: byte_code::FunctionAddr,
+        addr: byte_code::Addr,
         name: byte_code::StrAddr,
     ) {
         self.functions.insert(fid, addr);
@@ -105,11 +106,15 @@ pub fn lower_function(
     f_relocations: &mut FunctionRelocations,
     functions: &mut FunctionTable,
     e: &mut ManyError,
-) -> byte_code::FunctionAddr {
+) -> byte_code::Addr {
     let f = lir_functions.get(fid).unwrap();
     let addr = chunk.len();
-    let addr = byte_code::FunctionAddr::from(addr as u32);
+    let addr = byte_code::Addr::from(addr as u32);
     functions.insert(fid, addr, str_index[f.name]);
+
+    // Store arity and temp_cnt at function address
+    chunk.writer().push(f.arity as u32);
+    chunk.writer().push(f.temp_cnt as u32);
 
     let mut chunk_relocations = ChunkRelocations::new();
     let block_addrs = f
@@ -210,7 +215,7 @@ fn lower_jump_table(
         .iter()
         .fold(chunk.writer(), |writer, b| {
             chunk_relocations.add(writer.current(), inst_addr, *b);
-            writer.push::<byte_code::JumpDistance, _>(0)
+            writer.push::<byte_code::JumpDistance, _>(JumpDistance::default())
         })
         .finish();
 }
@@ -223,13 +228,13 @@ fn lower_jump_if_else(
     chunk: &mut byte_code::Chunk,
 ) {
     let inst_addr = chunk.len();
-    Instruction::JumpIf(test.register(), 0).emit(chunk);
+    Instruction::JumpIf(test.register(), JumpDistance::default()).emit(chunk);
     let fill_back_addr = byte_code::OpCode::JUMP_IF.jump_distance_offset() + inst_addr;
 
     chunk_relocations.add(fill_back_addr, inst_addr, then_branch);
 
     let inst_addr = chunk.len();
-    Instruction::Jump(0).emit(chunk);
+    Instruction::Jump(JumpDistance::default()).emit(chunk);
     let fill_back_addr = byte_code::OpCode::JUMP.jump_distance_offset() + inst_addr;
 
     chunk_relocations.add(fill_back_addr, inst_addr, else_branch);
@@ -271,10 +276,11 @@ fn lower_jump_if_eq_int(
 ) {
     let inst_addr = chunk.len();
     let fill_back_addr = if i32::MIN as i64 <= value && value <= i32::MAX as i64 {
-        Instruction::JumpIfEqI32(test.register(), value as i32, 0).emit(chunk);
+        Instruction::JumpIfEqI32(test.register(), value as i32, JumpDistance::default())
+            .emit(chunk);
         inst_addr + byte_code::OpCode::JUMP_IF_EQ_I32.jump_distance_offset()
     } else {
-        Instruction::JumpIfEqI64(test.register(), 0).emit(chunk);
+        Instruction::JumpIfEqI64(test.register(), JumpDistance::default()).emit(chunk);
         chunk.writer().push(value);
         inst_addr + byte_code::OpCode::JUMP_IF_EQ_I64.jump_distance_offset()
     };
@@ -290,7 +296,8 @@ fn lower_jump_if_eq_str(
     chunk: &mut byte_code::Chunk,
 ) {
     let inst_addr = chunk.len();
-    Instruction::JumpIfEqStr(test.register(), str_index[value], 0).emit(chunk);
+    Instruction::JumpIfEqStr(test.register(), str_index[value], JumpDistance::default())
+        .emit(chunk);
     let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_STR.jump_distance_offset() + inst_addr;
 
     chunk_relocations.add(fill_back_addr, inst_addr, branch);
@@ -302,7 +309,7 @@ fn lower_jump(
     chunk: &mut byte_code::Chunk,
 ) {
     let inst_addr = chunk.len();
-    Instruction::Jump(0).emit(chunk);
+    Instruction::Jump(JumpDistance::default()).emit(chunk);
     let fill_back_addr = byte_code::OpCode::JUMP.jump_distance_offset() + inst_addr;
 
     chunk_relocations.add(fill_back_addr, inst_addr, branch);
@@ -358,18 +365,19 @@ fn lower_tail_call(
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
-    if args_len <= 5 {
+    if args_len <= 6 {
         let inst = match args_len {
-            1 => Instruction::TailCall1(ret, callee, collect_to_array(args)),
-            2 => Instruction::TailCall2(ret, callee, collect_to_array(args)),
-            3 => Instruction::TailCall3(ret, callee, collect_to_array(args)),
-            4 => Instruction::TailCall4(ret, callee, collect_to_array(args)),
-            5 => Instruction::TailCall5(ret, callee, collect_to_array(args)),
+            1 => Instruction::TailCall1(callee, collect_to_array(args)),
+            2 => Instruction::TailCall2(callee, collect_to_array(args)),
+            3 => Instruction::TailCall3(callee, collect_to_array(args)),
+            4 => Instruction::TailCall4(callee, collect_to_array(args)),
+            5 => Instruction::TailCall5(callee, collect_to_array(args)),
+            6 => Instruction::TailCall6(callee, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::TailCallMany(ret, callee, args_len as u8).emit(chunk);
+        Instruction::TailCallMany(callee, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
@@ -383,7 +391,7 @@ fn lower_tail_call_u(
     functions: &mut FunctionRelocations,
 ) {
     let ret = ret.register();
-    let callee_addr = byte_code::FunctionAddr::default();
+    let callee_addr = byte_code::Addr::default();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
@@ -392,15 +400,16 @@ fn lower_tail_call_u(
         callee,
     );
 
-    if args_len <= 2 {
+    if args_len <= 3 {
         let inst = match args_len {
-            1 => Instruction::TailCallU1(ret, callee_addr, collect_to_array(args)),
-            2 => Instruction::TailCallU2(ret, callee_addr, collect_to_array(args)),
+            1 => Instruction::TailCallU1(callee_addr, collect_to_array(args)),
+            2 => Instruction::TailCallU2(callee_addr, collect_to_array(args)),
+            3 => Instruction::TailCallU3(callee_addr, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::TailCallUMany(ret, callee_addr, args_len as u8).emit(chunk);
+        Instruction::TailCallUMany(callee_addr, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
@@ -434,7 +443,7 @@ fn lower_call(
     functions: &mut FunctionRelocations,
 ) {
     let ret = ret.register();
-    let callee_addr = byte_code::FunctionAddr::default();
+    let callee_addr = byte_code::Addr::default();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
@@ -529,7 +538,7 @@ fn lower_function_inst(
     functions: &mut FunctionRelocations,
 ) {
     functions.add(chunk.len() + byte_code::OpCode::callee_addr_offset(), fid);
-    Instruction::Function(to.register(), byte_code::FunctionAddr::default()).emit(chunk);
+    Instruction::Function(to.register(), byte_code::Addr::default()).emit(chunk);
 }
 
 fn lower_builtin(to: lir::TempId, bid: lir::BuiltinId, chunk: &mut byte_code::Chunk) {

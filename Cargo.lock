@@ -196,6 +196,7 @@ dependencies = [
  "helo_macro",
  "num_enum",
  "tabled",
+ "thiserror",
 ]
 
 [[package]]

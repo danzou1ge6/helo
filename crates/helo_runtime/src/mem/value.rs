@@ -13,8 +13,14 @@ pub enum Value {
     Obj(Pointer<dyn Obj>),
 }
 
+impl Default for Value {
+    fn default() -> Self {
+        Value::Int(0)
+    }
+}
+
 /// Same as `Value`, but the lifetime '`p` guarantees that `Obj` variant points to a valid object.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ValueSafe<'p> {
     Int(i64),
     Float(f64),
@@ -55,5 +61,42 @@ impl<'p> ValueSafe<'p> {
             ValueSafe::Obj(o) => o.mark(),
             _ => {}
         }
+    }
+    pub fn unwrap_int(self) -> i64 {
+        if let Self::Int(i) = self {
+            i
+        } else {
+            panic!("Type Exception: Unwrapping a Value of type Int")
+        }
+    }
+    pub fn unwrap_float(self) -> f64 {
+        if let Self::Float(i) = self {
+            i
+        } else {
+            panic!("Type Exception: Unwrapping a Value of type Float")
+        }
+    }
+    pub fn unwrap_bool(self) -> bool {
+        if let Self::Bool(i) = self {
+            i
+        } else {
+            panic!("Type Exception: Unwrapping a Value of type Bool")
+        }
+    }
+    pub fn unwrap_obj(self) -> ObjRef<'p> {
+        if let Self::Obj(i) = self {
+            i
+        } else {
+            panic!("Type Exception: Unwrapping a Value of type Obj")
+        }
+    }
+    pub fn from_obj_ref(r: gc::ObjRef<'p>) -> Self {
+        Self::Obj(r)
+    }
+}
+
+impl<'p> Default for ValueSafe<'p> {
+    fn default() -> Self {
+        Self::Int(0)
     }
 }
