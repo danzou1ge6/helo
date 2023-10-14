@@ -1,6 +1,6 @@
 use helo_ir::pretty_print;
 use helo_ir::{artifect, lir, lir::ssa};
-use helo_runtime::disassembler;
+use helo_runtime::{disassembler, executable, vm};
 
 use miette::{Context, IntoDiagnostic};
 
@@ -43,7 +43,7 @@ fn print_ssa_blocks(
     println!("{doc}");
 }
 
-fn compile(src: String, file_name: String) -> miette::Result<()> {
+fn compile(src: String, file_name: String) -> miette::Result<executable::Executable> {
     let src = Arc::new(src);
     let file_name = Arc::new(file_name);
     let s = &src.clone()[..];
@@ -90,7 +90,18 @@ fn compile(src: String, file_name: String) -> miette::Result<()> {
 
     let pretty_table = disassembler::disassemble(&executable);
     println!("\n{pretty_table}");
-    Ok(())
+    Ok(executable)
+}
+
+fn run(exe: &executable::Executable) {
+    let gc_policy = vm::StressedGcPolicy::new();
+    let mut vm = vm::Vm::new(exe, gc_policy);
+    let r = vm.run();
+
+    match r {
+        Ok(result) => println!("Return value = {}", result),
+        Err(e) => println!("{:?}", e),
+    }
 }
 
 pub fn main() -> miette::Result<()> {
@@ -107,5 +118,7 @@ pub fn main() -> miette::Result<()> {
     file.read_to_string(&mut src)
         .into_diagnostic()
         .wrap_err("Read source file failed")?;
-    compile(src, file_name)
+    let executable = compile(src, file_name)?;
+    run(&executable);
+    Ok(())
 }

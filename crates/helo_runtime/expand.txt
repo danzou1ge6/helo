@@ -1,0 +1,4105 @@
+#![feature(prelude_import)]
+#![allow(non_upper_case_globals, non_camel_case_types)]
+#![feature(split_array)]
+#![feature(generic_const_exprs)]
+#![feature(generic_arg_infer)]
+#[prelude_import]
+use std::prelude::rust_2021::*;
+#[macro_use]
+extern crate std;
+
+pub mod builtins {
+    use crate::{mem, vm};
+    use mem::ValueSafe;
+    use std::collections::HashMap;
+    use vm::Vm;
+    pub struct BuiltinTable {
+        tab: HashMap<&'static str, BuiltinId>,
+    }
+    pub struct BuiltinId(pub(crate) u16);
+    #[automatically_derived]
+    impl ::core::fmt::Debug for BuiltinId {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            ::core::fmt::Formatter::debug_tuple_field1_finish(f, "BuiltinId",
+                &&self.0)
+        }
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for BuiltinId {
+        #[inline]
+        fn clone(&self) -> BuiltinId {
+            let _: ::core::clone::AssertParamIsClone<u16>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for BuiltinId { }
+    #[automatically_derived]
+    impl ::core::hash::Hash for BuiltinId {
+        #[inline]
+        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) -> () {
+            ::core::hash::Hash::hash(&self.0, state)
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for BuiltinId { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for BuiltinId {
+        #[inline]
+        fn eq(&self, other: &BuiltinId) -> bool { self.0 == other.0 }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for BuiltinId { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for BuiltinId {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<u16>;
+        }
+    }
+    type BuiltinFunc<const N : usize> =
+        for<'p> fn([ValueSafe<'p>; N]) -> ValueSafe<'p>;
+    fn int_add<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+        match (arg0, arg1) {
+            (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Int(a + b),
+            _ => {
+                ::core::panicking::panic_fmt(format_args!("Type Error: Integer-adding {0:?} and {1:?}",
+                        arg0, arg1));
+            }
+        }
+    }
+    fn int_subtract<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+        match (arg0, arg1) {
+            (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Int(a - b),
+            _ => {
+                ::core::panicking::panic_fmt(format_args!("Type Error: Integer-subtracting {0:?} and {1:?}",
+                        arg0, arg1));
+            }
+        }
+    }
+    fn int_eq<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+        match (arg0, arg1) {
+            (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Bool(a == b),
+            _ => {
+                ::core::panicking::panic_fmt(format_args!("Type Error: Integer-equating {0:?} and {1:?}",
+                        arg0, arg1));
+            }
+        }
+    }
+    pub enum Builtin {
+        B1(BuiltinFunc<1>),
+        B2(BuiltinFunc<2>),
+        B3(BuiltinFunc<3>),
+        B4(BuiltinFunc<4>),
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for Builtin {
+        #[inline]
+        fn clone(&self) -> Builtin {
+            let _: ::core::clone::AssertParamIsClone<BuiltinFunc<1>>;
+            let _: ::core::clone::AssertParamIsClone<BuiltinFunc<2>>;
+            let _: ::core::clone::AssertParamIsClone<BuiltinFunc<3>>;
+            let _: ::core::clone::AssertParamIsClone<BuiltinFunc<4>>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for Builtin { }
+    use Builtin::*;
+    impl Builtin {
+        pub fn arity(&self) -> usize {
+            match self { B1(..) => 1, B2(..) => 2, B3(..) => 3, B4(..) => 4, }
+        }
+        pub fn unwrap1(self) -> BuiltinFunc<1> {
+            match self {
+                B1(f) => f,
+                _ => {
+                    ::core::panicking::panic_fmt(format_args!("Type Error: Expected a builtin with 1 arguments, got {0}",
+                            self.arity()));
+                }
+            }
+        }
+        pub fn unwrap2(self) -> BuiltinFunc<2> {
+            match self {
+                B2(f) => f,
+                _ => {
+                    ::core::panicking::panic_fmt(format_args!("Type Error: Expected a builtin with 2 arguments, got {0}",
+                            self.arity()));
+                }
+            }
+        }
+        pub fn unwrap3(self) -> BuiltinFunc<3> {
+            match self {
+                B3(f) => f,
+                _ => {
+                    ::core::panicking::panic_fmt(format_args!("Type Error: Expected a builtin with 3 arguments, got {0}",
+                            self.arity()));
+                }
+            }
+        }
+        pub fn unwrap4(self) -> BuiltinFunc<4> {
+            match self {
+                B4(f) => f,
+                _ => {
+                    ::core::panicking::panic_fmt(format_args!("Type Error: Expected a builtin with 4 arguments, got {0}",
+                            self.arity()));
+                }
+            }
+        }
+    }
+    const BUILTINS: [(&'static str, Builtin); 5] =
+        [("+", B2(int_add)), ("-", B2(int_subtract)), ("*", B2(int_add)),
+                ("/", B2(int_add)), ("==", B2(int_eq))];
+    pub fn name_by_id(id: BuiltinId) -> &'static str {
+        BUILTINS[id.0 as usize].0
+    }
+    pub fn get(id: BuiltinId) -> Builtin { BUILTINS[id.0 as usize].1 }
+    pub fn get_arity(id: BuiltinId) -> usize { get(id).arity() }
+    pub fn call_adapted<'p>(id: BuiltinId, args: Vec<ValueSafe<'p>>)
+        -> ValueSafe<'p> {
+        let builtin = get(id);
+        match builtin {
+            B1(f) => f([args[0]]),
+            B2(f) => f([args[0], args[1]]),
+            B3(f) => f([args[0], args[1], args[2]]),
+            B4(f) => f([args[0], args[1], args[2], args[3]]),
+        }
+    }
+    impl BuiltinTable {
+        pub fn new() -> Self {
+            let mut tab = HashMap::new();
+            for (i, (name, _)) in BUILTINS.iter().enumerate() {
+                tab.insert(*name, BuiltinId(i as u16));
+            }
+            Self { tab }
+        }
+        pub fn id_by_name(&self, name: &str) -> BuiltinId {
+            *self.tab.get(name).unwrap()
+        }
+        pub fn arity_by_name(&self, name: &str) -> usize {
+            let id = self.tab.get(name).unwrap();
+            get_arity(*id)
+        }
+    }
+}
+pub mod byte_code {
+    use num_enum::{FromPrimitive, IntoPrimitive};
+    use helo_macro::{ChunkReaderReadArgs, ConstStrName, Emit, ToOpCode};
+    /// Takes 2 bytes
+    use crate::builtins::BuiltinId;
+    /// Takes 1 bytes
+    pub struct RegisterId(pub(crate) u8);
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for RegisterId { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for RegisterId {
+        #[inline]
+        fn eq(&self, other: &RegisterId) -> bool { self.0 == other.0 }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for RegisterId { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for RegisterId {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<u8>;
+        }
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for RegisterId {
+        #[inline]
+        fn clone(&self) -> RegisterId {
+            let _: ::core::clone::AssertParamIsClone<u8>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for RegisterId { }
+    #[automatically_derived]
+    impl ::core::default::Default for RegisterId {
+        #[inline]
+        fn default() -> RegisterId {
+            RegisterId(::core::default::Default::default())
+        }
+    }
+    /// Takes 4 bytes
+    pub struct StrAddr(pub(crate) u32);
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for StrAddr { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for StrAddr {
+        #[inline]
+        fn eq(&self, other: &StrAddr) -> bool { self.0 == other.0 }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for StrAddr { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for StrAddr {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<u32>;
+        }
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for StrAddr {
+        #[inline]
+        fn clone(&self) -> StrAddr {
+            let _: ::core::clone::AssertParamIsClone<u32>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for StrAddr { }
+    #[automatically_derived]
+    impl ::core::fmt::Debug for StrAddr {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            ::core::fmt::Formatter::debug_tuple_field1_finish(f, "StrAddr",
+                &&self.0)
+        }
+    }
+    /// Take 4 bytes
+    pub struct Addr(pub(crate) u32);
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for Addr { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for Addr {
+        #[inline]
+        fn eq(&self, other: &Addr) -> bool { self.0 == other.0 }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for Addr { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for Addr {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<u32>;
+        }
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for Addr {
+        #[inline]
+        fn clone(&self) -> Addr {
+            let _: ::core::clone::AssertParamIsClone<u32>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for Addr { }
+    #[automatically_derived]
+    impl ::core::default::Default for Addr {
+        #[inline]
+        fn default() -> Addr { Addr(::core::default::Default::default()) }
+    }
+    #[automatically_derived]
+    impl ::core::fmt::Debug for Addr {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            ::core::fmt::Formatter::debug_tuple_field1_finish(f, "Addr",
+                &&self.0)
+        }
+    }
+    pub struct JumpDistance(pub(crate) i16);
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for JumpDistance { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for JumpDistance {
+        #[inline]
+        fn eq(&self, other: &JumpDistance) -> bool { self.0 == other.0 }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for JumpDistance { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for JumpDistance {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<i16>;
+        }
+    }
+    #[automatically_derived]
+    impl ::core::clone::Clone for JumpDistance {
+        #[inline]
+        fn clone(&self) -> JumpDistance {
+            let _: ::core::clone::AssertParamIsClone<i16>;
+            *self
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::Copy for JumpDistance { }
+    #[automatically_derived]
+    impl ::core::default::Default for JumpDistance {
+        #[inline]
+        fn default() -> JumpDistance {
+            JumpDistance(::core::default::Default::default())
+        }
+    }
+    impl std::fmt::Display for StrAddr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{0}", self.0))
+        }
+    }
+    impl std::fmt::Display for BuiltinId {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{0}", self.0))
+        }
+    }
+    impl std::fmt::Display for RegisterId {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("r{0}", self.0))
+        }
+    }
+    impl std::fmt::Display for JumpDistance {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{0}", self.0))
+        }
+    }
+    impl std::ops::Add<u32> for Addr {
+        type Output = Addr;
+        fn add(self, rhs: u32) -> Self::Output { Addr(self.0 + rhs) }
+    }
+    impl std::ops::Add<JumpDistance> for Addr {
+        type Output = Addr;
+        fn add(self, rhs: JumpDistance) -> Self::Output {
+            Addr((self.0 as i64 + rhs.0 as i64) as u32)
+        }
+    }
+    impl From<Addr> for usize {
+        fn from(value: Addr) -> Self { value.0 as usize }
+    }
+    impl std::ops::AddAssign<u32> for Addr {
+        fn add_assign(&mut self, rhs: u32) { self.0 += rhs }
+    }
+    impl std::ops::AddAssign<JumpDistance> for Addr {
+        fn add_assign(&mut self, rhs: JumpDistance) {
+            self.0 = (self.0 as i64 + rhs.0 as i64) as u32
+        }
+    }
+    impl std::fmt::Display for Addr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{0:#010x}", self.0))
+        }
+    }
+    impl From<u8> for RegisterId {
+        fn from(value: u8) -> Self { Self(value) }
+    }
+    impl From<u32> for StrAddr {
+        fn from(value: u32) -> Self { Self(value) }
+    }
+    impl From<u32> for Addr {
+        fn from(value: u32) -> Self { Self(value) }
+    }
+    impl JumpDistance {
+        pub fn bytes_len() -> u8 { 2 }
+    }
+    impl TryFrom<usize> for JumpDistance {
+        type Error = std::num::TryFromIntError;
+        fn try_from(value: usize) -> Result<Self, Self::Error> {
+            i16::try_from(value).map(|i| Self(i))
+        }
+    }
+    impl From<u16> for BuiltinId {
+        fn from(value: u16) -> Self { Self(value) }
+    }
+    pub enum Instruction {
+
+        /// Following is a table of relative jump distance. The `i`th entry is taken for tag `i` at .0.
+        /// The relative jump distance is the difference of address of jump target and address of this instruction.
+        /// Relative jump distance takes one byte
+        ///
+        /// 3 of 8 bytes
+        JumpTable(RegisterId, u8),
+
+        /// Perform a relative jump if .0 is true.
+        ///
+        /// 4 of 8 bytes
+        JumpIf(RegisterId, JumpDistance),
+
+        /// Jumps if .0 equals .1. .1 takes 4 bytes
+        ///
+        /// 8 of 8 bytes
+        JumpIfEqI32(RegisterId, i32, JumpDistance),
+
+        /// Jump if .0 equals i64 stored in next 8 bytes.
+        ///
+        /// 4 of 8 bytes
+        JumpIfEqI64(RegisterId, JumpDistance),
+
+        /// Jump if .0 equals string at .1.
+        ///
+        /// 8 of 8 bytes
+        JumpIfEqStr(RegisterId, StrAddr, JumpDistance),
+
+        /// Jump if .0 equals bool at .1
+        ///
+        /// 5 of 8 bytes
+        JumpIfEqBool(RegisterId, bool, JumpDistance),
+
+        /// Jump a relative distance
+        ///
+        /// 3 of 8 bytes
+        Jump(JumpDistance),
+
+        /// Apply .2 to .1 and store result to .0
+        ///
+        /// 4 of 8 bytes
+        Apply1(RegisterId, RegisterId, [RegisterId; 1]),
+
+        /// 5 of 8 bytes
+        Apply2(RegisterId, RegisterId, [RegisterId; 2]),
+
+        /// 6 of 8 bytes
+        Apply3(RegisterId, RegisterId, [RegisterId; 3]),
+
+        /// 7 of 8 bytes
+        Apply4(RegisterId, RegisterId, [RegisterId; 4]),
+
+        /// 8 of 8 bytes
+        Apply5(RegisterId, RegisterId, [RegisterId; 5]),
+
+        /// Apply the following .2 number of register-ids to .1
+        ///
+        /// 4 of 8 bytes
+        ApplyMany(RegisterId, RegisterId, u8),
+
+        /// Call .1 with .2 and store result to .0
+        ///
+        /// 7 of 8 bytes
+        Call1(RegisterId, Addr, [RegisterId; 1]),
+
+        /// 8 of 8 bytes
+        Call2(RegisterId, Addr, [RegisterId; 2]),
+
+        /// Call .1 with following .2 number of registers
+        ///
+        /// 4 of 8 bytes
+        CallMany(RegisterId, Addr, u8),
+
+        /// Tail call .1 with .2
+        ///
+        /// 6 of 8 bytes
+        TailCallU1(Addr, [RegisterId; 1]),
+
+        /// 7 of 8 bytes
+        TailCallU2(Addr, [RegisterId; 2]),
+
+        /// 7 of 8 bytes
+        TailCallU3(Addr, [RegisterId; 3]),
+
+        /// Tail call .1 with following .2 number of registers
+        ///
+        /// 4 of 8 bytes
+        TailCallUMany(Addr, u8),
+
+        /// Tail call .1 with .2
+        ///
+        /// 3 of 8 bytes
+        TailCall1(RegisterId, [RegisterId; 1]),
+
+        /// 4 of 8 bytes
+        TailCall2(RegisterId, [RegisterId; 2]),
+
+        /// 5 of 8 bytes
+        TailCall3(RegisterId, [RegisterId; 3]),
+
+        /// 6 of 8 bytes
+        TailCall4(RegisterId, [RegisterId; 4]),
+
+        /// 7 of 8 bytes
+        TailCall5(RegisterId, [RegisterId; 5]),
+
+        /// 8 of 8 bytes
+        TailCall6(RegisterId, [RegisterId; 7]),
+
+        /// Call .1 with following .2 number of registers
+        ///
+        /// 4 of 8 bytes
+        TailCallMany(RegisterId, u8),
+
+        /// call builtin .1 with .2 and store result to .0
+        ///
+        /// 5 of 8 bytes
+        CallBuiltin1(RegisterId, BuiltinId, [RegisterId; 1]),
+
+        /// 6 of 8 bytes
+        CallBuiltin2(RegisterId, BuiltinId, [RegisterId; 2]),
+
+        /// 7 of 8 bytes
+        CallBuiltin3(RegisterId, BuiltinId, [RegisterId; 3]),
+
+        /// 8 of 8 bytes
+        CallBuiltin4(RegisterId, BuiltinId, [RegisterId; 4]),
+
+        /// Load immediate to register .0
+        ///
+        /// 6 of 8 bytes
+        Int32(RegisterId, i32),
+
+        /// 3 of 8 bytes
+        Bool(RegisterId, bool),
+
+        /// 6 of 8 bytes
+        Str(RegisterId, StrAddr),
+
+        /// Load Immediate at following 8-bytes to .0
+        ///
+        /// 2 of 8 bytes
+        Int64(RegisterId),
+
+        /// 2 of 8 bytes
+        Float(RegisterId),
+
+        /// Push .1 to array at .0. Variants, tuples are both represented by arrays.
+        ///
+        /// 3 of 8 bytes
+        Push1(RegisterId, [RegisterId; 1]),
+
+        /// 4 of 8 bytes
+        Push2(RegisterId, [RegisterId; 2]),
+
+        /// 5 of 8 bytes
+        Push3(RegisterId, [RegisterId; 3]),
+
+        /// 6 of 8 bytes
+        Push4(RegisterId, [RegisterId; 4]),
+
+        /// 7 of 8 bytes
+        Push5(RegisterId, [RegisterId; 5]),
+
+        /// 8 of 8 bytes
+        Push6(RegisterId, [RegisterId; 6]),
+
+        /// Load a user function
+        ///
+        /// 6 of 8 bytes
+        Function(RegisterId, Addr),
+
+        /// Load a builtin
+        ///
+        /// 5 of 8 bytes
+        Builtin(RegisterId, BuiltinId),
+
+        /// Get filed .2 of .1 and store result at .0
+        ///
+        /// 4 of 8 bytes
+        Field(RegisterId, RegisterId, u8),
+
+        /// Make a variant of tag .1 and fields .2
+        ///
+        /// 4 of 8 bytes
+        Tagged1(RegisterId, u8, [RegisterId; 1]),
+
+        /// 5 of 8 bytes
+        Tagged2(RegisterId, u8, [RegisterId; 2]),
+
+        /// 6 of 8 bytes
+        Tagged3(RegisterId, u8, [RegisterId; 3]),
+
+        /// 7 of 8 bytes
+        Tagged4(RegisterId, u8, [RegisterId; 4]),
+
+        /// 8 of 8 bytes
+        Tagged5(RegisterId, u8, [RegisterId; 5]),
+
+        /// Make a variant with no fields
+        ///
+        /// 3 of 8 bytes
+        Tagged(RegisterId, u8),
+
+        /// Copy value at .1 to .0
+        ///
+        /// 3 of 8 bytes
+        Mov(RegisterId, RegisterId),
+
+        /// Return value at .0
+        Ret(RegisterId),
+
+        /// Panic with static string at .0
+        ///
+        /// 5 of 8 bytes
+        Panic(StrAddr),
+    }
+    impl Instruction {
+        pub fn emit(self, chunk: &mut Chunk) {
+            use Instruction::*;
+            use OpCode::*;
+            let writer = chunk.writer();
+            match self {
+                JumpTable(x0, x1) =>
+                    writer.push(JUMP_TABLE).push(x0).push(x1).finish(),
+                JumpIf(x0, x1) =>
+                    writer.push(JUMP_IF).push(x0).push(x1).finish(),
+                JumpIfEqI32(x0, x1, x2) =>
+                    writer.push(JUMP_IF_EQ_I32).push(x0).push(x1).push(x2).finish(),
+                JumpIfEqI64(x0, x1) =>
+                    writer.push(JUMP_IF_EQ_I64).push(x0).push(x1).finish(),
+                JumpIfEqStr(x0, x1, x2) =>
+                    writer.push(JUMP_IF_EQ_STR).push(x0).push(x1).push(x2).finish(),
+                JumpIfEqBool(x0, x1, x2) =>
+                    writer.push(JUMP_IF_EQ_BOOL).push(x0).push(x1).push(x2).finish(),
+                Jump(x0) => writer.push(JUMP).push(x0).finish(),
+                Apply1(x0, x1, x2) =>
+                    writer.push(APPLY1).push(x0).push(x1).push(x2).finish(),
+                Apply2(x0, x1, x2) =>
+                    writer.push(APPLY2).push(x0).push(x1).push(x2).finish(),
+                Apply3(x0, x1, x2) =>
+                    writer.push(APPLY3).push(x0).push(x1).push(x2).finish(),
+                Apply4(x0, x1, x2) =>
+                    writer.push(APPLY4).push(x0).push(x1).push(x2).finish(),
+                Apply5(x0, x1, x2) =>
+                    writer.push(APPLY5).push(x0).push(x1).push(x2).finish(),
+                ApplyMany(x0, x1, x2) =>
+                    writer.push(APPLY_MANY).push(x0).push(x1).push(x2).finish(),
+                Call1(x0, x1, x2) =>
+                    writer.push(CALL1).push(x0).push(x1).push(x2).finish(),
+                Call2(x0, x1, x2) =>
+                    writer.push(CALL2).push(x0).push(x1).push(x2).finish(),
+                CallMany(x0, x1, x2) =>
+                    writer.push(CALL_MANY).push(x0).push(x1).push(x2).finish(),
+                TailCallU1(x0, x1) =>
+                    writer.push(TAIL_CALL_U1).push(x0).push(x1).finish(),
+                TailCallU2(x0, x1) =>
+                    writer.push(TAIL_CALL_U2).push(x0).push(x1).finish(),
+                TailCallU3(x0, x1) =>
+                    writer.push(TAIL_CALL_U3).push(x0).push(x1).finish(),
+                TailCallUMany(x0, x1) =>
+                    writer.push(TAIL_CALL_U_MANY).push(x0).push(x1).finish(),
+                TailCall1(x0, x1) =>
+                    writer.push(TAIL_CALL1).push(x0).push(x1).finish(),
+                TailCall2(x0, x1) =>
+                    writer.push(TAIL_CALL2).push(x0).push(x1).finish(),
+                TailCall3(x0, x1) =>
+                    writer.push(TAIL_CALL3).push(x0).push(x1).finish(),
+                TailCall4(x0, x1) =>
+                    writer.push(TAIL_CALL4).push(x0).push(x1).finish(),
+                TailCall5(x0, x1) =>
+                    writer.push(TAIL_CALL5).push(x0).push(x1).finish(),
+                TailCall6(x0, x1) =>
+                    writer.push(TAIL_CALL6).push(x0).push(x1).finish(),
+                TailCallMany(x0, x1) =>
+                    writer.push(TAIL_CALL_MANY).push(x0).push(x1).finish(),
+                CallBuiltin1(x0, x1, x2) =>
+                    writer.push(CALL_BUILTIN1).push(x0).push(x1).push(x2).finish(),
+                CallBuiltin2(x0, x1, x2) =>
+                    writer.push(CALL_BUILTIN2).push(x0).push(x1).push(x2).finish(),
+                CallBuiltin3(x0, x1, x2) =>
+                    writer.push(CALL_BUILTIN3).push(x0).push(x1).push(x2).finish(),
+                CallBuiltin4(x0, x1, x2) =>
+                    writer.push(CALL_BUILTIN4).push(x0).push(x1).push(x2).finish(),
+                Int32(x0, x1) =>
+                    writer.push(INT32).push(x0).push(x1).finish(),
+                Bool(x0, x1) => writer.push(BOOL).push(x0).push(x1).finish(),
+                Str(x0, x1) => writer.push(STR).push(x0).push(x1).finish(),
+                Int64(x0) => writer.push(INT64).push(x0).finish(),
+                Float(x0) => writer.push(FLOAT).push(x0).finish(),
+                Push1(x0, x1) =>
+                    writer.push(PUSH1).push(x0).push(x1).finish(),
+                Push2(x0, x1) =>
+                    writer.push(PUSH2).push(x0).push(x1).finish(),
+                Push3(x0, x1) =>
+                    writer.push(PUSH3).push(x0).push(x1).finish(),
+                Push4(x0, x1) =>
+                    writer.push(PUSH4).push(x0).push(x1).finish(),
+                Push5(x0, x1) =>
+                    writer.push(PUSH5).push(x0).push(x1).finish(),
+                Push6(x0, x1) =>
+                    writer.push(PUSH6).push(x0).push(x1).finish(),
+                Function(x0, x1) =>
+                    writer.push(FUNCTION).push(x0).push(x1).finish(),
+                Builtin(x0, x1) =>
+                    writer.push(BUILTIN).push(x0).push(x1).finish(),
+                Field(x0, x1, x2) =>
+                    writer.push(FIELD).push(x0).push(x1).push(x2).finish(),
+                Tagged1(x0, x1, x2) =>
+                    writer.push(TAGGED1).push(x0).push(x1).push(x2).finish(),
+                Tagged2(x0, x1, x2) =>
+                    writer.push(TAGGED2).push(x0).push(x1).push(x2).finish(),
+                Tagged3(x0, x1, x2) =>
+                    writer.push(TAGGED3).push(x0).push(x1).push(x2).finish(),
+                Tagged4(x0, x1, x2) =>
+                    writer.push(TAGGED4).push(x0).push(x1).push(x2).finish(),
+                Tagged5(x0, x1, x2) =>
+                    writer.push(TAGGED5).push(x0).push(x1).push(x2).finish(),
+                Tagged(x0, x1) =>
+                    writer.push(TAGGED).push(x0).push(x1).finish(),
+                Mov(x0, x1) => writer.push(MOV).push(x0).push(x1).finish(),
+                Ret(x0) => writer.push(RET).push(x0).finish(),
+                Panic(x0) => writer.push(PANIC).push(x0).finish(),
+            }
+        }
+    }
+    impl Instruction {
+        pub fn to_op_code(&self) -> OpCode {
+            use Instruction::*;
+            use OpCode::*;
+            match self {
+                JumpTable(..) => JUMP_TABLE,
+                JumpIf(..) => JUMP_IF,
+                JumpIfEqI32(..) => JUMP_IF_EQ_I32,
+                JumpIfEqI64(..) => JUMP_IF_EQ_I64,
+                JumpIfEqStr(..) => JUMP_IF_EQ_STR,
+                JumpIfEqBool(..) => JUMP_IF_EQ_BOOL,
+                Jump(..) => JUMP,
+                Apply1(..) => APPLY1,
+                Apply2(..) => APPLY2,
+                Apply3(..) => APPLY3,
+                Apply4(..) => APPLY4,
+                Apply5(..) => APPLY5,
+                ApplyMany(..) => APPLY_MANY,
+                Call1(..) => CALL1,
+                Call2(..) => CALL2,
+                CallMany(..) => CALL_MANY,
+                TailCallU1(..) => TAIL_CALL_U1,
+                TailCallU2(..) => TAIL_CALL_U2,
+                TailCallU3(..) => TAIL_CALL_U3,
+                TailCallUMany(..) => TAIL_CALL_U_MANY,
+                TailCall1(..) => TAIL_CALL1,
+                TailCall2(..) => TAIL_CALL2,
+                TailCall3(..) => TAIL_CALL3,
+                TailCall4(..) => TAIL_CALL4,
+                TailCall5(..) => TAIL_CALL5,
+                TailCall6(..) => TAIL_CALL6,
+                TailCallMany(..) => TAIL_CALL_MANY,
+                CallBuiltin1(..) => CALL_BUILTIN1,
+                CallBuiltin2(..) => CALL_BUILTIN2,
+                CallBuiltin3(..) => CALL_BUILTIN3,
+                CallBuiltin4(..) => CALL_BUILTIN4,
+                Int32(..) => INT32,
+                Bool(..) => BOOL,
+                Str(..) => STR,
+                Int64(..) => INT64,
+                Float(..) => FLOAT,
+                Push1(..) => PUSH1,
+                Push2(..) => PUSH2,
+                Push3(..) => PUSH3,
+                Push4(..) => PUSH4,
+                Push5(..) => PUSH5,
+                Push6(..) => PUSH6,
+                Function(..) => FUNCTION,
+                Builtin(..) => BUILTIN,
+                Field(..) => FIELD,
+                Tagged1(..) => TAGGED1,
+                Tagged2(..) => TAGGED2,
+                Tagged3(..) => TAGGED3,
+                Tagged4(..) => TAGGED4,
+                Tagged5(..) => TAGGED5,
+                Tagged(..) => TAGGED,
+                Mov(..) => MOV,
+                Ret(..) => RET,
+                Panic(..) => PANIC,
+            }
+        }
+    }
+    impl<'c> ChunkReader<'c, 1> {
+        pub fn jump_table(self) -> (RegisterId, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn jump_if(self) -> (RegisterId, JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn jump_if_eq_i32(self) -> (RegisterId, i32, JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn jump_if_eq_i64(self) -> (RegisterId, JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn jump_if_eq_str(self) -> (RegisterId, StrAddr, JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn jump_if_eq_bool(self) -> (RegisterId, bool, JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn jump(self) -> (JumpDistance) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            (x0)
+        }
+        pub fn apply1(self) -> (RegisterId, RegisterId, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn apply2(self) -> (RegisterId, RegisterId, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn apply3(self) -> (RegisterId, RegisterId, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn apply4(self) -> (RegisterId, RegisterId, [RegisterId; 4]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn apply5(self) -> (RegisterId, RegisterId, [RegisterId; 5]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn apply_many(self) -> (RegisterId, RegisterId, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call1(self) -> (RegisterId, Addr, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call2(self) -> (RegisterId, Addr, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call_many(self) -> (RegisterId, Addr, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tail_call_u1(self) -> (Addr, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call_u2(self) -> (Addr, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call_u3(self) -> (Addr, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call_u_many(self) -> (Addr, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call1(self) -> (RegisterId, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call2(self) -> (RegisterId, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call3(self) -> (RegisterId, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call4(self) -> (RegisterId, [RegisterId; 4]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call5(self) -> (RegisterId, [RegisterId; 5]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call6(self) -> (RegisterId, [RegisterId; 7]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn tail_call_many(self) -> (RegisterId, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn call_builtin1(self)
+            -> (RegisterId, BuiltinId, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call_builtin2(self)
+            -> (RegisterId, BuiltinId, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call_builtin3(self)
+            -> (RegisterId, BuiltinId, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn call_builtin4(self)
+            -> (RegisterId, BuiltinId, [RegisterId; 4]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn int32(self) -> (RegisterId, i32) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn bool(self) -> (RegisterId, bool) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn str(self) -> (RegisterId, StrAddr) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn int64(self) -> (RegisterId) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            (x0)
+        }
+        pub fn float(self) -> (RegisterId) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            (x0)
+        }
+        pub fn push1(self) -> (RegisterId, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn push2(self) -> (RegisterId, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn push3(self) -> (RegisterId, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn push4(self) -> (RegisterId, [RegisterId; 4]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn push5(self) -> (RegisterId, [RegisterId; 5]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn push6(self) -> (RegisterId, [RegisterId; 6]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn function(self) -> (RegisterId, Addr) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn builtin(self) -> (RegisterId, BuiltinId) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn field(self) -> (RegisterId, RegisterId, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged1(self) -> (RegisterId, u8, [RegisterId; 1]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged2(self) -> (RegisterId, u8, [RegisterId; 2]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged3(self) -> (RegisterId, u8, [RegisterId; 3]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged4(self) -> (RegisterId, u8, [RegisterId; 4]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged5(self) -> (RegisterId, u8, [RegisterId; 5]) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            let (_r, x2) = _r.read();
+            (x0, x1, x2)
+        }
+        pub fn tagged(self) -> (RegisterId, u8) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn mov(self) -> (RegisterId, RegisterId) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            let (_r, x1) = _r.read();
+            (x0, x1)
+        }
+        pub fn ret(self) -> (RegisterId) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            (x0)
+        }
+        pub fn panic(self) -> (StrAddr) {
+            let _r = self;
+            let (_r, x0) = _r.read();
+            (x0)
+        }
+    }
+    #[repr(u8)]
+    pub enum OpCode {
+        JUMP_TABLE,
+        JUMP_IF,
+        JUMP_IF_EQ_I32,
+        JUMP_IF_EQ_I64,
+        JUMP_IF_EQ_STR,
+        JUMP_IF_EQ_BOOL,
+        JUMP,
+        APPLY1,
+        APPLY2,
+        APPLY3,
+        APPLY4,
+        APPLY5,
+        APPLY_MANY,
+        CALL1,
+        CALL2,
+        CALL_MANY,
+        TAIL_CALL_U1,
+        TAIL_CALL_U2,
+        TAIL_CALL_U3,
+        TAIL_CALL_U_MANY,
+        TAIL_CALL1,
+        TAIL_CALL2,
+        TAIL_CALL3,
+        TAIL_CALL4,
+        TAIL_CALL5,
+        TAIL_CALL6,
+        TAIL_CALL_MANY,
+        CALL_BUILTIN1,
+        CALL_BUILTIN2,
+        CALL_BUILTIN3,
+        CALL_BUILTIN4,
+        INT32,
+        BOOL,
+        STR,
+        INT64,
+        FLOAT,
+        PUSH1,
+        PUSH2,
+        PUSH3,
+        PUSH4,
+        PUSH5,
+        PUSH6,
+        FUNCTION,
+        BUILTIN,
+        FIELD,
+        TAGGED1,
+        TAGGED2,
+        TAGGED3,
+        TAGGED4,
+        TAGGED5,
+        TAGGED,
+        MOV,
+        RET,
+        PANIC,
+
+        #[num_enum(catch_all)]
+        UNKNOWN(u8),
+    }
+    impl ::num_enum::FromPrimitive for OpCode {
+        type Primitive = u8;
+        fn from_primitive(number: Self::Primitive) -> Self {
+            #![allow(non_upper_case_globals)]
+            const JUMP_TABLE__num_enum_0__: u8 = 0;
+            const JUMP_IF__num_enum_0__: u8 = 1;
+            const JUMP_IF_EQ_I32__num_enum_0__: u8 = 2;
+            const JUMP_IF_EQ_I64__num_enum_0__: u8 = 3;
+            const JUMP_IF_EQ_STR__num_enum_0__: u8 = 4;
+            const JUMP_IF_EQ_BOOL__num_enum_0__: u8 = 5;
+            const JUMP__num_enum_0__: u8 = 6;
+            const APPLY1__num_enum_0__: u8 = 7;
+            const APPLY2__num_enum_0__: u8 = 8;
+            const APPLY3__num_enum_0__: u8 = 9;
+            const APPLY4__num_enum_0__: u8 = 10;
+            const APPLY5__num_enum_0__: u8 = 11;
+            const APPLY_MANY__num_enum_0__: u8 = 12;
+            const CALL1__num_enum_0__: u8 = 13;
+            const CALL2__num_enum_0__: u8 = 14;
+            const CALL_MANY__num_enum_0__: u8 = 15;
+            const TAIL_CALL_U1__num_enum_0__: u8 = 16;
+            const TAIL_CALL_U2__num_enum_0__: u8 = 17;
+            const TAIL_CALL_U3__num_enum_0__: u8 = 18;
+            const TAIL_CALL_U_MANY__num_enum_0__: u8 = 19;
+            const TAIL_CALL1__num_enum_0__: u8 = 20;
+            const TAIL_CALL2__num_enum_0__: u8 = 21;
+            const TAIL_CALL3__num_enum_0__: u8 = 22;
+            const TAIL_CALL4__num_enum_0__: u8 = 23;
+            const TAIL_CALL5__num_enum_0__: u8 = 24;
+            const TAIL_CALL6__num_enum_0__: u8 = 25;
+            const TAIL_CALL_MANY__num_enum_0__: u8 = 26;
+            const CALL_BUILTIN1__num_enum_0__: u8 = 27;
+            const CALL_BUILTIN2__num_enum_0__: u8 = 28;
+            const CALL_BUILTIN3__num_enum_0__: u8 = 29;
+            const CALL_BUILTIN4__num_enum_0__: u8 = 30;
+            const INT32__num_enum_0__: u8 = 31;
+            const BOOL__num_enum_0__: u8 = 32;
+            const STR__num_enum_0__: u8 = 33;
+            const INT64__num_enum_0__: u8 = 34;
+            const FLOAT__num_enum_0__: u8 = 35;
+            const PUSH1__num_enum_0__: u8 = 36;
+            const PUSH2__num_enum_0__: u8 = 37;
+            const PUSH3__num_enum_0__: u8 = 38;
+            const PUSH4__num_enum_0__: u8 = 39;
+            const PUSH5__num_enum_0__: u8 = 40;
+            const PUSH6__num_enum_0__: u8 = 41;
+            const FUNCTION__num_enum_0__: u8 = 42;
+            const BUILTIN__num_enum_0__: u8 = 43;
+            const FIELD__num_enum_0__: u8 = 44;
+            const TAGGED1__num_enum_0__: u8 = 45;
+            const TAGGED2__num_enum_0__: u8 = 46;
+            const TAGGED3__num_enum_0__: u8 = 47;
+            const TAGGED4__num_enum_0__: u8 = 48;
+            const TAGGED5__num_enum_0__: u8 = 49;
+            const TAGGED__num_enum_0__: u8 = 50;
+            const MOV__num_enum_0__: u8 = 51;
+            const RET__num_enum_0__: u8 = 52;
+            const PANIC__num_enum_0__: u8 = 53;
+
+            #[deny(unreachable_patterns)]
+            match number {
+                JUMP_TABLE__num_enum_0__ => Self::JUMP_TABLE,
+                JUMP_IF__num_enum_0__ => Self::JUMP_IF,
+                JUMP_IF_EQ_I32__num_enum_0__ => Self::JUMP_IF_EQ_I32,
+                JUMP_IF_EQ_I64__num_enum_0__ => Self::JUMP_IF_EQ_I64,
+                JUMP_IF_EQ_STR__num_enum_0__ => Self::JUMP_IF_EQ_STR,
+                JUMP_IF_EQ_BOOL__num_enum_0__ => Self::JUMP_IF_EQ_BOOL,
+                JUMP__num_enum_0__ => Self::JUMP,
+                APPLY1__num_enum_0__ => Self::APPLY1,
+                APPLY2__num_enum_0__ => Self::APPLY2,
+                APPLY3__num_enum_0__ => Self::APPLY3,
+                APPLY4__num_enum_0__ => Self::APPLY4,
+                APPLY5__num_enum_0__ => Self::APPLY5,
+                APPLY_MANY__num_enum_0__ => Self::APPLY_MANY,
+                CALL1__num_enum_0__ => Self::CALL1,
+                CALL2__num_enum_0__ => Self::CALL2,
+                CALL_MANY__num_enum_0__ => Self::CALL_MANY,
+                TAIL_CALL_U1__num_enum_0__ => Self::TAIL_CALL_U1,
+                TAIL_CALL_U2__num_enum_0__ => Self::TAIL_CALL_U2,
+                TAIL_CALL_U3__num_enum_0__ => Self::TAIL_CALL_U3,
+                TAIL_CALL_U_MANY__num_enum_0__ => Self::TAIL_CALL_U_MANY,
+                TAIL_CALL1__num_enum_0__ => Self::TAIL_CALL1,
+                TAIL_CALL2__num_enum_0__ => Self::TAIL_CALL2,
+                TAIL_CALL3__num_enum_0__ => Self::TAIL_CALL3,
+                TAIL_CALL4__num_enum_0__ => Self::TAIL_CALL4,
+                TAIL_CALL5__num_enum_0__ => Self::TAIL_CALL5,
+                TAIL_CALL6__num_enum_0__ => Self::TAIL_CALL6,
+                TAIL_CALL_MANY__num_enum_0__ => Self::TAIL_CALL_MANY,
+                CALL_BUILTIN1__num_enum_0__ => Self::CALL_BUILTIN1,
+                CALL_BUILTIN2__num_enum_0__ => Self::CALL_BUILTIN2,
+                CALL_BUILTIN3__num_enum_0__ => Self::CALL_BUILTIN3,
+                CALL_BUILTIN4__num_enum_0__ => Self::CALL_BUILTIN4,
+                INT32__num_enum_0__ => Self::INT32,
+                BOOL__num_enum_0__ => Self::BOOL,
+                STR__num_enum_0__ => Self::STR,
+                INT64__num_enum_0__ => Self::INT64,
+                FLOAT__num_enum_0__ => Self::FLOAT,
+                PUSH1__num_enum_0__ => Self::PUSH1,
+                PUSH2__num_enum_0__ => Self::PUSH2,
+                PUSH3__num_enum_0__ => Self::PUSH3,
+                PUSH4__num_enum_0__ => Self::PUSH4,
+                PUSH5__num_enum_0__ => Self::PUSH5,
+                PUSH6__num_enum_0__ => Self::PUSH6,
+                FUNCTION__num_enum_0__ => Self::FUNCTION,
+                BUILTIN__num_enum_0__ => Self::BUILTIN,
+                FIELD__num_enum_0__ => Self::FIELD,
+                TAGGED1__num_enum_0__ => Self::TAGGED1,
+                TAGGED2__num_enum_0__ => Self::TAGGED2,
+                TAGGED3__num_enum_0__ => Self::TAGGED3,
+                TAGGED4__num_enum_0__ => Self::TAGGED4,
+                TAGGED5__num_enum_0__ => Self::TAGGED5,
+                TAGGED__num_enum_0__ => Self::TAGGED,
+                MOV__num_enum_0__ => Self::MOV,
+                RET__num_enum_0__ => Self::RET,
+                PANIC__num_enum_0__ =>
+                    Self::PANIC,
+                    #[allow(unreachable_patterns)]
+                    _ => Self::UNKNOWN(number),
+            }
+        }
+    }
+    impl ::core::convert::From<u8> for OpCode {
+        #[inline]
+        fn from(number: u8) -> Self {
+            ::num_enum::FromPrimitive::from_primitive(number)
+        }
+    }
+    #[doc(hidden)]
+    impl ::num_enum::CannotDeriveBothFromPrimitiveAndTryFromPrimitive for
+        OpCode {
+    }
+    impl From<OpCode> for u8 {
+        #[inline]
+        fn from(enum_value: OpCode) -> Self {
+            match enum_value {
+                OpCode::UNKNOWN(raw) => raw,
+                rest => unsafe { *(&rest as *const OpCode as *const Self) },
+            }
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralPartialEq for OpCode { }
+    #[automatically_derived]
+    impl ::core::cmp::PartialEq for OpCode {
+        #[inline]
+        fn eq(&self, other: &OpCode) -> bool {
+            let __self_tag = ::core::intrinsics::discriminant_value(self);
+            let __arg1_tag = ::core::intrinsics::discriminant_value(other);
+            __self_tag == __arg1_tag &&
+                match (self, other) {
+                    (OpCode::UNKNOWN(__self_0), OpCode::UNKNOWN(__arg1_0)) =>
+                        *__self_0 == *__arg1_0,
+                    _ => true,
+                }
+        }
+    }
+    #[automatically_derived]
+    impl ::core::marker::StructuralEq for OpCode { }
+    #[automatically_derived]
+    impl ::core::cmp::Eq for OpCode {
+        #[inline]
+        #[doc(hidden)]
+        #[coverage(off)]
+        fn assert_receiver_is_total_eq(&self) -> () {
+            let _: ::core::cmp::AssertParamIsEq<u8>;
+        }
+    }
+    #[automatically_derived]
+    impl ::core::fmt::Debug for OpCode {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            match self {
+                OpCode::JUMP_TABLE =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_TABLE"),
+                OpCode::JUMP_IF =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_IF"),
+                OpCode::JUMP_IF_EQ_I32 =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_IF_EQ_I32"),
+                OpCode::JUMP_IF_EQ_I64 =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_IF_EQ_I64"),
+                OpCode::JUMP_IF_EQ_STR =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_IF_EQ_STR"),
+                OpCode::JUMP_IF_EQ_BOOL =>
+                    ::core::fmt::Formatter::write_str(f, "JUMP_IF_EQ_BOOL"),
+                OpCode::JUMP => ::core::fmt::Formatter::write_str(f, "JUMP"),
+                OpCode::APPLY1 =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY1"),
+                OpCode::APPLY2 =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY2"),
+                OpCode::APPLY3 =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY3"),
+                OpCode::APPLY4 =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY4"),
+                OpCode::APPLY5 =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY5"),
+                OpCode::APPLY_MANY =>
+                    ::core::fmt::Formatter::write_str(f, "APPLY_MANY"),
+                OpCode::CALL1 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL1"),
+                OpCode::CALL2 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL2"),
+                OpCode::CALL_MANY =>
+                    ::core::fmt::Formatter::write_str(f, "CALL_MANY"),
+                OpCode::TAIL_CALL_U1 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL_U1"),
+                OpCode::TAIL_CALL_U2 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL_U2"),
+                OpCode::TAIL_CALL_U3 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL_U3"),
+                OpCode::TAIL_CALL_U_MANY =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL_U_MANY"),
+                OpCode::TAIL_CALL1 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL1"),
+                OpCode::TAIL_CALL2 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL2"),
+                OpCode::TAIL_CALL3 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL3"),
+                OpCode::TAIL_CALL4 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL4"),
+                OpCode::TAIL_CALL5 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL5"),
+                OpCode::TAIL_CALL6 =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL6"),
+                OpCode::TAIL_CALL_MANY =>
+                    ::core::fmt::Formatter::write_str(f, "TAIL_CALL_MANY"),
+                OpCode::CALL_BUILTIN1 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL_BUILTIN1"),
+                OpCode::CALL_BUILTIN2 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL_BUILTIN2"),
+                OpCode::CALL_BUILTIN3 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL_BUILTIN3"),
+                OpCode::CALL_BUILTIN4 =>
+                    ::core::fmt::Formatter::write_str(f, "CALL_BUILTIN4"),
+                OpCode::INT32 =>
+                    ::core::fmt::Formatter::write_str(f, "INT32"),
+                OpCode::BOOL => ::core::fmt::Formatter::write_str(f, "BOOL"),
+                OpCode::STR => ::core::fmt::Formatter::write_str(f, "STR"),
+                OpCode::INT64 =>
+                    ::core::fmt::Formatter::write_str(f, "INT64"),
+                OpCode::FLOAT =>
+                    ::core::fmt::Formatter::write_str(f, "FLOAT"),
+                OpCode::PUSH1 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH1"),
+                OpCode::PUSH2 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH2"),
+                OpCode::PUSH3 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH3"),
+                OpCode::PUSH4 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH4"),
+                OpCode::PUSH5 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH5"),
+                OpCode::PUSH6 =>
+                    ::core::fmt::Formatter::write_str(f, "PUSH6"),
+                OpCode::FUNCTION =>
+                    ::core::fmt::Formatter::write_str(f, "FUNCTION"),
+                OpCode::BUILTIN =>
+                    ::core::fmt::Formatter::write_str(f, "BUILTIN"),
+                OpCode::FIELD =>
+                    ::core::fmt::Formatter::write_str(f, "FIELD"),
+                OpCode::TAGGED1 =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED1"),
+                OpCode::TAGGED2 =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED2"),
+                OpCode::TAGGED3 =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED3"),
+                OpCode::TAGGED4 =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED4"),
+                OpCode::TAGGED5 =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED5"),
+                OpCode::TAGGED =>
+                    ::core::fmt::Formatter::write_str(f, "TAGGED"),
+                OpCode::MOV => ::core::fmt::Formatter::write_str(f, "MOV"),
+                OpCode::RET => ::core::fmt::Formatter::write_str(f, "RET"),
+                OpCode::PANIC =>
+                    ::core::fmt::Formatter::write_str(f, "PANIC"),
+                OpCode::UNKNOWN(__self_0) =>
+                    ::core::fmt::Formatter::debug_tuple_field1_finish(f,
+                        "UNKNOWN", &__self_0),
+            }
+        }
+    }
+    impl OpCode {
+        pub fn to_str(&self) -> &'static str {
+            use OpCode::*;
+            match self {
+                JUMP_TABLE => "JUMP_TABLE",
+                JUMP_IF => "JUMP_IF",
+                JUMP_IF_EQ_I32 => "JUMP_IF_EQ_I32",
+                JUMP_IF_EQ_I64 => "JUMP_IF_EQ_I64",
+                JUMP_IF_EQ_STR => "JUMP_IF_EQ_STR",
+                JUMP_IF_EQ_BOOL => "JUMP_IF_EQ_BOOL",
+                JUMP => "JUMP",
+                APPLY1 => "APPLY1",
+                APPLY2 => "APPLY2",
+                APPLY3 => "APPLY3",
+                APPLY4 => "APPLY4",
+                APPLY5 => "APPLY5",
+                APPLY_MANY => "APPLY_MANY",
+                CALL1 => "CALL1",
+                CALL2 => "CALL2",
+                CALL_MANY => "CALL_MANY",
+                TAIL_CALL_U1 => "TAIL_CALL_U1",
+                TAIL_CALL_U2 => "TAIL_CALL_U2",
+                TAIL_CALL_U3 => "TAIL_CALL_U3",
+                TAIL_CALL_U_MANY => "TAIL_CALL_U_MANY",
+                TAIL_CALL1 => "TAIL_CALL1",
+                TAIL_CALL2 => "TAIL_CALL2",
+                TAIL_CALL3 => "TAIL_CALL3",
+                TAIL_CALL4 => "TAIL_CALL4",
+                TAIL_CALL5 => "TAIL_CALL5",
+                TAIL_CALL6 => "TAIL_CALL6",
+                TAIL_CALL_MANY => "TAIL_CALL_MANY",
+                CALL_BUILTIN1 => "CALL_BUILTIN1",
+                CALL_BUILTIN2 => "CALL_BUILTIN2",
+                CALL_BUILTIN3 => "CALL_BUILTIN3",
+                CALL_BUILTIN4 => "CALL_BUILTIN4",
+                INT32 => "INT32",
+                BOOL => "BOOL",
+                STR => "STR",
+                INT64 => "INT64",
+                FLOAT => "FLOAT",
+                PUSH1 => "PUSH1",
+                PUSH2 => "PUSH2",
+                PUSH3 => "PUSH3",
+                PUSH4 => "PUSH4",
+                PUSH5 => "PUSH5",
+                PUSH6 => "PUSH6",
+                FUNCTION => "FUNCTION",
+                BUILTIN => "BUILTIN",
+                FIELD => "FIELD",
+                TAGGED1 => "TAGGED1",
+                TAGGED2 => "TAGGED2",
+                TAGGED3 => "TAGGED3",
+                TAGGED4 => "TAGGED4",
+                TAGGED5 => "TAGGED5",
+                TAGGED => "TAGGED",
+                MOV => "MOV",
+                RET => "RET",
+                PANIC => "PANIC",
+                UNKNOWN(..) => "UNKNOWN",
+            }
+        }
+    }
+    impl std::fmt::Display for OpCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{0}", self.to_str()))
+        }
+    }
+    impl OpCode {
+        pub fn jump_distance_offset(&self) -> usize {
+            use OpCode::*;
+            match self {
+                JUMP => 1,
+                JUMP_IF => 2,
+                JUMP_IF_EQ_I32 => 6,
+                JUMP_IF_EQ_I64 => 2,
+                JUMP_IF_EQ_BOOL => 3,
+                JUMP_IF_EQ_STR => 5,
+                _ => {
+                    ::core::panicking::panic_fmt(format_args!("Only jumps have jump distance offset"));
+                }
+            }
+        }
+        pub fn callee_addr_offset() -> usize { 2 }
+    }
+    pub struct Chunk {
+        code: Vec<u8>,
+    }
+    pub struct ChunkWriter<'c> {
+        chunk: &'c mut Chunk,
+        cnt: usize,
+    }
+    pub trait ToBytes<const N : usize> {
+        fn to_bytes(self)
+        -> [u8; N];
+    }
+    pub trait FromBytes<const N : usize> {
+        fn from_bytes(bytes: [u8; N])
+        -> Self;
+    }
+    impl ToBytes<8> for i64 {
+        fn to_bytes(self) -> [u8; 8] { self.to_le_bytes() }
+    }
+    impl FromBytes<8> for i64 {
+        fn from_bytes(bytes: [u8; 8]) -> Self { Self::from_le_bytes(bytes) }
+    }
+    impl ToBytes<8> for u64 {
+        fn to_bytes(self) -> [u8; 8] { self.to_le_bytes() }
+    }
+    impl FromBytes<8> for u64 {
+        fn from_bytes(bytes: [u8; 8]) -> Self { Self::from_le_bytes(bytes) }
+    }
+    impl ToBytes<8> for f64 {
+        fn to_bytes(self) -> [u8; 8] { self.to_le_bytes() }
+    }
+    impl FromBytes<8> for f64 {
+        fn from_bytes(bytes: [u8; 8]) -> Self { Self::from_le_bytes(bytes) }
+    }
+    impl ToBytes<4> for StrAddr {
+        fn to_bytes(self) -> [u8; 4] { self.0.to_le_bytes() }
+    }
+    impl FromBytes<4> for StrAddr {
+        fn from_bytes(bytes: [u8; 4]) -> Self {
+            Self(u32::from_le_bytes(bytes))
+        }
+    }
+    impl ToBytes<4> for Addr {
+        fn to_bytes(self) -> [u8; 4] { self.0.to_le_bytes() }
+    }
+    impl FromBytes<4> for Addr {
+        fn from_bytes(bytes: [u8; 4]) -> Self {
+            Self(u32::from_le_bytes(bytes))
+        }
+    }
+    impl ToBytes<2> for BuiltinId {
+        fn to_bytes(self) -> [u8; 2] { self.0.to_le_bytes() }
+    }
+    impl FromBytes<2> for BuiltinId {
+        fn from_bytes(bytes: [u8; 2]) -> Self {
+            Self(u16::from_le_bytes(bytes))
+        }
+    }
+    impl ToBytes<2> for JumpDistance {
+        fn to_bytes(self) -> [u8; 2] { self.0.to_le_bytes() }
+    }
+    impl FromBytes<2> for JumpDistance {
+        fn from_bytes(bytes: [u8; 2]) -> Self {
+            Self(i16::from_le_bytes(bytes))
+        }
+    }
+    impl ToBytes<1> for OpCode {
+        fn to_bytes(self) -> [u8; 1] { [self.into()] }
+    }
+    impl FromBytes<1> for OpCode {
+        fn from_bytes(bytes: [u8; 1]) -> Self {
+            Self::from_primitive(bytes[0])
+        }
+    }
+    impl ToBytes<1> for bool {
+        fn to_bytes(self) -> [u8; 1] { [if self { 1 } else { 0 }] }
+    }
+    impl FromBytes<1> for bool {
+        fn from_bytes(bytes: [u8; 1]) -> Self { bytes[0] != 0 }
+    }
+    impl ToBytes<4> for i32 {
+        fn to_bytes(self) -> [u8; 4] { self.to_le_bytes() }
+    }
+    impl FromBytes<4> for i32 {
+        fn from_bytes(bytes: [u8; 4]) -> Self { Self::from_le_bytes(bytes) }
+    }
+    impl ToBytes<4> for u32 {
+        fn to_bytes(self) -> [u8; 4] { self.to_le_bytes() }
+    }
+    impl FromBytes<4> for u32 {
+        fn from_bytes(bytes: [u8; 4]) -> Self { Self::from_le_bytes(bytes) }
+    }
+    impl ToBytes<1> for RegisterId {
+        fn to_bytes(self) -> [u8; 1] { [self.0] }
+    }
+    impl FromBytes<1> for RegisterId {
+        fn from_bytes(bytes: [u8; 1]) -> Self { Self(bytes[0]) }
+    }
+    impl<const N : usize> ToBytes<N> for [RegisterId; N] {
+        fn to_bytes(self) -> [u8; N] { self.map(|x| x.0) }
+    }
+    impl<const N : usize> FromBytes<N> for [RegisterId; N] {
+        fn from_bytes(bytes: [u8; N]) -> Self { bytes.map(|x| RegisterId(x)) }
+    }
+    impl ToBytes<1> for u8 {
+        fn to_bytes(self) -> [u8; 1] { [self] }
+    }
+    impl FromBytes<1> for u8 {
+        fn from_bytes(bytes: [u8; 1]) -> Self { bytes[0] }
+    }
+    impl<'c> ChunkWriter<'c> {
+        pub fn bytes<const N : usize>(mut self, code: [u8; N]) -> Self {
+            self.chunk.code.extend(code.into_iter());
+            self.cnt += N;
+            self
+        }
+        pub fn push<T, const N : usize>(self, x: T) -> Self where
+            T: ToBytes<N> {
+            self.bytes(x.to_bytes())
+        }
+        pub fn current(&self) -> usize { self.chunk.code.len() }
+        pub fn finish(self) {
+            let pad = self.cnt.div_ceil(8) * 8 - self.cnt;
+            for _ in 0..pad { self.chunk.code.push(0); }
+        }
+    }
+    pub struct ChunkReader<'c, const M : usize> {
+        code: &'c [u8],
+    }
+    fn collect_to_array<T, const N : usize>(mut it: impl Iterator<Item = T>)
+        -> [T; N] where T: Default + Copy {
+        let mut r = [T::default(); N];
+        for i in 0..N { r[i] = it.next().unwrap(); }
+        r
+    }
+    impl<'c, const M : usize> ChunkReader<'c, M> {
+        pub fn read<T, const N : usize>(self)
+            -> (ChunkReader<'c, { M + N }>, T) where T: FromBytes<N> {
+            let r =
+                T::from_bytes(collect_to_array(self.code[M..].iter().copied()));
+            (ChunkReader { code: self.code }, r)
+        }
+    }
+    impl Chunk {
+        pub fn new() -> Self { Self { code: Vec::new() } }
+        pub fn writer(&mut self) -> ChunkWriter {
+            ChunkWriter { chunk: self, cnt: 0 }
+        }
+        pub fn write<T, const N : usize>(&mut self, addr: usize, value: T)
+            where T: ToBytes<N> {
+            self.code[addr..addr +
+                                    N].iter_mut().zip(value.to_bytes().into_iter()).for_each(|(write,
+                        value)| *write = value)
+        }
+        pub fn read<T, const N : usize>(&self, addr: Addr) -> T where
+            T: FromBytes<N> {
+            let r =
+                T::from_bytes(collect_to_array(self.code[usize::from(addr)..].iter().copied()));
+            r
+        }
+        pub fn reader(&self, addr: Addr) -> ChunkReader<0> {
+            ChunkReader { code: &self.code[addr.0 as usize..] }
+        }
+        pub fn fetch_registers<'a>(&'a self, at: Addr, cnt: usize)
+            -> impl Iterator<Item = RegisterId> + 'a {
+            (0..cnt).map(move |i| self.read::<RegisterId, _>(at + i as u32))
+        }
+        pub fn len(&self) -> usize { self.code.len() }
+        pub fn fill_back_jump(&mut self, addr: usize, distance: u16) {
+            let [h, l] = distance.to_le_bytes();
+            self.code[addr] = h;
+            self.code[addr + 1] = l;
+        }
+    }
+    impl std::ops::Index<usize> for Chunk {
+        type Output = u8;
+        fn index(&self, index: usize) -> &Self::Output { &self.code[index] }
+    }
+    impl std::ops::IndexMut<usize> for Chunk {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            &mut self.code[index]
+        }
+    }
+}
+pub mod disassembler {
+    use crate::builtins;
+    use crate::{byte_code, executable};
+    use tabled::{Table, Tabled};
+    struct Row {
+        addr: byte_code::Addr,
+        op_code: String,
+        to: String,
+        args: String,
+        extra: String,
+    }
+    impl ::tabled::Tabled for Row {
+        const LENGTH: usize = 0 + { 1 } + { 1 } + { 1 } + { 1 } + { 1 };
+        fn fields(&self) -> Vec<::std::borrow::Cow<'_, str>> {
+            {
+                let mut out = Vec::new();
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Owned({
+                                            let res =
+                                                ::alloc::fmt::format(format_args!("{0}", self.addr));
+                                            res
+                                        })])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Owned({
+                                            let res =
+                                                ::alloc::fmt::format(format_args!("{0}", self.op_code));
+                                            res
+                                        })])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Owned({
+                                            let res =
+                                                ::alloc::fmt::format(format_args!("{0}", self.to));
+                                            res
+                                        })])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Owned({
+                                            let res =
+                                                ::alloc::fmt::format(format_args!("{0}", self.args));
+                                            res
+                                        })])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Owned({
+                                            let res =
+                                                ::alloc::fmt::format(format_args!("{0}", self.extra));
+                                            res
+                                        })])));
+                out
+            }
+        }
+        fn headers() -> Vec<::std::borrow::Cow<'static, str>> {
+            {
+                let mut out = Vec::new();
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Borrowed("addr")])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Borrowed("op_code")])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Borrowed("to")])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Borrowed("args")])));
+                out.extend(<[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([::std::borrow::Cow::Borrowed("extra")])));
+                out
+            }
+        }
+    }
+    struct RowIter<'c> {
+        exe: &'c executable::Executable,
+        ip: byte_code::Addr,
+    }
+    impl<'c> RowIter<'c> {
+        fn new(exe: &'c executable::Executable) -> Self {
+            Self { exe, ip: 0.into() }
+        }
+    }
+    struct RegisterArray(Vec<byte_code::RegisterId>);
+    impl<const N : usize> From<[byte_code::RegisterId; N]> for RegisterArray {
+        fn from(value: [byte_code::RegisterId; N]) -> Self {
+            Self(value.into_iter().collect())
+        }
+    }
+    impl std::fmt::Display for RegisterArray {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("["))?;
+            for register_id in self.0.iter() {
+                f.write_fmt(format_args!("{0},", register_id))?;
+            }
+            f.write_fmt(format_args!("]"))
+        }
+    }
+    const STR_TRUNC_LEN: usize = 128;
+    pub fn trunc_str(s: &str) -> &str {
+        if s.len() > STR_TRUNC_LEN { &s[0..STR_TRUNC_LEN] } else { s }
+    }
+    impl<'c> Iterator for RowIter<'c> {
+        type Item = Vec<Row>;
+        fn next(&mut self) -> Option<Self::Item> {
+            if usize::from(self.ip) == self.exe.chunk.len() { return None; }
+            let es = || String::new();
+            let mk_info_row =
+                |addr, op_code, args, extra|
+                    Row { addr, op_code, to: es(), args, extra };
+            let mut rows =
+                if let Some(f_name_addr) =
+                            self.exe.symbols.try_find(self.ip.into()) {
+                        let f_name =
+                            self.exe.str_chunk.read(f_name_addr).to_string();
+                        let (reader, arity) =
+                            self.exe.chunk.reader(self.ip).read::<u32, _>();
+                        let (_, reg_cnt) = reader.read::<u32, _>();
+                        self.ip += 8;
+                        <[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([mk_info_row(self.ip,
+                                            "== FUNCTION BEGIN ==".to_string(), f_name,
+                                            {
+                                                let res =
+                                                    ::alloc::fmt::format(format_args!("Arity {0}, Reg {1}",
+                                                            arity, reg_cnt));
+                                                res
+                                            })]))
+                    } else { Vec::new() };
+            let reader = self.exe.chunk.reader(self.ip);
+            let (reader, op_code) = reader.read::<byte_code::OpCode, _>();
+            let mk_row =
+                |to: byte_code::RegisterId, args, extra|
+                    Row {
+                        addr: self.ip,
+                        op_code: op_code.to_string(),
+                        to: to.to_string(),
+                        args,
+                        extra,
+                    };
+            let mk_row1 =
+                |args, extra|
+                    Row {
+                        addr: self.ip,
+                        op_code: op_code.to_string(),
+                        to: es(),
+                        args,
+                        extra,
+                    };
+            macro_rules! arm_apply {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(ret, callee, args) = reader.$f() ;
+                        $rows.push(mk_row(ret, format!
+                        ("{}, {}", callee, RegisterArray :: from(args)), es(),)) ;
+                    }
+                } ;
+            }
+            macro_rules! arm_tail_call {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(callee, args) = reader.$f() ;
+                        $rows.push(mk_row1(format!
+                        ("{}, {}", callee, RegisterArray :: from(args)), es(),)) ;
+                    }
+                } ;
+            }
+            macro_rules! arm_tail_call_u {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(callee, args) = reader.$f() ; let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee)) ;
+                        $rows.push(mk_row1(format!
+                        ("{}, {}", callee, RegisterArray :: from(args)),
+                        name.to_string(),)) ;
+                    }
+                } ;
+            }
+            macro_rules! arm_call {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(ret, callee, args) = reader.$f() ; let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee)) ;
+                        $rows.push(mk_row(ret, format!
+                        ("{}, {}", callee, RegisterArray :: from(args)),
+                        name.to_string(),)) ;
+                    }
+                } ;
+            }
+            macro_rules! arm_call_builtin {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(ret, callee, args) = reader.$f() ; let name = builtins
+                        :: name_by_id(callee) ;
+                        $rows.push(mk_row(ret, format!
+                        ("{}, {}", callee, RegisterArray :: from(args)),
+                        name.to_string(),)) ;
+                    }
+                } ;
+            }
+            macro_rules! arm_apply_many {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(ret, callee, cnt) = reader.$f() ; let registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8, cnt as
+                        usize).collect :: < Vec < _ >> () ;
+                        $rows.push(mk_row(ret, format! ("{}, {}", callee, cnt),
+                        RegisterArray(registers).to_string(),)) ; self.ip +=
+                        (cnt.div_ceil(8) * 8) as u32 ;
+                    }
+                } ;
+            }
+            macro_rules! arm_tail_call_many {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(callee, cnt) = reader.$f() ; let registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8, cnt as
+                        usize).collect :: < Vec < _ >> () ;
+                        $rows.push(mk_row1(format! ("{}, {}", callee, cnt),
+                        RegisterArray(registers).to_string(),)) ; self.ip +=
+                        (cnt.div_ceil(8) * 8) as u32 ;
+                    }
+                } ;
+            }
+            macro_rules! arm_call_many {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(ret, callee, cnt) = reader.$f() ; let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee)) ; let
+                        registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8, cnt as
+                        usize).collect :: < Vec < _ >> () ;
+                        $rows.push(mk_row(ret, format! ("{}, {}", callee, cnt),
+                        format! ("{}, {}", name, RegisterArray(registers)),)) ;
+                        self.ip += (cnt.div_ceil(8) * 8) as u32 ;
+                    }
+                } ;
+            }
+            macro_rules! arm_tail_call_u_many {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(callee, cnt) = reader.$f() ; let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee)) ; let
+                        registers =
+                        (0 ..
+                        cnt).map(| i |
+                        {
+                            self.exe.chunk.read :: < byte_code :: RegisterId, _ >
+                            (self.ip + 8 + i as u32)
+                        }).collect :: < Vec < _ >> () ;
+                        $rows.push(mk_row1(format! ("{}, {}", callee, cnt), format!
+                        ("{}, {}", name, RegisterArray(registers)),)) ; self.ip +=
+                        (cnt.div_ceil(8) * 8) as u32 ;
+                    }
+                } ;
+            }
+            macro_rules! arm_push {
+                ($f : ident, $rows : ident) =>
+                {
+                    {
+                        let(to, args) = reader.$f() ;
+                        $rows.push(mk_row1(format!
+                        ("{}, {}", to, RegisterArray :: from(args)), es(),)) ;
+                    }
+                } ;
+            }
+            use byte_code::OpCode::*;
+            match op_code {
+                JUMP_TABLE => {
+                    let (r, size) = reader.jump_table();
+                    rows.push(mk_row1(r.to_string(), es()));
+                    for i in 0..size {
+                        let delta: byte_code::JumpDistance =
+                            self.exe.chunk.read(self.ip + 8 +
+                                    (i * byte_code::JumpDistance::bytes_len()) as u32);
+                        rows.push(mk_info_row(self.ip + 8 +
+                                    (i * byte_code::JumpDistance::bytes_len()) as u32, es(),
+                                delta.to_string(), (self.ip + delta).to_string()));
+                    }
+                    self.ip +=
+                        ((size * byte_code::JumpDistance::bytes_len()).div_ceil(8) *
+                                    8) as u32;
+                }
+                JUMP_IF => {
+                    let (r, branch) = reader.jump_if();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", r, branch));
+                                res
+                            }, (self.ip + branch).to_string()));
+                }
+                JUMP_IF_EQ_BOOL => {
+                    let (r, value, branch) = reader.jump_if_eq_bool();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}, {2}", r, value,
+                                            branch));
+                                res
+                            }, (self.ip + branch).to_string()));
+                }
+                JUMP_IF_EQ_I32 => {
+                    let (r, value, branch) = reader.jump_if_eq_i32();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}, {2}", r, value,
+                                            branch));
+                                res
+                            }, (self.ip + branch).to_string()));
+                }
+                JUMP_IF_EQ_I64 => {
+                    let (r, branch) = reader.jump_if_eq_i64();
+                    let (_, value) =
+                        self.exe.chunk.reader(self.ip + 8).read::<i64, _>();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}, {2}", r, value,
+                                            branch));
+                                res
+                            }, (self.ip + branch).to_string()));
+                    self.ip += 8;
+                }
+                JUMP_IF_EQ_STR => {
+                    let (r, value, branch) = reader.jump_if_eq_str();
+                    let s = trunc_str(self.exe.str_chunk.read(value));
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}, {2}", r, value,
+                                            branch));
+                                res
+                            },
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", s,
+                                            (self.ip + branch).to_string()));
+                                res
+                            }));
+                }
+                JUMP => {
+                    let branch = reader.jump();
+                    rows.push(mk_row1(es(), (self.ip + branch).to_string()));
+                }
+                APPLY1 => {
+                    let (ret, callee, args) = reader.apply1();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                APPLY2 => {
+                    let (ret, callee, args) = reader.apply2();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                APPLY3 => {
+                    let (ret, callee, args) = reader.apply3();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                APPLY4 => {
+                    let (ret, callee, args) = reader.apply4();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                APPLY5 => {
+                    let (ret, callee, args) = reader.apply5();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                APPLY_MANY => {
+                    let (ret, callee, cnt) = reader.apply_many();
+                    let registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8,
+                                cnt as usize).collect::<Vec<_>>();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee, cnt));
+                                res
+                            }, RegisterArray(registers).to_string()));
+                    self.ip += (cnt.div_ceil(8) * 8) as u32;
+                }
+                CALL1 => {
+                    let (ret, callee, args) = reader.call1();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                CALL2 => {
+                    let (ret, callee, args) = reader.call2();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                CALL_MANY => {
+                    let (ret, callee, cnt) = reader.call_many();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    let registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8,
+                                cnt as usize).collect::<Vec<_>>();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee, cnt));
+                                res
+                            },
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", name,
+                                            RegisterArray(registers)));
+                                res
+                            }));
+                    self.ip += (cnt.div_ceil(8) * 8) as u32;
+                }
+                TAIL_CALL_U1 => {
+                    let (callee, args) = reader.tail_call_u1();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                TAIL_CALL_U2 => {
+                    let (callee, args) = reader.tail_call_u2();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                TAIL_CALL_U3 => {
+                    let (callee, args) = reader.tail_call_u3();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                TAIL_CALL_U_MANY => {
+                    let (callee, cnt) = reader.tail_call_u_many();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(callee));
+                    let registers =
+                        (0..cnt).map(|i|
+                                    {
+                                        self.exe.chunk.read::<byte_code::RegisterId,
+                                            _>(self.ip + 8 + i as u32)
+                                    }).collect::<Vec<_>>();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee, cnt));
+                                res
+                            },
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", name,
+                                            RegisterArray(registers)));
+                                res
+                            }));
+                    self.ip += (cnt.div_ceil(8) * 8) as u32;
+                }
+                TAIL_CALL1 => {
+                    let (callee, args) = reader.tail_call1();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL2 => {
+                    let (callee, args) = reader.tail_call2();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL3 => {
+                    let (callee, args) = reader.tail_call3();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL4 => {
+                    let (callee, args) = reader.tail_call4();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL5 => {
+                    let (callee, args) = reader.tail_call5();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL6 => {
+                    let (callee, args) = reader.tail_call6();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAIL_CALL_MANY => {
+                    let (callee, cnt) = reader.tail_call_many();
+                    let registers =
+                        self.exe.chunk.fetch_registers(self.ip + 8,
+                                cnt as usize).collect::<Vec<_>>();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee, cnt));
+                                res
+                            }, RegisterArray(registers).to_string()));
+                    self.ip += (cnt.div_ceil(8) * 8) as u32;
+                }
+                CALL_BUILTIN1 => {
+                    let (ret, callee, args) = reader.call_builtin1();
+                    let name = builtins::name_by_id(callee);
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                CALL_BUILTIN2 => {
+                    let (ret, callee, args) = reader.call_builtin2();
+                    let name = builtins::name_by_id(callee);
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                CALL_BUILTIN3 => {
+                    let (ret, callee, args) = reader.call_builtin3();
+                    let name = builtins::name_by_id(callee);
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                CALL_BUILTIN4 => {
+                    let (ret, callee, args) = reader.call_builtin4();
+                    let name = builtins::name_by_id(callee);
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, name.to_string()));
+                }
+                INT32 => {
+                    let (to, value) = reader.int32();
+                    rows.push(mk_row(to, value.to_string(), es()))
+                }
+                BOOL => {
+                    let (to, value) = reader.bool();
+                    rows.push(mk_row(to, value.to_string(), es()))
+                }
+                STR => {
+                    let (to, addr) = reader.str();
+                    let s = trunc_str(self.exe.str_chunk.read(addr));
+                    rows.push(mk_row(to, addr.to_string(), s.to_string()))
+                }
+                INT64 => {
+                    let to = reader.int64();
+                    let (_, value) =
+                        self.exe.chunk.reader(self.ip + 8).read::<i64, _>();
+                    let r = rows.push(mk_row(to, value.to_string(), es()));
+                    self.ip += 8;
+                    r
+                }
+                FLOAT => {
+                    let to = reader.float();
+                    let (_, value) =
+                        self.exe.chunk.reader(self.ip + 8).read::<f64, _>();
+                    let r = rows.push(mk_row(to, value.to_string(), es()));
+                    self.ip += 8;
+                    r
+                }
+                PUSH1 => {
+                    let (to, args) = reader.push1();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                PUSH2 => {
+                    let (to, args) = reader.push2();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                PUSH3 => {
+                    let (to, args) = reader.push3();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                PUSH4 => {
+                    let (to, args) = reader.push4();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                PUSH5 => {
+                    let (to, args) = reader.push5();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                PUSH6 => {
+                    let (to, args) = reader.push6();
+                    rows.push(mk_row1({
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", to,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                FUNCTION => {
+                    let (to, addr) = reader.function();
+                    let name =
+                        self.exe.str_chunk.read(self.exe.symbols.find(addr));
+                    rows.push(mk_row(to, addr.to_string(), name.to_string()))
+                }
+                BUILTIN => {
+                    let (to, id) = reader.builtin();
+                    let name = builtins::name_by_id(id);
+                    rows.push(mk_row(to, id.to_string(), name.to_string()))
+                }
+                FIELD => {
+                    let (to, from, n) = reader.field();
+                    rows.push(mk_row(to,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}. {1}", from, n));
+                                res
+                            }, es()))
+                }
+                TAGGED1 => {
+                    let (ret, callee, args) = reader.tagged1();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAGGED2 => {
+                    let (ret, callee, args) = reader.tagged2();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAGGED3 => {
+                    let (ret, callee, args) = reader.tagged3();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAGGED4 => {
+                    let (ret, callee, args) = reader.tagged4();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAGGED5 => {
+                    let (ret, callee, args) = reader.tagged5();
+                    rows.push(mk_row(ret,
+                            {
+                                let res =
+                                    ::alloc::fmt::format(format_args!("{0}, {1}", callee,
+                                            RegisterArray::from(args)));
+                                res
+                            }, es()));
+                }
+                TAGGED => {
+                    let (to, tag) = reader.tagged();
+                    rows.push(mk_row(to, tag.to_string(), es()))
+                }
+                MOV => {
+                    let (to, from) = reader.mov();
+                    rows.push(mk_row(to, from.to_string(), es()))
+                }
+                RET => {
+                    let r = reader.ret();
+                    rows.push(mk_row1(r.to_string(), es()))
+                }
+                PANIC => {
+                    let addr = reader.panic();
+                    let s = trunc_str(self.exe.str_chunk.read(addr));
+                    rows.push(mk_row1(addr.to_string(), s.to_string()))
+                }
+                UNKNOWN(code) => rows.push(mk_row1(code.to_string(), es())),
+            };
+            self.ip += 8;
+            Some(rows)
+        }
+    }
+    pub fn disassemble(exe: &executable::Executable) -> Table {
+        let rows = RowIter::new(exe).flatten();
+        let mut table = Table::new(rows);
+        use tabled::settings::Style;
+        table.with(Style::blank());
+        table
+    }
+}
+pub mod errors {
+    use thiserror::Error;
+    pub enum RunTimeError {
+
+        #[error("Out of Menory")]
+        OutOfMemory,
+
+        #[error("Program Paniced: {}",.0)]
+        Panic(String),
+
+        #[error("Bad Op Code in Program: {}",.0)]
+        BadOpCode(u8),
+    }
+    #[allow(unused_qualifications)]
+    impl std::error::Error for RunTimeError { }
+    #[allow(unused_qualifications)]
+    impl std::fmt::Display for RunTimeError {
+        fn fmt(&self, __formatter: &mut std::fmt::Formatter)
+            -> std::fmt::Result {
+
+            #[allow(unused_variables, deprecated, clippy ::
+            used_underscore_binding)]
+            match self {
+                RunTimeError::OutOfMemory {} =>
+                    __formatter.write_fmt(format_args!("Out of Menory")),
+                RunTimeError::Panic(_0) =>
+                    __formatter.write_fmt(format_args!("Program Paniced: {0}",
+                            _0)),
+                RunTimeError::BadOpCode(_0) =>
+                    __formatter.write_fmt(format_args!("Bad Op Code in Program: {0}",
+                            _0)),
+            }
+        }
+    }
+    #[automatically_derived]
+    impl ::core::fmt::Debug for RunTimeError {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            match self {
+                RunTimeError::OutOfMemory =>
+                    ::core::fmt::Formatter::write_str(f, "OutOfMemory"),
+                RunTimeError::Panic(__self_0) =>
+                    ::core::fmt::Formatter::debug_tuple_field1_finish(f,
+                        "Panic", &__self_0),
+                RunTimeError::BadOpCode(__self_0) =>
+                    ::core::fmt::Formatter::debug_tuple_field1_finish(f,
+                        "BadOpCode", &__self_0),
+            }
+        }
+    }
+}
+pub mod executable {
+    use crate::byte_code;
+    pub struct StrChunk(String);
+    impl StrChunk {
+        pub fn new() -> Self { Self(String::new()) }
+        pub fn push(&mut self, s: &str) -> Option<byte_code::StrAddr> {
+            let addr = self.0.len();
+            self.0.push_str(s);
+            self.0.push('\0');
+            u32::try_from(addr).map(|x| byte_code::StrAddr(x)).ok()
+        }
+        pub fn read(&self, addr: byte_code::StrAddr) -> &str {
+            let addr = addr.0 as usize;
+            let len = self.0[addr..].find('\0').unwrap();
+            &self.0[addr..addr + len]
+        }
+    }
+    pub struct Symbols {
+        f: Vec<(byte_code::Addr, byte_code::StrAddr)>,
+    }
+    #[automatically_derived]
+    impl ::core::fmt::Debug for Symbols {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+            ::core::fmt::Formatter::debug_struct_field1_finish(f, "Symbols",
+                "f", &&self.f)
+        }
+    }
+    impl Symbols {
+        pub fn new(function_names: Vec<(byte_code::Addr, byte_code::StrAddr)>)
+            -> Self {
+            Self { f: function_names }
+        }
+        pub fn find(&self, addr: byte_code::Addr) -> byte_code::StrAddr {
+            self.f.iter().find(|(f_addr, _)| *f_addr == addr).unwrap().1
+        }
+        pub fn try_find(&self, addr: byte_code::Addr)
+            -> Option<byte_code::StrAddr> {
+            self.f.iter().find(|(f_addr, _)|
+                            *f_addr == addr).map(|(_, name_addr)| name_addr).copied()
+        }
+    }
+    pub struct Executable {
+        pub(crate) chunk: byte_code::Chunk,
+        pub(crate) entry: byte_code::Addr,
+        pub(crate) str_chunk: StrChunk,
+        pub(crate) symbols: Symbols,
+    }
+    impl Executable {
+        pub fn new(chunk: byte_code::Chunk, entry: byte_code::Addr,
+            str_chunk: StrChunk, symbols: Symbols) -> Self {
+            Self { chunk, entry, str_chunk, symbols }
+        }
+    }
+}
+pub mod mem {
+    mod gc {
+        use crate::{builtins, byte_code};
+        use super::{value, ValueVec};
+        use value::{Value, ValueSafe};
+        use core::ptr;
+        use std::{alloc, marker::PhantomData};
+        pub struct Pointer<T>(ptr::NonNull<T>) where T: ?Sized + Obj;
+        impl<T> Clone for Pointer<T> where T: ?Sized + Obj {
+            fn clone(&self) -> Self { Pointer(self.0.clone()) }
+        }
+        impl<T> Copy for Pointer<T> where T: ?Sized + Obj {}
+        impl<T> From<ptr::NonNull<T>> for Pointer<T> where T: ?Sized + Obj {
+            fn from(value: ptr::NonNull<T>) -> Self { Self(value) }
+        }
+        impl<T> Pointer<T> where T: Obj + 'static {
+            pub unsafe fn deallocate(self) {
+                let layout = alloc::Layout::new::<T>();
+                alloc::dealloc(self.0.as_ptr() as *mut u8, layout);
+            }
+            fn cast_obj_pointer(self) -> ObjPointer {
+                unsafe {
+                    let ptr = self.0.as_ptr() as *mut dyn Obj;
+                    let ptr = ptr::NonNull::new_unchecked(ptr);
+                    Pointer(ptr)
+                }
+            }
+        }
+        pub type ObjPointer = Pointer<dyn Obj>;
+        impl ObjPointer {
+            pub unsafe fn deallocate(self) {
+                let layout =
+                    match self.kind() {
+                        ObjectKind::Array => alloc::Layout::new::<ObjArray>(),
+                        ObjectKind::List => alloc::Layout::new::<ObjList>(),
+                        ObjectKind::Callable => alloc::Layout::new::<ObjCallable>(),
+                    };
+                alloc::dealloc(self.0.as_ptr() as *mut u8, layout);
+            }
+            pub unsafe fn size(self) -> usize {
+                match self.kind() {
+                    ObjectKind::Array => std::mem::size_of::<ObjArray>(),
+                    ObjectKind::List => std::mem::size_of::<ObjList>(),
+                    ObjectKind::Callable => std::mem::size_of::<ObjCallable>(),
+                }
+            }
+        }
+        impl<T> Pointer<T> where T: ?Sized + Obj {
+            pub unsafe fn set_next_obj(&mut self, p: Option<ObjPointer>) {
+                self.0.as_mut().set_next_obj(p)
+            }
+            pub unsafe fn next_obj(&self) -> Option<ObjPointer> {
+                self.0.as_ref().next_obj()
+            }
+            pub unsafe fn mark(&mut self) { self.0.as_mut().mark() }
+            pub unsafe fn unmark(&mut self) { self.0.as_mut().unmark() }
+            pub unsafe fn is_marked(&self) -> bool {
+                self.0.as_ref().is_marked()
+            }
+            pub fn from_ref<'p>(r: Ref<'p, T>) -> Self { Self(r.p) }
+            pub unsafe fn to_ref<'p>(self, _phantom: PhantomData<&'p GcPool>)
+                -> Ref<'p, T> {
+                Ref { p: self.0, _m: PhantomData }
+            }
+        }
+        impl<'p, T> Ref<'p, T> where T: Obj + ?Sized {
+            pub fn mark(&mut self) { unsafe { self.p.as_mut().mark() } }
+            pub fn kind(&self) -> ObjectKind {
+                unsafe { self.p.as_ref().kind() }
+            }
+        }
+        impl<'p, T> Ref<'p, T> where T: Obj + 'static {
+            pub fn cast_obj_ref(self) -> ObjRef<'p> {
+                unsafe {
+                    Pointer::from_ref(self).cast_obj_pointer().to_ref(PhantomData)
+                }
+            }
+        }
+        impl<'p> ObjRef<'p> {
+            pub fn cast<T>(self) -> Ref<'p, T> where T: Obj + StaticObjKind {
+                unsafe { Pointer::from_ref(self).cast().to_ref(PhantomData) }
+            }
+        }
+        impl ObjPointer {
+            pub unsafe fn kind(&self) -> ObjectKind { self.0.as_ref().kind() }
+            pub unsafe fn cast_unchecked<T>(self) -> Pointer<T> where T: Obj {
+                Pointer(self.0.cast::<T>())
+            }
+            pub unsafe fn cast<T>(self) -> Pointer<T> where T: Obj +
+                StaticObjKind {
+                if <T as StaticObjKind>::kind() == self.kind() {
+                        self.cast_unchecked::<T>()
+                    } else {
+                       {
+                           ::core::panicking::panic_fmt(format_args!("Cast Obj Error: Casting to {0:?}, got {1:?}",
+                                   <T as StaticObjKind>::kind(), self.kind()));
+                       }
+                   }
+            }
+        }
+        /// A always valid pointer to some object.
+        /// The `'p` lifetime marker here is from [`Lock`]. This ensures that no sweep can be performed
+        /// if a [`Ref`] pointer is around.
+        pub struct Ref<'p, T> where T: ?Sized {
+            p: ptr::NonNull<T>,
+            _m: PhantomData<&'p GcPool>,
+        }
+        impl<'p, T> Clone for Ref<'p, T> where T: ?Sized {
+            fn clone(&self) -> Self { Self { p: self.p, _m: self._m } }
+        }
+        impl<'p, T> Copy for Ref<'p, T> where T: ?Sized {}
+        pub type ObjRef<'p> = Ref<'p, dyn Obj>;
+        impl<'p, T> std::fmt::Debug for Ref<'p, T> where T: Obj + ?Sized {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+                -> std::fmt::Result {
+                f.write_fmt(format_args!("Ref({0:?})", self.p))
+            }
+        }
+        /// Describes an object that can be garbage collected
+        pub trait Gc {
+            /// Set pointer to next object in the pool
+            fn set_next_obj(&mut self, p: Option<ObjPointer>);
+            /// Return pointer to next object in the pool
+            fn next_obj(&self)
+            -> Option<ObjPointer>;
+            /// Mark this object and its children as reachable
+            fn mark(&mut self);
+            /// Cancel mark on this object, but NOT on its children
+            fn unmark(&mut self);
+            /// If the object is marked as reachable
+            fn is_marked(&self)
+            -> bool;
+        }
+        /// Describes an object in the VM
+        pub trait Obj: Gc {
+            fn kind(&self)
+            -> ObjectKind;
+        }
+        /// Used for dynamic checked cast
+        pub trait StaticObjKind {
+            fn kind()
+            -> ObjectKind;
+        }
+        pub enum ObjectKind { Array, List, Callable, }
+        #[automatically_derived]
+        impl ::core::clone::Clone for ObjectKind {
+            #[inline]
+            fn clone(&self) -> ObjectKind { *self }
+        }
+        #[automatically_derived]
+        impl ::core::marker::Copy for ObjectKind { }
+        #[automatically_derived]
+        impl ::core::marker::StructuralPartialEq for ObjectKind { }
+        #[automatically_derived]
+        impl ::core::cmp::PartialEq for ObjectKind {
+            #[inline]
+            fn eq(&self, other: &ObjectKind) -> bool {
+                let __self_tag = ::core::intrinsics::discriminant_value(self);
+                let __arg1_tag =
+                    ::core::intrinsics::discriminant_value(other);
+                __self_tag == __arg1_tag
+            }
+        }
+        #[automatically_derived]
+        impl ::core::marker::StructuralEq for ObjectKind { }
+        #[automatically_derived]
+        impl ::core::cmp::Eq for ObjectKind {
+            #[inline]
+            #[doc(hidden)]
+            #[coverage(off)]
+            fn assert_receiver_is_total_eq(&self) -> () {}
+        }
+        #[automatically_derived]
+        impl ::core::fmt::Debug for ObjectKind {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter)
+                -> ::core::fmt::Result {
+                ::core::fmt::Formatter::write_str(f,
+                    match self {
+                        ObjectKind::Array => "Array",
+                        ObjectKind::List => "List",
+                        ObjectKind::Callable => "Callable",
+                    })
+            }
+        }
+        /// An array object
+        pub struct ObjArray {
+            tag: u32,
+            v: Vec<Value>,
+            gc_marker: bool,
+            next_obj: Option<ObjPointer>,
+        }
+        impl StaticObjKind for ObjArray {
+            fn kind() -> ObjectKind { ObjectKind::Array }
+        }
+        impl Gc for ObjArray {
+            fn set_next_obj(&mut self, p: Option<ObjPointer>) {
+                self.next_obj = p
+            }
+            fn next_obj(&self) -> Option<ObjPointer> { self.next_obj }
+            fn mark(&mut self) {
+                self.gc_marker = true;
+                self.v.iter_mut().for_each(|v| unsafe { v.mark() });
+            }
+            fn unmark(&mut self) { self.gc_marker = false; }
+            fn is_marked(&self) -> bool { self.gc_marker }
+        }
+        impl Obj for ObjArray {
+            fn kind(&self) -> ObjectKind { ObjectKind::Array }
+        }
+        impl ObjArray {
+            pub fn allocate(tag: u32) -> Result<Pointer<ObjArray>, ()> {
+                unsafe {
+                    let layout = alloc::Layout::new::<ObjArray>();
+                    let ptr = alloc::alloc(layout) as *mut ObjArray;
+                    if ptr.is_null() { return Err(()); }
+                    let obj_arr = &mut *ptr;
+                    *obj_arr =
+                        ObjArray {
+                            tag,
+                            v: Vec::new(),
+                            gc_marker: false,
+                            next_obj: None,
+                        };
+                    let trait_ptr = ptr::NonNull::new_unchecked(ptr);
+                    Ok(trait_ptr.into())
+                }
+            }
+        }
+        impl Pointer<ObjArray> {
+            pub unsafe fn tag(&self) -> u32 { self.0.as_ref().tag }
+            pub unsafe fn push(&mut self, v: Value) {
+                self.0.as_mut().v.push(v)
+            }
+            pub unsafe fn get(&self, idx: usize) -> Option<Value> {
+                self.0.as_ref().v.get(idx).copied()
+            }
+        }
+        impl<'p> Ref<'p, ObjArray> {
+            pub fn tag(&self) -> u32 {
+                unsafe { Pointer::from_ref(*self).tag() }
+            }
+            pub fn push(&mut self, v: ValueSafe<'p>) {
+                unsafe { Pointer::from_ref(*self).push(Value::from_safe(v)) }
+            }
+            pub fn get(&self, idx: usize) -> Option<ValueSafe<'p>> {
+                unsafe {
+                    Pointer::from_ref(*self).get(idx).map(|v|
+                            v.to_safe(PhantomData))
+                }
+            }
+        }
+        /// A list with each node garbage collected
+        /// # Safety
+        /// All pointers in this struct must be valid
+        pub struct ObjList {
+            v: Option<(Value, Pointer<ObjList>)>,
+            gc_marker: bool,
+            next_obj: Option<ObjPointer>,
+        }
+        impl StaticObjKind for ObjList {
+            fn kind() -> ObjectKind { ObjectKind::List }
+        }
+        impl Gc for ObjList {
+            fn set_next_obj(&mut self, p: Option<ObjPointer>) {
+                self.next_obj = p;
+            }
+            fn next_obj(&self) -> Option<ObjPointer> { self.next_obj }
+            fn mark(&mut self) {
+                self.gc_marker = true;
+                if let Some((v, next)) = &mut self.v {
+                        unsafe { v.mark() }
+                        unsafe { next.mark() }
+                    }
+            }
+            fn unmark(&mut self) { self.gc_marker = false; }
+            fn is_marked(&self) -> bool { self.gc_marker }
+        }
+        impl Obj for ObjList {
+            fn kind(&self) -> ObjectKind { ObjectKind::List }
+        }
+        impl ObjList {
+            pub fn allocate() -> Result<Pointer<ObjList>, ()> {
+                unsafe {
+                    let layout = alloc::Layout::new::<ObjList>();
+                    let ptr = alloc::alloc(layout) as *mut ObjList;
+                    if ptr.is_null() { return Err(()); }
+                    let obj_arr = &mut *ptr;
+                    *obj_arr =
+                        ObjList { v: None, gc_marker: false, next_obj: None };
+                    let trait_ptr = ptr::NonNull::new(ptr).unwrap();
+                    Ok(trait_ptr.into())
+                }
+            }
+        }
+        pub struct ListRefIter<'p>(Ref<'p, ObjList>);
+        impl<'p> Iterator for ListRefIter<'p> {
+            type Item = ValueSafe<'p>;
+            fn next(&mut self) -> Option<Self::Item> {
+                if let Some(head) = self.0.head() {
+                        self.0 = self.0.tail().unwrap();
+                        Some(head)
+                    } else { None }
+            }
+        }
+        impl Pointer<ObjList> {
+            pub unsafe fn con<'p>(self, v: Value)
+                -> Result<Pointer<ObjList>, ()> {
+                let mut head = ObjList::allocate()?;
+                head.0.as_mut().v = Some((v, self));
+                Ok(head)
+            }
+            pub unsafe fn head<'p>(self) -> Option<Value> {
+                self.0.as_ref().v.map(|(v, _)| v)
+            }
+            pub unsafe fn tail<'p>(self) -> Option<Pointer<ObjList>> {
+                self.0.as_ref().v.map(|(_, list)| list)
+            }
+        }
+        impl<'p> Ref<'p, ObjList> {
+            pub fn con(self, v: ValueSafe<'p>)
+                -> Result<Ref<'p, ObjList>, ()> {
+                unsafe {
+                    Pointer::from_ref(self).con(Value::from_safe(v)).map(|p|
+                            p.to_ref(PhantomData))
+                }
+            }
+            pub fn head(self) -> Option<ValueSafe<'p>> {
+                unsafe {
+                    let v = Pointer::from_ref(self).head();
+                    v.map(|v| v.to_safe(PhantomData))
+                }
+            }
+            pub fn tail(self) -> Option<Ref<'p, ObjList>> {
+                unsafe {
+                    let t = Pointer::from_ref(self).tail();
+                    t.map(|t| t.to_ref(PhantomData))
+                }
+            }
+            pub fn iter(self) -> ListRefIter<'p> { ListRefIter(self) }
+        }
+        pub enum Routine {
+            User(byte_code::Addr),
+            Builtin(builtins::BuiltinId),
+        }
+        #[automatically_derived]
+        impl ::core::clone::Clone for Routine {
+            #[inline]
+            fn clone(&self) -> Routine {
+                let _: ::core::clone::AssertParamIsClone<byte_code::Addr>;
+                let _: ::core::clone::AssertParamIsClone<builtins::BuiltinId>;
+                *self
+            }
+        }
+        #[automatically_derived]
+        impl ::core::marker::Copy for Routine { }
+        /// Wraps a function address and environment. Represents a closure or a curried function.
+        pub struct ObjCallable {
+            f: Routine,
+            arity: usize,
+            env: Pointer<ObjList>,
+            env_len: usize,
+            gc_marker: bool,
+            next_obj: Option<ObjPointer>,
+        }
+        impl Gc for ObjCallable {
+            fn set_next_obj(&mut self, p: Option<ObjPointer>) {
+                self.next_obj = p;
+            }
+            fn next_obj(&self) -> Option<ObjPointer> { self.next_obj }
+            fn mark(&mut self) {
+                self.gc_marker = true;
+                unsafe { self.env.mark() };
+            }
+            fn unmark(&mut self) { self.gc_marker = false; }
+            fn is_marked(&self) -> bool { self.gc_marker }
+        }
+        impl Obj for ObjCallable {
+            fn kind(&self) -> ObjectKind { ObjectKind::Callable }
+        }
+        impl StaticObjKind for ObjCallable {
+            fn kind() -> ObjectKind { ObjectKind::Callable }
+        }
+        impl ObjCallable {
+            pub fn allocate_with_env(f: Routine, arity: usize,
+                env: Pointer<ObjList>) -> Result<Pointer<ObjCallable>, ()> {
+                unsafe {
+                    let layout = alloc::Layout::new::<ObjCallable>();
+                    let ptr = alloc::alloc(layout) as *mut ObjCallable;
+                    if ptr.is_null() { return Err(()); }
+                    let obj_arr = &mut *ptr;
+                    *obj_arr =
+                        ObjCallable {
+                            f,
+                            arity,
+                            env_len: 0,
+                            env,
+                            gc_marker: false,
+                            next_obj: None,
+                        };
+                    let trait_ptr = ptr::NonNull::new(ptr).unwrap();
+                    Ok(trait_ptr.into())
+                }
+            }
+            pub fn allocate(f: Routine, arity: usize)
+                -> Result<Pointer<ObjCallable>, ()> {
+                let env = ObjList::allocate()?;
+                Ok(ObjCallable::allocate_with_env(f, arity, env)?)
+            }
+        }
+        impl Pointer<ObjCallable> {
+            pub unsafe fn arity(self) -> usize { self.0.as_ref().arity }
+            pub unsafe fn routine(self) -> Routine { self.0.as_ref().f }
+            pub unsafe fn env(self) -> Pointer<ObjList> {
+                self.0.as_ref().env
+            }
+        }
+        impl<'p> Ref<'p, ObjCallable> {
+            pub fn arity(self) -> usize {
+                unsafe { Pointer::from_ref(self).arity() }
+            }
+            pub fn routine(self) -> Routine {
+                unsafe { Pointer::from_ref(self).routine() }
+            }
+            fn env(self) -> Ref<'p, ObjList> {
+                unsafe { Pointer::from_ref(self).env().to_ref(PhantomData) }
+            }
+            pub fn push_env(self, values: impl Iterator<Item = ValueSafe<'p>>)
+                -> Result<Ref<'p, ObjCallable>, ()> {
+                let mut new_env = self.env();
+                for value in values { new_env = new_env.con(value)?; }
+                let new_env = Pointer::from_ref(new_env);
+                let callable =
+                    ObjCallable::allocate_with_env(self.routine(), self.arity(),
+                            new_env)?;
+                unsafe { Ok(callable.to_ref(PhantomData)) }
+            }
+            pub fn env_iter(&self) -> ListRefIter<'p> { self.env().iter() }
+            pub fn env_len(&self) -> usize {
+                unsafe { self.p.as_ref().env_len }
+            }
+        }
+        pub struct Lock {
+            private: PhantomData<()>,
+        }
+        impl Lock {
+            fn new() -> Self { Lock { private: PhantomData } }
+        }
+        /// # Safety
+        /// All pointers must be valid
+        pub struct GcPool {
+            first: Option<ObjPointer>,
+            /// In bytes
+            memory_usage: usize,
+        }
+        impl GcPool {
+            /// # Safety
+            /// `obj` must point to valid object.
+            unsafe fn push(&mut self, mut obj: ObjPointer) {
+                if let Some(first) = self.first {
+                        obj.set_next_obj(Some(first));
+                    }
+                self.first = Some(obj);
+            }
+            pub fn allocate_array<'p>(&mut self, tag: u32, _lock: &'p Lock)
+                -> Result<Ref<'p, ObjArray>, ()> {
+                let ptr = ObjArray::allocate(tag)?;
+                unsafe { self.push(ptr.clone().cast_obj_pointer()); }
+                self.memory_usage += std::mem::size_of::<ObjArray>();
+                Ok(Ref { p: ptr.0, _m: PhantomData })
+            }
+            pub fn allocate_list<'p>(&mut self, _lock: &'p Lock)
+                -> Result<Ref<'p, ObjList>, ()> {
+                let ptr = ObjList::allocate()?;
+                unsafe { self.push(ptr.clone().cast_obj_pointer()); }
+                self.memory_usage += std::mem::size_of::<ObjList>();
+                Ok(Ref { p: ptr.0, _m: PhantomData })
+            }
+            pub fn allocate_callable<'p>(&mut self, f: Routine, arity: usize,
+                _lock: &'p Lock) -> Result<Ref<'p, ObjCallable>, ()> {
+                let ptr = ObjCallable::allocate(f, arity)?;
+                unsafe { self.push(ptr.clone().cast_obj_pointer()); }
+                self.memory_usage += std::mem::size_of::<ObjCallable>();
+                Ok(Ref { p: ptr.0, _m: PhantomData })
+            }
+            /// Remove unmarked objects. a [`ValueVecMarked`] must be consumed as objects are no longer marked
+            /// after this function is called.
+            pub fn sweep<'p>(&'p mut self, vv: &mut ValueVec,
+                _lock: &'p mut Lock) {
+                unsafe {
+                    vv.mark();
+                    while let Some(mut first) = self.first {
+                        if !first.is_marked() {
+                                let new_first = first.next_obj();
+                                self.memory_usage -= first.size();
+                                first.deallocate();
+                                self.first = new_first;
+                            } else { first.unmark(); break; }
+                    }
+                    if let Some(first) = self.first {
+                            let mut p = first;
+                            while let Some(mut p_next) = p.next_obj() {
+                                if !p_next.is_marked() {
+                                        let new_next = p_next.next_obj();
+                                        self.memory_usage -= p_next.size();
+                                        p_next.deallocate();
+                                        p.set_next_obj(new_next);
+                                    } else { p_next.unmark(); p = p_next; }
+                            }
+                        }
+                }
+            }
+            pub fn new() -> (Self, super::ValueVec, Lock) {
+                (Self { first: None, memory_usage: 0 },
+                    super::ValueVec::new(), Lock::new())
+            }
+            pub fn memory_usage(&self) -> usize { self.memory_usage }
+        }
+        impl Drop for GcPool {
+            fn drop(&mut self) {
+                while let Some(obj) = self.first {
+                    unsafe { self.first = obj.next_obj(); obj.deallocate(); }
+                }
+            }
+        }
+    }
+    mod value {
+        use std::marker::PhantomData;
+        use super::{gc, GcPool};
+        use gc::{Obj, ObjRef, Pointer};
+        /// A cheap to copy value in registers.
+        /// `Obj` does not guarantee a valid pointer
+        pub enum Value {
+            Int(i64),
+            Float(f64),
+            Bool(bool),
+            Obj(Pointer<dyn Obj>),
+        }
+        #[automatically_derived]
+        impl ::core::clone::Clone for Value {
+            #[inline]
+            fn clone(&self) -> Value {
+                let _: ::core::clone::AssertParamIsClone<i64>;
+                let _: ::core::clone::AssertParamIsClone<f64>;
+                let _: ::core::clone::AssertParamIsClone<bool>;
+                let _: ::core::clone::AssertParamIsClone<Pointer<dyn Obj>>;
+                *self
+            }
+        }
+        #[automatically_derived]
+        impl ::core::marker::Copy for Value { }
+        impl Default for Value {
+            fn default() -> Self { Value::Int(0) }
+        }
+        /// Same as `Value`, but the lifetime '`p` guarantees that `Obj` variant points to a valid object.
+        pub enum ValueSafe<'p> {
+            Int(i64),
+            Float(f64),
+            Bool(bool),
+            Obj(ObjRef<'p>),
+        }
+        #[automatically_derived]
+        impl<'p> ::core::clone::Clone for ValueSafe<'p> {
+            #[inline]
+            fn clone(&self) -> ValueSafe<'p> {
+                let _: ::core::clone::AssertParamIsClone<i64>;
+                let _: ::core::clone::AssertParamIsClone<f64>;
+                let _: ::core::clone::AssertParamIsClone<bool>;
+                let _: ::core::clone::AssertParamIsClone<ObjRef<'p>>;
+                *self
+            }
+        }
+        #[automatically_derived]
+        impl<'p> ::core::marker::Copy for ValueSafe<'p> { }
+        #[automatically_derived]
+        impl<'p> ::core::fmt::Debug for ValueSafe<'p> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter)
+                -> ::core::fmt::Result {
+                match self {
+                    ValueSafe::Int(__self_0) =>
+                        ::core::fmt::Formatter::debug_tuple_field1_finish(f, "Int",
+                            &__self_0),
+                    ValueSafe::Float(__self_0) =>
+                        ::core::fmt::Formatter::debug_tuple_field1_finish(f,
+                            "Float", &__self_0),
+                    ValueSafe::Bool(__self_0) =>
+                        ::core::fmt::Formatter::debug_tuple_field1_finish(f, "Bool",
+                            &__self_0),
+                    ValueSafe::Obj(__self_0) =>
+                        ::core::fmt::Formatter::debug_tuple_field1_finish(f, "Obj",
+                            &__self_0),
+                }
+            }
+        }
+        impl Value {
+            pub fn from_safe<'p>(v: ValueSafe<'p>) -> Self {
+                use ValueSafe::*;
+                match v {
+                    Int(i) => Value::Int(i),
+                    Float(f) => Value::Float(f),
+                    Bool(b) => Value::Bool(b),
+                    Obj(o) => Value::Obj(Pointer::from_ref(o)),
+                }
+            }
+            pub unsafe fn to_safe<'p>(self, _phantom: PhantomData<&'p GcPool>)
+                -> ValueSafe<'p> {
+                use Value::*;
+                match self {
+                    Int(i) => ValueSafe::Int(i),
+                    Float(f) => ValueSafe::Float(f),
+                    Bool(b) => ValueSafe::Bool(b),
+                    Obj(o) => ValueSafe::Obj(o.to_ref(_phantom)),
+                }
+            }
+            pub unsafe fn mark(&mut self) {
+                match self { Value::Obj(o) => o.mark(), _ => {} }
+            }
+        }
+        impl<'p> ValueSafe<'p> {
+            pub fn mark(&mut self) {
+                match self { ValueSafe::Obj(o) => o.mark(), _ => {} }
+            }
+            pub fn unwrap_int(self) -> i64 {
+                if let Self::Int(i) = self {
+                        i
+                    } else {
+                       {
+                           ::core::panicking::panic_fmt(format_args!("Type Exception: Unwrapping a Value of type Int"));
+                       }
+                   }
+            }
+            pub fn unwrap_float(self) -> f64 {
+                if let Self::Float(i) = self {
+                        i
+                    } else {
+                       {
+                           ::core::panicking::panic_fmt(format_args!("Type Exception: Unwrapping a Value of type Float"));
+                       }
+                   }
+            }
+            pub fn unwrap_bool(self) -> bool {
+                if let Self::Bool(i) = self {
+                        i
+                    } else {
+                       {
+                           ::core::panicking::panic_fmt(format_args!("Type Exception: Unwrapping a Value of type Bool"));
+                       }
+                   }
+            }
+            pub fn unwrap_obj(self) -> ObjRef<'p> {
+                if let Self::Obj(i) = self {
+                        i
+                    } else {
+                       {
+                           ::core::panicking::panic_fmt(format_args!("Type Exception: Unwrapping a Value of type Obj"));
+                       }
+                   }
+            }
+            pub fn from_obj_ref(r: gc::ObjRef<'p>) -> Self { Self::Obj(r) }
+        }
+        impl<'p> Default for ValueSafe<'p> {
+            fn default() -> Self { Self::Int(0) }
+        }
+    }
+    use std::marker::PhantomData;
+    pub use gc::{
+        GcPool, Lock, ObjArray, ObjCallable, ObjList, ObjRef, Ref, Routine,
+    };
+    pub use value::ValueSafe;
+    use self::value::Value;
+    /// # Safety:
+    /// All pointer should be valid
+    pub struct ValueVec {
+        v: Vec<value::Value>,
+    }
+    impl ValueVec {
+        fn new() -> Self { Self { v: Vec::new() } }
+        fn mark(&mut self) {
+            unsafe { self.v.iter_mut().for_each(|v| v.mark()); }
+        }
+        pub fn read<'p>(&self, idx: usize, lock: &'p Lock) -> ValueSafe<'p> {
+            unsafe { self.v[idx].to_safe(PhantomData) }
+        }
+        pub fn write<'p>(&mut self, idx: usize, value: ValueSafe<'p>) {
+            self.v[idx] = Value::from_safe(value)
+        }
+        pub fn allocate(&mut self, cnt: usize) {
+            (0..cnt).for_each(|_| self.v.push(Value::default()));
+        }
+        pub fn shrink(&mut self, cnt: usize) {
+            self.v.resize_with(self.v.len() - cnt, || Value::default())
+        }
+    }
+}
+pub mod vm {
+    use crate::errors;
+    use crate::{builtins, byte_code, executable, mem};
+    use byte_code::{Addr, ChunkReader, JumpDistance, RegisterId};
+    use executable::Executable;
+    use mem::ValueSafe;
+    struct CallFrame {
+        register_offset: usize,
+        return_addr: Addr,
+        return_register: RegisterId,
+    }
+    struct CallStack {
+        stack: Vec<CallFrame>,
+        current_reg_cnt: usize,
+    }
+    impl CallStack {
+        pub fn new() -> Self {
+            Self {
+                stack: <[_]>::into_vec(#[rustc_box] ::alloc::boxed::Box::new([CallFrame {
+                                    register_offset: 0,
+                                    return_addr: 0.into(),
+                                    return_register: RegisterId::default(),
+                                }])),
+                current_reg_cnt: 0,
+            }
+        }
+        pub fn read_register<'p>(&self, vv: &mem::ValueVec,
+            id: byte_code::RegisterId, lock: &'p mem::Lock)
+            -> mem::ValueSafe<'p> {
+            let offset = self.stack.last().unwrap().register_offset;
+            vv.read(offset + id.0 as usize, lock)
+        }
+        pub fn read_register_of_last_frame<'p>(&self, vv: &mem::ValueVec,
+            id: byte_code::RegisterId, lock: &'p mem::Lock)
+            -> mem::ValueSafe<'p> {
+            let offset = self.stack[self.stack.len() - 2].register_offset;
+            vv.read(offset + id.0 as usize, lock)
+        }
+        pub fn write_register<'p>(&self, vv: &mut mem::ValueVec,
+            id: byte_code::RegisterId, value: mem::ValueSafe<'p>) {
+            let offset = self.stack.last().unwrap().register_offset;
+            vv.write(offset + id.0 as usize, value)
+        }
+        pub fn new_frame<'p>(&mut self, vv: &mut mem::ValueVec,
+            reg_cnt: usize, return_register: RegisterId, return_addr: Addr) {
+            self.stack.push(CallFrame {
+                    register_offset: self.stack.last().unwrap().register_offset
+                        + self.current_reg_cnt,
+                    return_addr,
+                    return_register,
+                });
+            vv.allocate(reg_cnt);
+            self.current_reg_cnt = reg_cnt;
+        }
+        pub fn pop_frame<'p>(&mut self, vv: &mut mem::ValueVec,
+            return_value: ValueSafe<'p>) -> Option<Addr> {
+            vv.shrink(self.current_reg_cnt);
+            let popped_frame = self.stack.pop().unwrap();
+            if self.stack.len() == 1 { return None; }
+            let old_offset = popped_frame.register_offset;
+            let new_offset = self.stack.last().unwrap().register_offset;
+            self.current_reg_cnt = old_offset - new_offset;
+            self.write_register(vv, popped_frame.return_register,
+                return_value);
+            Some(popped_frame.return_addr)
+        }
+    }
+    pub trait GcPolicy {
+        fn if_do_gc(&self, memory_usage: usize)
+        -> bool;
+        fn update(&mut self, memory_usage: usize);
+    }
+    pub struct IncreasingGcPolicy {
+        growth_rate: usize,
+        next_gc: usize,
+    }
+    pub struct StressedGcPolicy {}
+    impl StressedGcPolicy {
+        pub fn new() -> Self { Self {} }
+    }
+    impl GcPolicy for StressedGcPolicy {
+        fn if_do_gc(&self, _memory_usage: usize) -> bool { true }
+        fn update(&mut self, _memory_usage: usize) {}
+    }
+    impl GcPolicy for IncreasingGcPolicy {
+        fn if_do_gc(&self, memory_usage: usize) -> bool {
+            memory_usage > self.next_gc
+        }
+        fn update(&mut self, memory_usage: usize) {
+            self.next_gc = self.growth_rate * memory_usage
+        }
+    }
+    impl IncreasingGcPolicy {
+        pub fn new(growth_rate: usize, first_gc: usize) -> Self {
+            Self { growth_rate, next_gc: first_gc }
+        }
+    }
+    impl Default for IncreasingGcPolicy {
+        fn default() -> Self { Self::new(2, 10 * 1024 * 1024) }
+    }
+    pub struct Vm<'e, G> {
+        ip: Addr,
+        exe: &'e Executable,
+        gc_policy: G,
+    }
+    impl<'e, G> Vm<'e, G> where G: GcPolicy {
+        pub fn new(exe: &'e Executable, gc_policy: G) -> Self {
+            Self { ip: exe.entry, exe, gc_policy }
+        }
+        fn relative_jump(&mut self, offset: byte_code::JumpDistance) {
+            self.ip += offset;
+        }
+        fn ip_inc_8bytes(&mut self) { self.ip += 8; }
+        pub fn run(&mut self) -> Result<i64, errors::RunTimeError> {
+            let (mut pool, mut registers, mut lock) = mem::GcPool::new();
+            let mut call_stack = CallStack::new();
+            macro_rules! do_call_builtin {
+                ($ret : expr, $builtin_id : expr, $args : expr, $f : ident) =>
+                {
+                    let values =
+                    $args.map(| arg |
+                    call_stack.read_register(& registers, arg, & lock)) ; let
+                    builtin = builtins :: get($builtin_id).$f() ; let
+                    return_value = builtin(values) ;
+                    call_stack.write_register(& mut registers, $ret,
+                    return_value) ; self.ip_inc_8bytes() ;
+                } ;
+            }
+            self.do_call(&mut call_stack, &mut registers, RegisterId(0),
+                self.ip, [], &lock);
+            loop {
+                use byte_code::OpCode;
+                use OpCode::*;
+                let reader = self.exe.chunk.reader(self.ip);
+                let (reader, op_code) = reader.read::<OpCode, _>();
+                match op_code {
+                    JUMP_TABLE =>
+                        self.do_jump_table(&mut call_stack, &mut registers, reader,
+                            &lock),
+                    JUMP_IF => {
+                        let (test, jump) = reader.jump_if();
+                        if let ValueSafe::Bool(true) =
+                                    call_stack.read_register(&registers, test, &lock) {
+                                self.relative_jump(jump);
+                            }
+                        self.ip_inc_8bytes();
+                    }
+                    JUMP_IF_EQ_BOOL => {
+                        let (test, value, jump) = reader.jump_if_eq_bool();
+                        if let ValueSafe::Bool(value_test) =
+                                    call_stack.read_register(&registers, test, &lock) {
+                                if value_test == value { self.relative_jump(jump); }
+                            }
+                        self.ip_inc_8bytes();
+                    }
+                    JUMP_IF_EQ_I32 => {
+                        let (test, value, jump) = reader.jump_if_eq_i32();
+                        if let ValueSafe::Int(value_test) =
+                                    call_stack.read_register(&registers, test, &lock) {
+                                if value_test == value as i64 { self.relative_jump(jump); }
+                            }
+                        self.ip_inc_8bytes();
+                    }
+                    JUMP_IF_EQ_I64 => {
+                        let (test, jump) = reader.jump_if_eq_i64();
+                        let value = self.exe.chunk.read::<i64, _>(self.ip + 8);
+                        if let ValueSafe::Int(value_test) =
+                                    call_stack.read_register(&registers, test, &lock) {
+                                if value_test == value { self.relative_jump(jump) }
+                            }
+                        self.ip_inc_8bytes();
+                        self.ip_inc_8bytes();
+                    }
+                    JUMP_IF_EQ_STR =>
+                        ::core::panicking::panic("not implemented"),
+                    JUMP => {
+                        let offset = reader.jump();
+                        self.relative_jump(offset);
+                    }
+                    APPLY1 => {
+                        let (ret, callee, args) = reader.apply1();
+                        self.do_apply(&mut call_stack, &mut registers, ret, callee,
+                                args, &lock)?;
+                    }
+                    APPLY2 => {
+                        let (ret, callee, args) = reader.apply2();
+                        self.do_apply(&mut call_stack, &mut registers, ret, callee,
+                                args, &lock)?;
+                    }
+                    APPLY3 => {
+                        let (ret, callee, args) = reader.apply3();
+                        self.do_apply(&mut call_stack, &mut registers, ret, callee,
+                                args, &lock)?;
+                    }
+                    APPLY4 => {
+                        let (ret, callee, args) = reader.apply4();
+                        self.do_apply(&mut call_stack, &mut registers, ret, callee,
+                                args, &lock)?;
+                    }
+                    APPLY5 => {
+                        let (ret, callee, args) = reader.apply5();
+                        self.do_apply(&mut call_stack, &mut registers, ret, callee,
+                                args, &lock)?;
+                    }
+                    APPLY_MANY => {
+                        let (ret, callee, cnt) = reader.apply_many();
+                        self.do_apply_many(&mut call_stack, &mut registers, ret,
+                                callee, cnt, &lock)?;
+                    }
+                    CALL1 => {
+                        let (ret, f_addr, args) = reader.call1();
+                        self.do_call(&mut call_stack, &mut registers, ret, f_addr,
+                            args, &lock);
+                    }
+                    CALL2 => {
+                        let (ret, f_addr, args) = reader.call2();
+                        self.do_call(&mut call_stack, &mut registers, ret, f_addr,
+                            args, &lock);
+                    }
+                    CALL_MANY => {
+                        let (ret, f_addr, args_cnt) = reader.call_many();
+                        self.do_call_many(&mut call_stack, &mut registers, ret,
+                            f_addr, args_cnt, &lock);
+                    }
+                    TAIL_CALL_U1 => {
+                        let (f_addr, args) = reader.tail_call_u1();
+                        self.do_tail_call_u(&mut call_stack, &mut registers, f_addr,
+                            args, &lock)
+                    }
+                    TAIL_CALL_U2 => {
+                        let (f_addr, args) = reader.tail_call_u2();
+                        self.do_tail_call_u(&mut call_stack, &mut registers, f_addr,
+                            args, &lock)
+                    }
+                    TAIL_CALL_U3 => {
+                        let (f_addr, args) = reader.tail_call_u3();
+                        self.do_tail_call_u(&mut call_stack, &mut registers, f_addr,
+                            args, &lock)
+                    }
+                    TAIL_CALL_U_MANY => {
+                        let (f_addr, args_cnt) = reader.tail_call_u_many();
+                        self.do_tail_call_u_many(&mut call_stack, &mut registers,
+                            f_addr, args_cnt, &lock)
+                    }
+                    TAIL_CALL1 => {
+                        let (callee, args) = reader.tail_call1();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL2 => {
+                        let (callee, args) = reader.tail_call2();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL3 => {
+                        let (callee, args) = reader.tail_call3();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL4 => {
+                        let (callee, args) = reader.tail_call4();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL5 => {
+                        let (callee, args) = reader.tail_call5();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL6 => {
+                        let (callee, args) = reader.tail_call6();
+                        self.do_tail_call(&mut call_stack, &mut registers, callee,
+                            args, &lock)
+                    }
+                    TAIL_CALL_MANY => {
+                        let (callee, args_cnt) = reader.tail_call_many();
+                        self.do_tail_call_many(&mut call_stack, &mut registers,
+                            callee, args_cnt, &lock);
+                    }
+                    INT32 => {
+                        let (r, value) = reader.int32();
+                        call_stack.write_register(&mut registers, r,
+                            ValueSafe::Int(value.into()));
+                        self.ip_inc_8bytes();
+                    }
+                    INT64 => {
+                        let r = reader.int64();
+                        let value = self.exe.chunk.read::<i64, _>(self.ip + 8);
+                        call_stack.write_register(&mut registers, r,
+                            ValueSafe::Int(value));
+                        self.ip_inc_8bytes();
+                        self.ip_inc_8bytes();
+                    }
+                    STR => ::core::panicking::panic("not implemented"),
+                    FLOAT => {
+                        let r = reader.int64();
+                        let value = self.exe.chunk.read::<f64, _>(self.ip + 8);
+                        call_stack.write_register(&mut registers, r,
+                            ValueSafe::Float(value));
+                        self.ip_inc_8bytes();
+                        self.ip_inc_8bytes();
+                    }
+                    BOOL => {
+                        let (to, value) = reader.bool();
+                        call_stack.write_register(&mut registers, to,
+                            ValueSafe::Bool(value));
+                        self.ip_inc_8bytes();
+                    }
+                    PUSH1 => {
+                        let (to, args) = reader.push1();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    PUSH2 => {
+                        let (to, args) = reader.push2();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    PUSH3 => {
+                        let (to, args) = reader.push3();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    PUSH4 => {
+                        let (to, args) = reader.push4();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    PUSH5 => {
+                        let (to, args) = reader.push5();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    PUSH6 => {
+                        let (to, args) = reader.push6();
+                        self.do_push(&mut call_stack, &mut registers, to, args,
+                            &lock);
+                    }
+                    FUNCTION => {
+                        let (to, fid) = reader.function();
+                        let arity = self.exe.chunk.read::<u32, _>(fid);
+                        let routine = mem::Routine::User(fid);
+                        let obj_callable =
+                            pool.allocate_callable(routine, arity as usize,
+                                            &lock).map(|obj|
+                                            obj.cast_obj_ref()).map_err(|_|
+                                        errors::RunTimeError::OutOfMemory)?;
+                        call_stack.write_register(&mut registers, to,
+                            ValueSafe::Obj(obj_callable));
+                        self.ip_inc_8bytes();
+                    }
+                    BUILTIN => {
+                        let (to, bid) = reader.builtin();
+                        let arity = builtins::get_arity(bid);
+                        let routine = mem::Routine::Builtin(bid);
+                        let obj_callable =
+                            pool.allocate_callable(routine, arity as usize,
+                                            &lock).map(|obj|
+                                            obj.cast_obj_ref()).map_err(|_|
+                                        errors::RunTimeError::OutOfMemory)?;
+                        call_stack.write_register(&mut registers, to,
+                            ValueSafe::Obj(obj_callable));
+                        self.ip_inc_8bytes();
+                    }
+                    FIELD => {
+                        let (to, from, index) = reader.field();
+                        let obj_array =
+                            call_stack.read_register(&registers, from,
+                                        &lock).unwrap_obj().cast::<mem::ObjArray>();
+                        call_stack.write_register(&mut registers, to,
+                            obj_array.get(index.into()).unwrap());
+                        self.ip_inc_8bytes();
+                    }
+                    TAGGED1 => {
+                        let (to, tag, args) = reader.tagged1();
+                        self.do_tagged(&mut call_stack, &mut registers, &mut pool,
+                                to, tag, args, &lock)?;
+                    }
+                    TAGGED2 => {
+                        let (to, tag, args) = reader.tagged2();
+                        self.do_tagged(&mut call_stack, &mut registers, &mut pool,
+                                to, tag, args, &lock)?;
+                    }
+                    TAGGED3 => {
+                        let (to, tag, args) = reader.tagged3();
+                        self.do_tagged(&mut call_stack, &mut registers, &mut pool,
+                                to, tag, args, &lock)?;
+                    }
+                    TAGGED4 => {
+                        let (to, tag, args) = reader.tagged4();
+                        self.do_tagged(&mut call_stack, &mut registers, &mut pool,
+                                to, tag, args, &lock)?;
+                    }
+                    TAGGED5 => {
+                        let (to, tag, args) = reader.tagged5();
+                        self.do_tagged(&mut call_stack, &mut registers, &mut pool,
+                                to, tag, args, &lock)?;
+                    }
+                    TAGGED => {
+                        let (to, tag) = reader.tagged();
+                        let array =
+                            pool.allocate_array(tag.into(),
+                                        &lock).map_err(|_| errors::RunTimeError::OutOfMemory)?;
+                        call_stack.write_register(&mut registers, to,
+                            ValueSafe::Obj(array.cast_obj_ref()));
+                        self.ip_inc_8bytes();
+                    }
+                    MOV => {
+                        let (to, from) = reader.mov();
+                        let value =
+                            call_stack.read_register(&registers, from, &lock);
+                        call_stack.write_register(&mut registers, to, value);
+                        self.ip_inc_8bytes();
+                    }
+                    PANIC => {
+                        let addr = reader.panic();
+                        let msg = self.exe.str_chunk.read(addr);
+                        return Err(errors::RunTimeError::Panic(msg.to_string()));
+                    }
+                    RET => {
+                        let reg = reader.ret();
+                        let return_value =
+                            call_stack.read_register(&registers, reg, &lock);
+                        if let Some(return_address) =
+                                    call_stack.pop_frame(&mut registers, return_value) {
+                                self.ip = return_address;
+                            } else { return Ok(return_value.unwrap_int()); }
+                    }
+                    CALL_BUILTIN1 => {
+                        let (ret, builtin_id, args) = reader.call_builtin1();
+                        let values =
+                            args.map(|arg|
+                                    call_stack.read_register(&registers, arg, &lock));
+                        let builtin = builtins::get(builtin_id).unwrap1();
+                        let return_value = builtin(values);
+                        call_stack.write_register(&mut registers, ret,
+                            return_value);
+                        self.ip_inc_8bytes();
+                        ;
+                    }
+                    CALL_BUILTIN2 => {
+                        let (ret, builtin_id, args) = reader.call_builtin2();
+                        let values =
+                            args.map(|arg|
+                                    call_stack.read_register(&registers, arg, &lock));
+                        let builtin = builtins::get(builtin_id).unwrap2();
+                        let return_value = builtin(values);
+                        call_stack.write_register(&mut registers, ret,
+                            return_value);
+                        self.ip_inc_8bytes();
+                        ;
+                    }
+                    CALL_BUILTIN3 => {
+                        let (ret, builtin_id, args) = reader.call_builtin3();
+                        let values =
+                            args.map(|arg|
+                                    call_stack.read_register(&registers, arg, &lock));
+                        let builtin = builtins::get(builtin_id).unwrap3();
+                        let return_value = builtin(values);
+                        call_stack.write_register(&mut registers, ret,
+                            return_value);
+                        self.ip_inc_8bytes();
+                        ;
+                    }
+                    CALL_BUILTIN4 => {
+                        let (ret, builtin_id, args) = reader.call_builtin4();
+                        let values =
+                            args.map(|arg|
+                                    call_stack.read_register(&registers, arg, &lock));
+                        let builtin = builtins::get(builtin_id).unwrap4();
+                        let return_value = builtin(values);
+                        call_stack.write_register(&mut registers, ret,
+                            return_value);
+                        self.ip_inc_8bytes();
+                        ;
+                    }
+                    UNKNOWN(x) => {
+                        return Err(errors::RunTimeError::BadOpCode(x));
+                    }
+                }
+                if self.gc_policy.if_do_gc(pool.memory_usage()) {
+                        pool.sweep(&mut registers, &mut lock);
+                        self.gc_policy.update(pool.memory_usage());
+                    }
+            }
+        }
+        fn do_tagged<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, pool: &mut mem::GcPool,
+            to: RegisterId, tag: u8, args: [RegisterId; N],
+            lock: &'p mem::Lock) -> Result<(), errors::RunTimeError> {
+            let mut array =
+                pool.allocate_array(tag.into(),
+                            lock).map_err(|_| errors::RunTimeError::OutOfMemory)?;
+            args.into_iter().for_each(|arg|
+                    {
+                        array.push(call_stack.read_register(&registers, arg, lock));
+                    });
+            call_stack.write_register(registers, to,
+                ValueSafe::Obj(array.cast_obj_ref()));
+            self.ip_inc_8bytes();
+            Ok(())
+        }
+        fn do_push<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, to: RegisterId,
+            args: [RegisterId; N], lock: &'p mem::Lock) {
+            let mut array =
+                call_stack.read_register(&registers, to,
+                            lock).unwrap_obj().cast::<mem::ObjArray>();
+            args.into_iter().for_each(|arg|
+                    array.push(call_stack.read_register(registers, arg, lock)));
+            self.ip_inc_8bytes();
+        }
+        fn do_tail_call<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, callee: RegisterId,
+            args: [RegisterId; N], lock: &'p mem::Lock) {
+            let callable =
+                call_stack.read_register(registers, callee,
+                            lock).unwrap_obj().cast::<mem::ObjCallable>();
+            match callable.routine() {
+                mem::Routine::User(f_addr) => {
+                    let args_copied =
+                        args.map(|r| call_stack.read_register(registers, r, lock));
+                    for (i, arg) in
+                        (0..callable.env_len()).rev().zip(callable.env_iter()) {
+                        call_stack.write_register(registers, RegisterId(i as u8),
+                            arg);
+                    }
+                    for (i, arg) in
+                        (callable.env_len()..callable.env_len() +
+                                        N).zip(args_copied.into_iter()) {
+                        call_stack.write_register(registers, RegisterId(i as u8),
+                            arg);
+                    }
+                    self.ip = f_addr + 8;
+                }
+                mem::Routine::Builtin(..) =>
+                    ::core::panicking::panic("internal error: entered unreachable code"),
+            }
+        }
+        fn do_tail_call_many<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, callee: RegisterId, args_cnt: u8,
+            lock: &'p mem::Lock) {
+            let callable =
+                call_stack.read_register(registers, callee,
+                            lock).unwrap_obj().cast::<mem::ObjCallable>();
+            match callable.routine() {
+                mem::Routine::User(f_addr) => {
+                    let args_addr = self.ip + 8;
+                    let args_copied =
+                        self.exe.chunk.fetch_registers(args_addr,
+                                    args_cnt as
+                                        usize).map(|r|
+                                    call_stack.read_register(registers, r,
+                                        lock)).collect::<Vec<_>>();
+                    for (i, arg) in
+                        (0..callable.env_len()).rev().zip(callable.env_iter()) {
+                        call_stack.write_register(registers, RegisterId(i as u8),
+                            arg);
+                    }
+                    for (i, arg) in
+                        (callable.env_len()..callable.env_len() +
+                                        args_cnt as usize).zip(args_copied.into_iter()) {
+                        call_stack.write_register(registers, RegisterId(i as u8),
+                            arg);
+                    }
+                    self.ip = f_addr + 8;
+                }
+                mem::Routine::Builtin(..) =>
+                    ::core::panicking::panic("internal error: entered unreachable code"),
+            }
+        }
+        fn do_tail_call_u<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, f_addr: Addr,
+            args: [RegisterId; N], lock: &'p mem::Lock) {
+            let args_copies =
+                args.map(|r| call_stack.read_register(registers, r, lock));
+            for (i, arg) in args_copies.into_iter().enumerate() {
+                call_stack.write_register(registers, RegisterId(i as u8),
+                    arg);
+            }
+            self.ip = f_addr + 8;
+        }
+        fn do_tail_call_u_many<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, f_addr: Addr, args_cnt: u8,
+            lock: &'p mem::Lock) {
+            let args =
+                self.exe.chunk.fetch_registers(self.ip + 8,
+                            args_cnt as
+                                usize).map(|r|
+                            call_stack.read_register(registers, r,
+                                lock)).collect::<Vec<_>>();
+            for (i, arg) in args.into_iter().enumerate() {
+                call_stack.write_register(registers, RegisterId(i as u8),
+                    arg);
+            }
+            self.ip = f_addr + 8;
+        }
+        fn enter_function<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, ret: RegisterId, f_addr: Addr,
+            return_addr: Addr) {
+            self.ip = f_addr;
+            let reg_cnt = self.exe.chunk.read::<u32, _>(f_addr + 4);
+            call_stack.new_frame(registers, reg_cnt as usize, ret,
+                return_addr);
+            self.ip += 8;
+        }
+        fn do_call<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, ret: RegisterId, f_addr: Addr,
+            args: [RegisterId; N], lock: &'p mem::Lock) {
+            let return_addr = self.ip + 8;
+            self.enter_function(call_stack, registers, ret, f_addr,
+                return_addr);
+            for (i, arg) in args.into_iter().enumerate() {
+                call_stack.write_register(registers, RegisterId(i as u8),
+                    call_stack.read_register_of_last_frame(registers, arg,
+                        lock));
+            }
+        }
+        fn do_call_many<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, ret: RegisterId, f_addr: Addr,
+            args_cnt: u8, lock: &'p mem::Lock) {
+            let return_addr =
+                self.ip + 8 + Self::bytes_ceil_8(args_cnt.into());
+            let args_addr = self.ip + 8;
+            self.enter_function(call_stack, registers, ret, f_addr,
+                return_addr);
+            for (i, arg) in
+                self.exe.chunk.fetch_registers(args_addr,
+                            args_cnt.into()).into_iter().enumerate() {
+                call_stack.write_register(registers, RegisterId(i as u8),
+                    call_stack.read_register_of_last_frame(registers, arg,
+                        lock));
+            }
+        }
+        fn do_jump_table<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, reader: ChunkReader<'_, 1>,
+            lock: &'p mem::Lock) {
+            let (r, _) = reader.jump_table();
+            let obj =
+                call_stack.read_register(registers, r, lock).unwrap_obj();
+            let arr = obj.cast::<mem::ObjArray>();
+            let tag = arr.tag();
+            let jump =
+                self.exe.chunk.read(self.ip + 8 +
+                        tag * JumpDistance::bytes_len() as u32);
+            self.relative_jump(jump);
+        }
+        fn do_apply<'p, const N :
+            usize>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, ret: RegisterId,
+            callee: RegisterId, args: [RegisterId; N], lock: &'p mem::Lock)
+            -> Result<(), errors::RunTimeError> {
+            let callable =
+                call_stack.read_register(registers, callee,
+                            lock).unwrap_obj().cast::<mem::ObjCallable>();
+            if N < callable.arity() {
+                    let applied =
+                        callable.push_env(args.into_iter().map(|r|
+                                            call_stack.read_register(registers, r,
+                                                lock))).map_err(|_| errors::RunTimeError::OutOfMemory)?;
+                    call_stack.write_register(registers, ret,
+                        mem::ValueSafe::from_obj_ref(applied.cast_obj_ref()));
+                    self.ip_inc_8bytes()
+                } else {
+                   let routine = callable.routine();
+                   match routine {
+                       mem::Routine::User(f_addr) => {
+                           let return_addr = self.ip + 8;
+                           self.enter_function(call_stack, registers, ret, f_addr,
+                               return_addr);
+                           for (i, arg) in
+                               (0..callable.env_len()).rev().zip(callable.env_iter()) {
+                               call_stack.write_register(registers, RegisterId(i as u8),
+                                   arg);
+                           }
+                           for (i, arg) in
+                               (callable.env_len()..callable.env_len() +
+                                               N).zip(args.into_iter()) {
+                               call_stack.write_register(registers, RegisterId(i as u8),
+                                   call_stack.read_register_of_last_frame(registers, arg,
+                                       lock));
+                           }
+                       }
+                       mem::Routine::Builtin(builtin_id) => {
+                           let mut args_sent = Vec::new();
+                           for arg in callable.env_iter() { args_sent.push(arg); }
+                           for arg in args {
+                               args_sent.push(call_stack.read_register(registers, arg,
+                                       lock));
+                           }
+                           let result = builtins::call_adapted(builtin_id, args_sent);
+                           call_stack.write_register(registers, ret, result);
+                       }
+                   }
+               }
+            Ok(())
+        }
+        fn bytes_ceil_8(cnt: usize) -> u32 { (cnt.div_ceil(8) * 8) as u32 }
+        fn ip_inc_bytes_ceil_8(&mut self, cnt: usize) {
+            self.ip += Self::bytes_ceil_8(cnt)
+        }
+        fn do_apply_many<'p>(&mut self, call_stack: &mut CallStack,
+            registers: &mut mem::ValueVec, ret: RegisterId,
+            callee: RegisterId, args_cnt: u8, lock: &'p mem::Lock)
+            -> Result<(), errors::RunTimeError> {
+            let callable =
+                call_stack.read_register(registers, callee,
+                            lock).unwrap_obj().cast::<mem::ObjCallable>();
+            if (args_cnt as usize) < callable.arity() {
+                    self.ip_inc_8bytes();
+                    let applied =
+                        callable.push_env(self.exe.chunk.fetch_registers(self.ip,
+                                            args_cnt as
+                                                usize).map(|reg|
+                                            call_stack.read_register(registers, reg,
+                                                lock))).map_err(|_| errors::RunTimeError::OutOfMemory)?;
+                    self.ip_inc_bytes_ceil_8(args_cnt.into());
+                    call_stack.write_register(registers, ret,
+                        mem::ValueSafe::from_obj_ref(applied.cast_obj_ref()));
+                } else {
+                   let routine = callable.routine();
+                   match routine {
+                       mem::Routine::User(f_addr) => {
+                           let return_addr =
+                               self.ip + 8 + Self::bytes_ceil_8(args_cnt.into());
+                           let args_addr = self.ip + 8;
+                           self.enter_function(call_stack, registers, ret, f_addr,
+                               return_addr);
+                           for (i, arg) in
+                               (0..callable.env_len()).rev().zip(callable.env_iter()) {
+                               call_stack.write_register(registers, RegisterId(i as u8),
+                                   arg);
+                           }
+                           for (i, arg) in
+                               (callable.env_len()..callable.env_len() +
+                                               args_cnt as
+                                                   usize).zip(self.exe.chunk.fetch_registers(args_addr,
+                                       args_cnt as usize)) {
+                               call_stack.write_register(registers, RegisterId(i as u8),
+                                   call_stack.read_register_of_last_frame(registers, arg,
+                                       lock));
+                           }
+                       }
+                       mem::Routine::Builtin(builtin_id) => {
+                           self.ip_inc_8bytes();
+                           let mut args_sent = Vec::new();
+                           for arg in callable.env_iter() { args_sent.push(arg); }
+                           for arg in
+                               self.exe.chunk.fetch_registers(self.ip, args_cnt as usize) {
+                               args_sent.push(call_stack.read_register(registers, arg,
+                                       lock));
+                           }
+                           let result = builtins::call_adapted(builtin_id, args_sent);
+                           call_stack.write_register(registers, ret, result);
+                       }
+                   }
+               }
+            Ok(())
+        }
+    }
+}

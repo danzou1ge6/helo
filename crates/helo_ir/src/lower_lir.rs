@@ -125,6 +125,7 @@ pub fn lower_function(
                 block_id,
                 &f.blocks,
                 str_index,
+                fid,
                 &mut chunk_relocations,
                 chunk,
                 f_relocations,
@@ -148,13 +149,23 @@ fn lower_block(
     block_id: lir::BlockId,
     blocks: &lir::BlockHeap,
     str_index: &lir::StrIndex,
+    current_fid: lir::FunctionId,
     chunk_relocations: &mut ChunkRelocations,
     chunk: &mut byte_code::Chunk,
     f_relocations: &mut FunctionRelocations,
 ) -> usize {
     let addr = chunk.len();
-    for inst in blocks[block_id].iter() {
-        lower_instruction(inst, str_index, chunk, f_relocations);
+    for (inst_index, inst) in blocks[block_id].iter().enumerate() {
+        lower_instruction(
+            inst_index,
+            inst,
+            str_index,
+            block_id,
+            blocks,
+            current_fid,
+            chunk,
+            f_relocations,
+        );
     }
 
     use lir::Jump::*;
@@ -177,18 +188,33 @@ fn lower_block(
 }
 
 fn lower_instruction(
+    inst_index: usize,
     inst: &lir::Instruction,
     str_index: &lir::StrIndex,
+    block: lir::BlockId,
+    blocks: &lir::BlockHeap,
+    current_fid: lir::FunctionId,
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionRelocations,
 ) {
     use lir::Instruction::*;
     match inst {
         Apply(ret, callee, args) => lower_apply(*ret, *callee, &args, chunk),
-        TailCall(ret, callee, args) => lower_tail_call(*ret, *callee, &args, chunk),
-        TailCallU(ret, callee, args) => lower_tail_call_u(*ret, *callee, &args, chunk, functions),
         CallBuiltin(ret, callee, args) => lower_call_builtin(*ret, *callee, &args, chunk),
-        Call(ret, callee, args) => lower_call(*ret, *callee, &args, chunk, functions),
+        Call(ret, callee, args) => {
+            if is_return_addr(inst_index, inst, block, blocks) && *callee == current_fid {
+                lower_tail_call(*callee, args, chunk, functions)
+            } else {
+                lower_call(*ret, *callee, &args, chunk, functions)
+            }
+        }
+        CallThisClosure(ret, callee, args) => {
+            if is_return_addr(inst_index, inst, block, blocks) {
+                lower_tail_call_local(*callee, args, chunk)
+            } else {
+                lower_apply(*ret, *callee, &args, chunk)
+            }
+        }
         Int(to, v) => lower_int(*to, *v, chunk),
         Float(to, v) => lower_float(*to, v.parse().unwrap(), chunk),
         Bool(to, v) => lower_bool(*to, *v, chunk),
@@ -200,6 +226,16 @@ fn lower_instruction(
         Tagged(to, tag, args) => lower_tagged(*to, *tag, &args, chunk),
         Mov(to, from) => lower_mov(*to, *from, chunk),
     }
+}
+
+fn is_return_addr(
+    inst_index: usize,
+    inst: &lir::Instruction,
+    block: lir::BlockId,
+    blocks: &lir::BlockHeap,
+) -> bool {
+    inst_index + 1 == blocks[block].len()
+        && blocks[block].exit().uses().is_some_and(|u| u == inst.def())
 }
 
 fn lower_jump_table(
@@ -354,62 +390,54 @@ fn lower_apply(
     }
 }
 
-fn lower_tail_call(
-    ret: lir::TempId,
-    callee: lir::TempId,
-    args: &[lir::TempId],
-    chunk: &mut byte_code::Chunk,
-) {
-    let ret = ret.register();
+fn lower_tail_call_local(callee: lir::TempId, args: &[lir::TempId], chunk: &mut byte_code::Chunk) {
     let callee = callee.register();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
     if args_len <= 6 {
         let inst = match args_len {
-            1 => Instruction::TailCall1(callee, collect_to_array(args)),
-            2 => Instruction::TailCall2(callee, collect_to_array(args)),
-            3 => Instruction::TailCall3(callee, collect_to_array(args)),
-            4 => Instruction::TailCall4(callee, collect_to_array(args)),
-            5 => Instruction::TailCall5(callee, collect_to_array(args)),
-            6 => Instruction::TailCall6(callee, collect_to_array(args)),
+            1 => Instruction::TailCallLocal1(callee, collect_to_array(args)),
+            2 => Instruction::TailCallLocal2(callee, collect_to_array(args)),
+            3 => Instruction::TailCallLocal3(callee, collect_to_array(args)),
+            4 => Instruction::TailCallLocal4(callee, collect_to_array(args)),
+            5 => Instruction::TailCallLocal5(callee, collect_to_array(args)),
+            6 => Instruction::TailCallLocal6(callee, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::TailCallMany(callee, args_len as u8).emit(chunk);
+        Instruction::TailCallLocalMany(callee, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
 }
 
-fn lower_tail_call_u(
-    ret: lir::TempId,
+fn lower_tail_call(
     callee: lir::FunctionId,
     args: &[lir::TempId],
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionRelocations,
 ) {
-    let ret = ret.register();
     let callee_addr = byte_code::Addr::default();
     let args_len = args.len();
     let args = args.iter().map(|a| a.register());
 
     functions.add(
-        chunk.len() + byte_code::OpCode::callee_addr_offset(),
+        chunk.len() + byte_code::OpCode::TAIL_CALL1.callee_addr_offset(),
         callee,
     );
 
     if args_len <= 3 {
         let inst = match args_len {
-            1 => Instruction::TailCallU1(callee_addr, collect_to_array(args)),
-            2 => Instruction::TailCallU2(callee_addr, collect_to_array(args)),
-            3 => Instruction::TailCallU3(callee_addr, collect_to_array(args)),
+            1 => Instruction::TailCall1(callee_addr, collect_to_array(args)),
+            2 => Instruction::TailCall2(callee_addr, collect_to_array(args)),
+            3 => Instruction::TailCall3(callee_addr, collect_to_array(args)),
             _ => unreachable!(),
         };
         inst.emit(chunk)
     } else {
-        Instruction::TailCallUMany(callee_addr, args_len as u8).emit(chunk);
+        Instruction::TailCallMany(callee_addr, args_len as u8).emit(chunk);
         args.fold(chunk.writer(), |writer, arg| writer.push(arg))
             .finish();
     }
@@ -448,7 +476,7 @@ fn lower_call(
     let args = args.iter().map(|a| a.register());
 
     functions.add(
-        chunk.len() + byte_code::OpCode::callee_addr_offset(),
+        chunk.len() + byte_code::OpCode::CALL1.callee_addr_offset(),
         callee,
     );
 
@@ -537,7 +565,10 @@ fn lower_function_inst(
     chunk: &mut byte_code::Chunk,
     functions: &mut FunctionRelocations,
 ) {
-    functions.add(chunk.len() + byte_code::OpCode::callee_addr_offset(), fid);
+    functions.add(
+        chunk.len() + byte_code::OpCode::FUNCTION.callee_addr_offset(),
+        fid,
+    );
     Instruction::Function(to.register(), byte_code::Addr::default()).emit(chunk);
 }
 

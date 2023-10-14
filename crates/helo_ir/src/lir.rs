@@ -79,14 +79,14 @@ use ir::StrId;
 pub enum Instruction {
     /// Apply .2 to .1 and store result to .0
     Apply(TempId, TempId, Vec<TempId>),
-    /// Tail call
-    TailCall(TempId, TempId, Vec<TempId>),
-    /// Tail call user function directly
-    TailCallU(TempId, FunctionId, Vec<TempId>),
     /// Call builtin
     CallBuiltin(TempId, BuiltinId, Vec<TempId>),
     /// Call user defined function
     Call(TempId, FunctionId, Vec<TempId>),
+    /// Call .1 with arguments .2, and store result to.0.
+    /// Different from `Apply`, this instruction also implies that .1 is actually he executing closure.
+    /// This information is useful for tail recursion optimization
+    CallThisClosure(TempId, TempId, Vec<TempId>),
     /// Load immediate to register .0
     Int(TempId, i64),
     Float(TempId, String),
@@ -188,8 +188,7 @@ impl Instruction {
         match self {
             Apply(_, _, _)
             | Call(_, _, _)
-            | TailCall(_, _, _)
-            | TailCallU(_, _, _)
+            | CallThisClosure(_, _, _)
             | CallBuiltin(_, _, _)
             | Int(_, _)
             | Float(_, _)
@@ -208,8 +207,7 @@ impl Instruction {
         match self {
             Call(out, _, _)
             | Apply(out, _, _)
-            | TailCall(out, _, _)
-            | TailCallU(out, _, _)
+            | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _) => *out,
             Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) => *out,
             Push(out, _, _) => *out,
@@ -224,8 +222,7 @@ impl Instruction {
         match self {
             Call(out, _, _)
             | Apply(out, _, _)
-            | TailCall(out, _, _)
-            | TailCallU(out, _, _)
+            | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _) => out,
             Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) => out,
             Push(out, _, _) => out,
@@ -241,13 +238,12 @@ impl Instruction {
             Int(_, _) | Float(_, _) | Bool(_, _) | Str(_, _) | Function(_, _) | Buitltin(_, _) => {
                 Box::new([].into_iter())
             }
-            Apply(_, a, args) | TailCall(_, a, args) | Push(_, a, args) => {
+            Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
                 Box::new([a].into_iter().copied().chain(args.iter().copied()))
             }
-            Call(_, _, args)
-            | TailCallU(_, _, args)
-            | CallBuiltin(_, _, args)
-            | Tagged(_, _, args) => Box::new(args.iter().copied()),
+            Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
+                Box::new(args.iter().copied())
+            }
             Field(_, input, _) | Mov(_, input) => Box::new([*input].into_iter()),
         }
     }
@@ -257,13 +253,12 @@ impl Instruction {
             Int(_, _) | Float(_, _) | Bool(_, _) | Str(_, _) | Function(_, _) | Buitltin(_, _) => {
                 Box::new([].into_iter())
             }
-            Apply(_, a, args) | TailCall(_, a, args) | Push(_, a, args) => {
+            Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
                 Box::new([a].into_iter().chain(args.iter_mut()))
             }
-            Call(_, _, args)
-            | TailCallU(_, _, args)
-            | CallBuiltin(_, _, args)
-            | Tagged(_, _, args) => Box::new(args.iter_mut()),
+            Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
+                Box::new(args.iter_mut())
+            }
             Field(_, input, _) | Mov(_, input) => Box::new([input].into_iter()),
         }
     }

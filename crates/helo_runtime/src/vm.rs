@@ -76,7 +76,7 @@ impl CallStack {
         vv.shrink(self.current_reg_cnt);
         let popped_frame = self.stack.pop().unwrap();
 
-        if self.stack.is_empty() {
+        if self.stack.len() == 1 {
             return None;
         }
 
@@ -101,6 +101,12 @@ pub struct IncreasingGcPolicy {
 
 pub struct StressedGcPolicy {}
 
+impl StressedGcPolicy {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 impl GcPolicy for StressedGcPolicy {
     fn if_do_gc(&self, _memory_usage: usize) -> bool {
         true
@@ -117,6 +123,21 @@ impl GcPolicy for IncreasingGcPolicy {
     }
 }
 
+impl IncreasingGcPolicy {
+    pub fn new(growth_rate: usize, first_gc: usize) -> Self {
+        Self {
+            growth_rate,
+            next_gc: first_gc,
+        }
+    }
+}
+
+impl Default for IncreasingGcPolicy {
+    fn default() -> Self {
+        Self::new(2, 10 * 1024 * 1024)
+    }
+}
+
 pub struct Vm<'e, G> {
     ip: Addr,
     exe: &'e Executable,
@@ -127,6 +148,13 @@ impl<'e, G> Vm<'e, G>
 where
     G: GcPolicy,
 {
+    pub fn new(exe: &'e Executable, gc_policy: G) -> Self {
+        Self {
+            ip: exe.entry,
+            exe,
+            gc_policy,
+        }
+    }
     fn relative_jump(&mut self, offset: byte_code::JumpDistance) {
         self.ip += offset;
     }
@@ -147,6 +175,9 @@ where
                 self.ip_inc_8bytes();
             };
         }
+
+        self.do_call(&mut call_stack, &mut registers, RegisterId(0), self.ip, [], &lock);
+
 
         loop {
             use byte_code::OpCode;
@@ -248,21 +279,21 @@ where
                         &lock,
                     );
                 }
-                TAIL_CALL_U1 => {
-                    let (f_addr, args) = reader.tail_call_u1();
-                    self.do_tail_call_u(&mut call_stack, &mut registers, f_addr, args, &lock)
+                TAIL_CALL1 => {
+                    let (f_addr, args) = reader.tail_call1();
+                    self.do_tail_call(&mut call_stack, &mut registers, f_addr, args, &lock)
                 }
-                TAIL_CALL_U2 => {
-                    let (f_addr, args) = reader.tail_call_u2();
-                    self.do_tail_call_u(&mut call_stack, &mut registers, f_addr, args, &lock)
+                TAIL_CALL2 => {
+                    let (f_addr, args) = reader.tail_call2();
+                    self.do_tail_call(&mut call_stack, &mut registers, f_addr, args, &lock)
                 }
-                TAIL_CALL_U3 => {
-                    let (f_addr, args) = reader.tail_call_u3();
-                    self.do_tail_call_u(&mut call_stack, &mut registers, f_addr, args, &lock)
+                TAIL_CALL3 => {
+                    let (f_addr, args) = reader.tail_call3();
+                    self.do_tail_call(&mut call_stack, &mut registers, f_addr, args, &lock)
                 }
-                TAIL_CALL_U_MANY => {
-                    let (f_addr, args_cnt) = reader.tail_call_u_many();
-                    self.do_tail_call_u_many(
+                TAIL_CALL_MANY => {
+                    let (f_addr, args_cnt) = reader.tail_call_many();
+                    self.do_tail_call_many(
                         &mut call_stack,
                         &mut registers,
                         f_addr,
@@ -270,33 +301,33 @@ where
                         &lock,
                     )
                 }
-                TAIL_CALL1 => {
-                    let (callee, args) = reader.tail_call1();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL1 => {
+                    let (callee, args) = reader.tail_call_local1();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL2 => {
-                    let (callee, args) = reader.tail_call2();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL2 => {
+                    let (callee, args) = reader.tail_call_local2();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL3 => {
-                    let (callee, args) = reader.tail_call3();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL3 => {
+                    let (callee, args) = reader.tail_call_local3();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL4 => {
-                    let (callee, args) = reader.tail_call4();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL4 => {
+                    let (callee, args) = reader.tail_call_local4();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL5 => {
-                    let (callee, args) = reader.tail_call5();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL5 => {
+                    let (callee, args) = reader.tail_call_local5();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL6 => {
-                    let (callee, args) = reader.tail_call6();
-                    self.do_tail_call(&mut call_stack, &mut registers, callee, args, &lock)
+                TAIL_CALL_LOCAL6 => {
+                    let (callee, args) = reader.tail_call_local6();
+                    self.do_tail_call_local(&mut call_stack, &mut registers, callee, args, &lock)
                 }
-                TAIL_CALL_MANY => {
-                    let (callee, args_cnt) = reader.tail_call_many();
-                    self.do_tail_call_many(
+                TAIL_CALL_LOCAL_MANY => {
+                    let (callee, args_cnt) = reader.tail_call_local_many();
+                    self.do_tail_call_local_many(
                         &mut call_stack,
                         &mut registers,
                         callee,
@@ -557,7 +588,7 @@ where
         self.ip_inc_8bytes();
     }
 
-    fn do_tail_call<'p, const N: usize>(
+    fn do_tail_call_local<'p, const N: usize>(
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
@@ -589,7 +620,7 @@ where
         }
     }
 
-    fn do_tail_call_many<'p>(
+    fn do_tail_call_local_many<'p>(
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
@@ -629,7 +660,7 @@ where
         }
     }
 
-    fn do_tail_call_u<'p, const N: usize>(
+    fn do_tail_call<'p, const N: usize>(
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
@@ -644,7 +675,7 @@ where
         self.ip = f_addr + 8;
     }
 
-    fn do_tail_call_u_many<'p>(
+    fn do_tail_call_many<'p>(
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
@@ -801,6 +832,8 @@ where
                     }
                     let result = builtins::call_adapted(builtin_id, args_sent);
                     call_stack.write_register(registers, ret, result);
+
+                    self.ip_inc_8bytes();
                 }
             }
         }
@@ -878,6 +911,8 @@ where
                     }
                     let result = builtins::call_adapted(builtin_id, args_sent);
                     call_stack.write_register(registers, ret, result);
+
+                    self.ip_inc_8bytes();
                 }
             }
         }

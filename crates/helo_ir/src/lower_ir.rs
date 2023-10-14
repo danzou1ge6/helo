@@ -34,14 +34,24 @@ impl Compiler {
     }
 }
 
-fn tie_loose_ends(ends: Vec<lir::BlockId>, blocks: &mut lir::BlockHeap) -> lir::BlockId {
-    let next_block = blocks.new_block();
-    ends.into_iter()
-        .for_each(|b| blocks.seal(b, lir::Jump::Jump(next_block)));
-    next_block
+enum BlockEnd {
+    Many(Vec<lir::BlockId>),
+    Single(lir::BlockId),
 }
 
-fn lower_expr<'s>(
+impl From<lir::BlockId> for BlockEnd {
+    fn from(value: lir::BlockId) -> Self {
+        Self::Single(value)
+    }
+}
+
+impl From<Vec<lir::BlockId>> for BlockEnd {
+    fn from(value: Vec<lir::BlockId>) -> Self {
+        Self::Many(value)
+    }
+}
+
+fn lower_expr_untied<'s>(
     to: lir::TempId,
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
@@ -51,7 +61,7 @@ fn lower_expr<'s>(
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable,
     compiler: &mut Compiler,
-) -> lir::BlockId {
+) -> BlockEnd {
     use ir::ExprNode::*;
     match ir_nodes[id].node() {
         LetBind { local, value, in_ } => lower_let_bind(
@@ -66,70 +76,63 @@ fn lower_expr<'s>(
             blocks,
             functions,
             compiler,
-        ),
-        SwitchTag(operand, arms, default) => {
-            let loose_ends = lower_switch_tag(
-                to,
-                *operand,
-                arms,
-                *default,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                block,
-                blocks,
-                functions,
-                compiler,
-            );
-            tie_loose_ends(loose_ends, blocks)
-        }
-        Switch(operand, arms, default) => {
-            let loose_ends = lower_switch(
-                to,
-                *operand,
-                arms,
-                *default,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                block,
-                blocks,
-                functions,
-                compiler,
-            );
-            tie_loose_ends(loose_ends, blocks)
-        }
-        Cond(arms, default) => {
-            let loose_ends = lower_cond(
-                to,
-                arms,
-                *default,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                block,
-                blocks,
-                functions,
-                compiler,
-            );
-            tie_loose_ends(loose_ends, blocks)
-        }
-        IfElse { test, then, else_ } => {
-            let loose_ends = lower_if_else(
-                to,
-                *test,
-                *then,
-                *else_,
-                ir_nodes,
-                ir_functions,
-                builtins,
-                block,
-                blocks,
-                functions,
-                compiler,
-            );
-            tie_loose_ends(loose_ends, blocks)
-        }
+        )
+        .into(),
+        SwitchTag(operand, arms, default) => lower_switch_tag(
+            to,
+            *operand,
+            arms,
+            *default,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        Switch(operand, arms, default) => lower_switch(
+            to,
+            *operand,
+            arms,
+            *default,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        Cond(arms, default) => lower_cond(
+            to,
+            arms,
+            *default,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        IfElse { test, then, else_ } => lower_if_else(
+            to,
+            *test,
+            *then,
+            *else_,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
         Call { callee, args } => lower_call(
             to,
             *callee,
@@ -141,8 +144,9 @@ fn lower_expr<'s>(
             blocks,
             functions,
             compiler,
-        ),
-        Immediate(im) => lower_immediate(to, im.clone(), block, blocks),
+        )
+        .into(),
+        Immediate(im) => lower_immediate(to, im.clone(), block, blocks).into(),
         MakeClosure(fid, captures) => lower_make_closure(
             to,
             fid,
@@ -154,9 +158,10 @@ fn lower_expr<'s>(
             blocks,
             functions,
             compiler,
-        ),
-        Local(local) => lower_local(to, *local, block, blocks, compiler),
-        ThisClosure(local) => lower_local(to, *local, block, blocks, compiler),
+        )
+        .into(),
+        Local(local) => lower_local(to, *local, block, blocks, compiler).into(),
+        ThisClosure(local) => lower_local(to, *local, block, blocks, compiler).into(),
         UserFunction(fid) => lower_user_function(
             to,
             fid,
@@ -166,10 +171,11 @@ fn lower_expr<'s>(
             block,
             blocks,
             functions,
-        ),
-        Builtin(fid) => lower_builtin(to, fid, builtins, block, blocks),
+        )
+        .into(),
+        Builtin(fid) => lower_builtin(to, fid, builtins, block, blocks).into(),
         VariantField(local, pos) | TupleField(local, pos) => {
-            lower_field(to, *local, *pos, block, blocks, compiler)
+            lower_field(to, *local, *pos, block, blocks, compiler).into()
         }
         MakeTagged(tag, v) => lower_make_tagged(
             to,
@@ -182,7 +188,8 @@ fn lower_expr<'s>(
             blocks,
             functions,
             compiler,
-        ),
+        )
+        .into(),
         MakeTuple(v) => lower_make_tagged(
             to,
             0,
@@ -194,8 +201,73 @@ fn lower_expr<'s>(
             blocks,
             functions,
             compiler,
-        ),
-        Panic(s) => lower_panic(*s, block, blocks),
+        )
+        .into(),
+        Panic(s) => lower_panic(*s, block, blocks).into(),
+    }
+}
+
+fn lower_expr<'s>(
+    to: lir::TempId,
+    id: ir::ExprId,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable,
+    compiler: &mut Compiler,
+) -> lir::BlockId {
+    let end = lower_expr_untied(
+        to,
+        id,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        block,
+        blocks,
+        functions,
+        compiler,
+    );
+    match end {
+        BlockEnd::Many(ends) => {
+            let next_block = blocks.new_block();
+            ends.into_iter()
+                .for_each(|b| blocks.seal(b, lir::Jump::Jump(next_block)));
+            next_block
+        }
+        BlockEnd::Single(end) => end,
+    }
+}
+
+fn lower_function_body<'s>(
+    to: lir::TempId,
+    id: ir::ExprId,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable,
+    compiler: &mut Compiler,
+) {
+    let end = lower_expr_untied(
+        to,
+        id,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        block,
+        blocks,
+        functions,
+        compiler,
+    );
+    match end {
+        BlockEnd::Many(ends) => {
+            ends.into_iter()
+                .for_each(|b| blocks.seal(b, lir::Jump::Ret(to)));
+        }
+        BlockEnd::Single(end) => blocks.seal(end, lir::Jump::Ret(to)),
     }
 }
 
@@ -215,17 +287,19 @@ pub fn lower_function<'s>(
         let mut compiler = Compiler::new(f.local_cnt, f.arity, fid.clone());
         let mut blocks = lir::BlockHeap::new();
 
-        let (body, ret_block) = lower_expr_new_block(
+        let body = blocks.new_block();
+
+        lower_function_body(
             compiler.ret_temp(),
             f.body,
             ir_nodes,
             ir_functions,
             builtins,
+            body,
             &mut blocks,
             functions,
             &mut compiler,
         );
-        blocks.seal(ret_block, lir::Jump::Ret(compiler.ret_temp()));
 
         lir::Function {
             body,
@@ -338,7 +412,7 @@ fn lower_switch_tag<'s>(
 
     let operand_temp = compiler.new_temp();
     let block = lower_expr(
-        to,
+        operand_temp,
         operand,
         ir_nodes,
         ir_functions,
@@ -635,17 +709,6 @@ fn lower_call<'s>(
             blocks[block].push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
             block
         }
-        // Optimization: Tail call of non-closure function
-        ir::ExprNode::UserFunction(fid)
-            if *fid == compiler.fid
-                && args.len() == compiler.arity
-                && to == compiler.ret_temp() =>
-        {
-            let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
-            let block = emit_arguments!(block);
-            blocks[block].push(TailCallU(to, lir_fid, args_temp));
-            block
-        }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
         // Instead, we call this user function directly
         ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
@@ -654,13 +717,11 @@ fn lower_call<'s>(
             blocks[block].push(Call(to, lir_fid, args_temp));
             block
         }
-        // Optimization: Tall call of closure
-        ir::ExprNode::ThisClosure(local)
-            if args.len() == compiler.arity && to == compiler.ret_temp() =>
-        {
+        // Optimization: Call of the executing closure
+        ir::ExprNode::ThisClosure(local) if args.len() == compiler.arity => {
             let callee_temp = compiler.local_id_to_temp(*local);
             let block = emit_arguments!(block);
-            blocks[block].push(TailCall(to, callee_temp, args_temp));
+            blocks[block].push(CallThisClosure(to, callee_temp, args_temp));
             block
         }
         _ => {

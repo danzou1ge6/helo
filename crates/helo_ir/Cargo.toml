@@ -15,7 +15,7 @@ required-features = ["pretty_print"]
 
 [features]
 default = ["pretty_print"]
-pretty_print = ["terminal_size", "pretty"]
+pretty_print = ["terminal_size", "pretty", "miette/fancy"]
 
 [dependencies]
 helo_parse = { path = "../helo_parse" }

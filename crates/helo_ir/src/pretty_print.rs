@@ -245,24 +245,11 @@ where
             .append(
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),
-        TailCall(ret, callee, args) => allocator
-            .text(format!("x{:<3} <- TAIL_CALL x{} ", ret, callee))
+        CallThisClosure(ret, callee, args) => allocator
+            .text(format!("x{:<3} <- CALL_THIS_CLOSURE x{} ", ret, callee))
             .append(
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),
-        TailCallU(ret, callee, args) => {
-            let callee_name = functions.get(*callee);
-            let callee_name = str_list.get(callee_name);
-            allocator
-                .text(format!(
-                    "x{:<3} <- TAIL_CALL_U f{}'{}' ",
-                    ret, callee, callee_name
-                ))
-                .append(
-                    allocator
-                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
-                )
-        }
         Call(ret, callee, args) => {
             let callee_name = functions.get(*callee);
             let callee_name = str_list.get(callee_name);

@@ -19,6 +19,7 @@ impl StrChunk {
     }
 }
 
+#[derive(Debug)]
 pub struct Symbols {
     f: Vec<(byte_code::Addr, byte_code::StrAddr)>,
 }

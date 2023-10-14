@@ -74,13 +74,14 @@ impl<'c> Iterator for RowIter<'c> {
             let f_name = self.exe.str_chunk.read(f_name_addr).to_string();
             let (reader, arity) = self.exe.chunk.reader(self.ip).read::<u32, _>();
             let (_, reg_cnt) = reader.read::<u32, _>();
-            self.ip += 8;
-            vec![mk_info_row(
+            let r = vec![mk_info_row(
                 self.ip,
                 "== FUNCTION BEGIN ==".to_string(),
                 f_name,
                 format!("Arity {}, Reg {}", arity, reg_cnt),
-            )]
+            )];
+            self.ip += 8;
+            r
         } else {
             Vec::new()
         };
@@ -181,12 +182,10 @@ impl<'c> Iterator for RowIter<'c> {
         macro_rules! arm_tail_call_many {
             ($f:ident, $rows:ident) => {{
                 let (callee, cnt) = reader.$f();
-                let registers = (0..cnt)
-                    .map(|i| {
-                        self.exe
-                            .chunk
-                            .read::<byte_code::RegisterId, _>(self.ip + 8 + i as u32)
-                    })
+                let registers = self
+                    .exe
+                    .chunk
+                    .fetch_registers(self.ip + 8, cnt as usize)
                     .collect::<Vec<_>>();
                 $rows.push(mk_row1(
                     format!("{}, {}", callee, cnt),
@@ -200,12 +199,10 @@ impl<'c> Iterator for RowIter<'c> {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, cnt) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
-                let registers = (0..cnt)
-                    .map(|i| {
-                        self.exe
-                            .chunk
-                            .read::<byte_code::RegisterId, _>(self.ip + 8 + i as u32)
-                    })
+                let registers = self
+                    .exe
+                    .chunk
+                    .fetch_registers(self.ip + 8, cnt as usize)
                     .collect::<Vec<_>>();
                 $rows.push(mk_row(
                     ret,
@@ -315,17 +312,17 @@ impl<'c> Iterator for RowIter<'c> {
             CALL1 => arm_call!(call1, rows),
             CALL2 => arm_call!(call2, rows),
             CALL_MANY => arm_call_many!(call_many, rows),
-            TAIL_CALL_U1 => arm_tail_call_u!(tail_call_u1, rows),
-            TAIL_CALL_U2 => arm_tail_call_u!(tail_call_u2, rows),
-            TAIL_CALL_U3 => arm_tail_call_u!(tail_call_u3, rows),
-            TAIL_CALL_U_MANY => arm_tail_call_u_many!(tail_call_u_many, rows),
-            TAIL_CALL1 => arm_tail_call!(tail_call1, rows),
-            TAIL_CALL2 => arm_tail_call!(tail_call2, rows),
-            TAIL_CALL3 => arm_tail_call!(tail_call3, rows),
-            TAIL_CALL4 => arm_tail_call!(tail_call4, rows),
-            TAIL_CALL5 => arm_tail_call!(tail_call5, rows),
-            TAIL_CALL6 => arm_tail_call!(tail_call6, rows),
-            TAIL_CALL_MANY => arm_tail_call_many!(tail_call_many, rows),
+            TAIL_CALL1 => arm_tail_call_u!(tail_call1, rows),
+            TAIL_CALL2 => arm_tail_call_u!(tail_call2, rows),
+            TAIL_CALL3 => arm_tail_call_u!(tail_call3, rows),
+            TAIL_CALL_MANY => arm_tail_call_u_many!(tail_call_many, rows),
+            TAIL_CALL_LOCAL1 => arm_tail_call!(tail_call_local1, rows),
+            TAIL_CALL_LOCAL2 => arm_tail_call!(tail_call_local2, rows),
+            TAIL_CALL_LOCAL3 => arm_tail_call!(tail_call_local3, rows),
+            TAIL_CALL_LOCAL4 => arm_tail_call!(tail_call_local4, rows),
+            TAIL_CALL_LOCAL5 => arm_tail_call!(tail_call_local5, rows),
+            TAIL_CALL_LOCAL6 => arm_tail_call!(tail_call_local6, rows),
+            TAIL_CALL_LOCAL_MANY => arm_tail_call_many!(tail_call_many, rows),
             CALL_BUILTIN1 => arm_call_builtin!(call_builtin1, rows),
             CALL_BUILTIN2 => arm_call_builtin!(call_builtin2, rows),
             CALL_BUILTIN3 => arm_call_builtin!(call_builtin3, rows),

@@ -8,10 +8,10 @@ use crate::builtins::BuiltinId;
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct RegisterId(pub(crate) u8);
 /// Takes 4 bytes
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct StrAddr(pub(crate) u32);
 /// Take 4 bytes
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
 pub struct Addr(pub(crate) u32);
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub struct JumpDistance(pub(crate) i16);
@@ -179,34 +179,34 @@ pub enum Instruction {
     /// Tail call .1 with .2
     ///
     /// 6 of 8 bytes
-    TailCallU1(Addr, [RegisterId; 1]),
+    TailCall1(Addr, [RegisterId; 1]),
     /// 7 of 8 bytes
-    TailCallU2(Addr, [RegisterId; 2]),
+    TailCall2(Addr, [RegisterId; 2]),
     /// 7 of 8 bytes
-    TailCallU3(Addr, [RegisterId; 3]),
+    TailCall3(Addr, [RegisterId; 3]),
     /// Tail call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
-    TailCallUMany(Addr, u8),
+    TailCallMany(Addr, u8),
 
     /// Tail call .1 with .2
     ///
     /// 3 of 8 bytes
-    TailCall1(RegisterId, [RegisterId; 1]),
+    TailCallLocal1(RegisterId, [RegisterId; 1]),
     /// 4 of 8 bytes
-    TailCall2(RegisterId, [RegisterId; 2]),
+    TailCallLocal2(RegisterId, [RegisterId; 2]),
     /// 5 of 8 bytes
-    TailCall3(RegisterId, [RegisterId; 3]),
+    TailCallLocal3(RegisterId, [RegisterId; 3]),
     /// 6 of 8 bytes
-    TailCall4(RegisterId, [RegisterId; 4]),
+    TailCallLocal4(RegisterId, [RegisterId; 4]),
     /// 7 of 8 bytes
-    TailCall5(RegisterId, [RegisterId; 5]),
+    TailCallLocal5(RegisterId, [RegisterId; 5]),
     /// 8 of 8 bytes
-    TailCall6(RegisterId, [RegisterId; 7]),
+    TailCallLocal6(RegisterId, [RegisterId; 7]),
     /// Call .1 with following .2 number of registers
     ///
     /// 4 of 8 bytes
-    TailCallMany(RegisterId, u8),
+    TailCallLocalMany(RegisterId, u8),
 
     /// call builtin .1 with .2 and store result to .0
     ///
@@ -314,17 +314,17 @@ pub enum OpCode {
     CALL1,
     CALL2,
     CALL_MANY,
-    TAIL_CALL_U1,
-    TAIL_CALL_U2,
-    TAIL_CALL_U3,
-    TAIL_CALL_U_MANY,
     TAIL_CALL1,
     TAIL_CALL2,
     TAIL_CALL3,
-    TAIL_CALL4,
-    TAIL_CALL5,
-    TAIL_CALL6,
     TAIL_CALL_MANY,
+    TAIL_CALL_LOCAL1,
+    TAIL_CALL_LOCAL2,
+    TAIL_CALL_LOCAL3,
+    TAIL_CALL_LOCAL4,
+    TAIL_CALL_LOCAL5,
+    TAIL_CALL_LOCAL6,
+    TAIL_CALL_LOCAL_MANY,
     CALL_BUILTIN1,
     CALL_BUILTIN2,
     CALL_BUILTIN3,
@@ -376,8 +376,14 @@ impl OpCode {
         }
     }
 
-    pub fn callee_addr_offset() -> usize {
-        2
+    pub fn callee_addr_offset(&self) -> usize {
+        use OpCode::*;
+        match self {
+            TAIL_CALL1 | TAIL_CALL2 | TAIL_CALL3 | TAIL_CALL_MANY => 1,
+            CALL1 | CALL2 | CALL_MANY => 2,
+            FUNCTION => 2,
+            _ => panic!("Only calls have callee addrress offset")
+        }
     }
 }
 

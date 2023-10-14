@@ -1,4 +1,13 @@
-let fn filter predicate,xs =
-    case xs of Con y,ys if predicate y -> Con y,(filter predicate,ys)
-             | Con y,ys                -> filter predicate,ys
-             | Nil                     -> Nil
+
+
+
+let fn fold f, init, xs =
+    case xs of Con y, ys -> fold f, (f y, init), ys
+             | Nil       -> init
+
+let fn sum xs = fold (+), 0, xs
+
+
+let fn main =
+    let Con 1,(Con 2,Nil) of list in
+    sum list

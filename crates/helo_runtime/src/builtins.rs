@@ -12,10 +12,24 @@ pub struct BuiltinId(pub(crate) u16);
 
 type BuiltinFunc<const N: usize> = for<'p> fn([ValueSafe<'p>; N]) -> ValueSafe<'p>;
 
-fn add<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+fn int_add<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
     match (arg0, arg1) {
         (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Int(a + b),
         _ => panic!("Type Error: Integer-adding {:?} and {:?}", arg0, arg1),
+    }
+}
+
+fn int_subtract<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+    match (arg0, arg1) {
+        (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Int(a - b),
+        _ => panic!("Type Error: Integer-subtracting {:?} and {:?}", arg0, arg1),
+    }
+}
+
+fn int_eq<'p>([arg0, arg1]: [ValueSafe<'p>; 2]) -> ValueSafe<'p> {
+    match (arg0, arg1) {
+        (ValueSafe::Int(a), ValueSafe::Int(b)) => ValueSafe::Bool(a == b),
+        _ => panic!("Type Error: Integer-equating {:?} and {:?}", arg0, arg1),
     }
 }
 
@@ -76,11 +90,11 @@ impl Builtin {
 }
 
 const BUILTINS: [(&'static str, Builtin); 5] = [
-    ("+", B2(add)),
-    ("-", B2(add)),
-    ("*", B2(add)),
-    ("/", B2(add)),
-    ("==", B2(add)),
+    ("+", B2(int_add)),
+    ("-", B2(int_subtract)),
+    ("*", B2(int_add)),
+    ("/", B2(int_add)),
+    ("==", B2(int_eq)),
 ];
 
 pub fn name_by_id(id: BuiltinId) -> &'static str {
