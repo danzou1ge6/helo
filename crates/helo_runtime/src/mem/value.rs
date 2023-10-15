@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use super::{gc, GcPool};
-use gc::{Obj, ObjRef, Pointer};
+use super::{objects, GcPool};
+use objects::{Obj, ObjRef, Pointer};
 
 /// A cheap to copy value in registers.
 /// `Obj` does not guarantee a valid pointer
@@ -90,7 +90,7 @@ impl<'p> ValueSafe<'p> {
             panic!("Type Exception: Unwrapping a Value of type Obj")
         }
     }
-    pub fn from_obj_ref(r: gc::ObjRef<'p>) -> Self {
+    pub fn from_obj_ref(r: objects::ObjRef<'p>) -> Self {
         Self::Obj(r)
     }
 }

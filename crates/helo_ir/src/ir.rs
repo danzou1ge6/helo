@@ -45,6 +45,7 @@ pub enum Immediate {
     Float(String),
     Bool(bool),
     Str(StrId),
+    Char(char),
 }
 
 impl Immediate {
@@ -55,6 +56,7 @@ impl Immediate {
             Float(f) => f.to_string(),
             Bool(b) => if *b { "true" } else { "false" }.to_string(),
             Str(id) => str_list.get(*id).to_string(),
+            Char(c) => c.to_string(),
         }
     }
     pub fn unwrap_int(self) -> i64 {
@@ -79,6 +81,12 @@ impl Immediate {
         match self {
             Self::Str(i) => i,
             _ => panic!("called `unwrap_str` on Immediate that is {:?}", self),
+        }
+    }
+    pub fn unwrap_char(self) -> char {
+        match self {
+            Self::Char(i) => i,
+            _ => panic!("called `unwrap_char` on Immediate that is {:?}", self),
         }
     }
 }
@@ -127,6 +135,7 @@ impl StrTable {
             ast::Constant::Float(i) => Immediate::Float(i.to_string()),
             ast::Constant::Bool(i) => Immediate::Bool(i),
             ast::Constant::Str(s) => Immediate::Str(self.add(s.to_string())),
+            ast::Constant::Char(c) => Immediate::Char(c),
         }
     }
 }

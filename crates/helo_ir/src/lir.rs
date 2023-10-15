@@ -92,6 +92,7 @@ pub enum Instruction {
     Float(TempId, String),
     Bool(TempId, bool),
     Str(TempId, StrId),
+    Char(TempId, char),
     /// Push .2's to closure (at .1)'s environment and store result to .0
     Push(TempId, TempId, Vec<TempId>),
     /// Loat function
@@ -115,6 +116,7 @@ pub enum Jump {
     /// Jump denpending on immediate equivalence
     JumpSwitchInt(TempId, Vec<(i64, BlockId)>, BlockId),
     JumpSwitchStr(TempId, Vec<(StrId, BlockId)>, BlockId),
+    JumpSwitchChar(TempId, Vec<(char, BlockId)>, BlockId),
     /// Unconditional jump
     Jump(BlockId),
     /// Return from function
@@ -140,6 +142,12 @@ impl Jump {
                     .copied()
                     .chain([*default].into_iter()),
             ),
+            Jump::JumpSwitchChar(_, v, default) => Box::new(
+                v.iter()
+                    .map(|(_, to)| to)
+                    .copied()
+                    .chain([*default].into_iter()),
+            ),
             Jump::Jump(to) => Box::new([*to].into_iter()),
             Jump::Panic(_) | Jump::Ret(_) => Box::new([].into_iter()),
         }
@@ -154,6 +162,9 @@ impl Jump {
             Jump::JumpSwitchStr(_, v, default) => {
                 Box::new(v.iter_mut().map(|(_, to)| to).chain([default].into_iter()))
             }
+            Jump::JumpSwitchChar(_, v, default) => {
+                Box::new(v.iter_mut().map(|(_, to)| to).chain([default].into_iter()))
+            }
             Jump::Jump(to) => Box::new([to].into_iter()),
             Jump::Panic(_) | Jump::Ret(_) => Box::new([].into_iter()),
         }
@@ -164,6 +175,7 @@ impl Jump {
             JumpIfElse(r, _, _)
             | JumpSwitchInt(r, _, _)
             | JumpSwitchStr(r, _, _)
+            | JumpSwitchChar(r, _, _)
             | Ret(r)
             | JumpTable(r, _) => Some(*r),
             Jump(_) | Panic(_) => None,
@@ -175,6 +187,7 @@ impl Jump {
             JumpIfElse(r, _, _)
             | JumpSwitchInt(r, _, _)
             | JumpSwitchStr(r, _, _)
+            | JumpSwitchChar(r, _, _)
             | Ret(r)
             | JumpTable(r, _) => Some(r),
             Jump(_) | Panic(_) => None,
@@ -194,6 +207,7 @@ impl Instruction {
             | Float(_, _)
             | Bool(_, _)
             | Str(_, _)
+            | Char(_, _)
             | Push(_, _, _)
             | Function(_, _)
             | Buitltin(_, _)
@@ -209,7 +223,7 @@ impl Instruction {
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _) => *out,
-            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) => *out,
+            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) | Char(out, _) => *out,
             Push(out, _, _) => *out,
             Function(out, _) | Buitltin(out, _) => *out,
             Field(out, _, _) => *out,
@@ -224,7 +238,7 @@ impl Instruction {
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _) => out,
-            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) => out,
+            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) | Char(out, _) => out,
             Push(out, _, _) => out,
             Function(out, _) | Buitltin(out, _) => out,
             Field(out, _, _) => out,
@@ -235,9 +249,13 @@ impl Instruction {
     pub fn uses<'a>(&'a self) -> Box<dyn Iterator<Item = TempId> + 'a> {
         use Instruction::*;
         match self {
-            Int(_, _) | Float(_, _) | Bool(_, _) | Str(_, _) | Function(_, _) | Buitltin(_, _) => {
-                Box::new([].into_iter())
-            }
+            Int(_, _)
+            | Float(_, _)
+            | Bool(_, _)
+            | Str(_, _)
+            | Function(_, _)
+            | Buitltin(_, _)
+            | Char(_, _) => Box::new([].into_iter()),
             Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
                 Box::new([a].into_iter().copied().chain(args.iter().copied()))
             }
@@ -250,9 +268,13 @@ impl Instruction {
     pub fn uses_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &mut TempId> + 'a> {
         use Instruction::*;
         match self {
-            Int(_, _) | Float(_, _) | Bool(_, _) | Str(_, _) | Function(_, _) | Buitltin(_, _) => {
-                Box::new([].into_iter())
-            }
+            Int(_, _)
+            | Float(_, _)
+            | Bool(_, _)
+            | Str(_, _)
+            | Function(_, _)
+            | Buitltin(_, _)
+            | Char(_, _) => Box::new([].into_iter()),
             Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
                 Box::new([a].into_iter().chain(args.iter_mut()))
             }

@@ -143,6 +143,10 @@ pub enum Instruction {
     ///
     /// 5 of 8 bytes
     JumpIfEqBool(RegisterId, bool, JumpDistance),
+    /// Jump if .0 equals char at .1
+    ///
+    /// 8 of 8 bytes
+    JumpIfEqChar(RegisterId, char, JumpDistance),
     /// Jump a relative distance
     ///
     /// 3 of 8 bytes
@@ -227,6 +231,8 @@ pub enum Instruction {
     Bool(RegisterId, bool),
     /// 6 of 8 bytes
     Str(RegisterId, StrAddr),
+    /// 6 of 8 bytes
+    Char(RegisterId, char),
     /// Load Immediate at following 8-bytes to .0
     ///
     /// 2 of 8 bytes
@@ -304,6 +310,7 @@ pub enum OpCode {
     JUMP_IF_EQ_I64,
     JUMP_IF_EQ_STR,
     JUMP_IF_EQ_BOOL,
+    JUMP_IF_EQ_CHAR,
     JUMP,
     APPLY1,
     APPLY2,
@@ -332,6 +339,7 @@ pub enum OpCode {
     INT32,
     BOOL,
     STR,
+    CHAR,
     INT64,
     FLOAT,
     PUSH1,
@@ -372,6 +380,7 @@ impl OpCode {
             JUMP_IF_EQ_I64 => 2,
             JUMP_IF_EQ_BOOL => 3,
             JUMP_IF_EQ_STR => 5,
+            JUMP_IF_EQ_CHAR => 5,
             _ => panic!("Only jumps have jump distance offset"),
         }
     }
@@ -382,7 +391,7 @@ impl OpCode {
             TAIL_CALL1 | TAIL_CALL2 | TAIL_CALL3 | TAIL_CALL_MANY => 1,
             CALL1 | CALL2 | CALL_MANY => 2,
             FUNCTION => 2,
-            _ => panic!("Only calls have callee addrress offset")
+            _ => panic!("Only calls have callee addrress offset"),
         }
     }
 }
@@ -569,6 +578,18 @@ impl ToBytes<1> for u8 {
 impl FromBytes<1> for u8 {
     fn from_bytes(bytes: [u8; 1]) -> Self {
         bytes[0]
+    }
+}
+
+impl ToBytes<4> for char {
+    fn to_bytes(self) -> [u8; 4] {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl FromBytes<4> for char {
+    fn from_bytes(bytes: [u8; 4]) -> Self {
+        unsafe { std::mem::transmute(bytes) }
     }
 }
 

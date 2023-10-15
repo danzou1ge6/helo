@@ -180,6 +180,9 @@ fn lower_block(
         JumpSwitchStr(test, arms, default) => {
             lower_jump_switch_str(*test, &arms, *default, str_index, chunk_relocations, chunk)
         }
+        JumpSwitchChar(test, arms, default) => {
+            lower_jump_switch_char(*test, &arms, *default, chunk_relocations, chunk)
+        }
         Jump(block) => lower_jump(*block, chunk_relocations, chunk),
         Ret(r) => lower_ret(*r, chunk),
         Panic(s) => lower_panic(*s, str_index, chunk),
@@ -219,6 +222,7 @@ fn lower_instruction(
         Float(to, v) => lower_float(*to, v.parse().unwrap(), chunk),
         Bool(to, v) => lower_bool(*to, *v, chunk),
         Str(to, v) => lower_str(*to, *v, str_index, chunk),
+        Char(to, v) => lower_char(*to, *v, chunk),
         Push(to, from, args) => lower_push(*to, *from, &args, chunk),
         Function(to, fid) => lower_function_inst(*to, *fid, chunk, functions),
         Buitltin(to, bid) => lower_builtin(*to, *bid, chunk),
@@ -303,6 +307,19 @@ fn lower_jump_switch_str(
     lower_jump(default, chunk_relocations, chunk);
 }
 
+fn lower_jump_switch_char(
+    test: lir::TempId,
+    arms: &[(char, lir::BlockId)],
+    default: lir::BlockId,
+    chunk_relocations: &mut ChunkRelocations,
+    chunk: &mut byte_code::Chunk,
+) {
+    for (value, branch) in arms {
+        lower_jump_if_eq_char(test, *value, *branch, chunk_relocations, chunk);
+    }
+    lower_jump(default, chunk_relocations, chunk);
+}
+
 fn lower_jump_if_eq_int(
     test: lir::TempId,
     value: i64,
@@ -320,6 +337,20 @@ fn lower_jump_if_eq_int(
         chunk.writer().push(value);
         inst_addr + byte_code::OpCode::JUMP_IF_EQ_I64.jump_distance_offset()
     };
+    chunk_relocations.add(fill_back_addr, inst_addr, branch);
+}
+
+fn lower_jump_if_eq_char(
+    test: lir::TempId,
+    value: char,
+    branch: lir::BlockId,
+    chunk_relocations: &mut ChunkRelocations,
+    chunk: &mut byte_code::Chunk,
+) {
+    let inst_addr = chunk.len();
+    Instruction::JumpIfEqChar(test.register(), value, JumpDistance::default()).emit(chunk);
+    let fill_back_addr = byte_code::OpCode::JUMP_IF_EQ_CHAR.jump_distance_offset() + inst_addr;
+
     chunk_relocations.add(fill_back_addr, inst_addr, branch);
 }
 
@@ -506,6 +537,11 @@ fn lower_int(to: lir::TempId, value: i64, chunk: &mut byte_code::Chunk) {
 
 fn lower_float(to: lir::TempId, value: f64, chunk: &mut byte_code::Chunk) {
     Instruction::Float(to.register()).emit(chunk);
+    chunk.writer().push(value).finish();
+}
+
+fn lower_char(to: lir::TempId, value: char, chunk: &mut byte_code::Chunk) {
+    Instruction::Char(to.register(), value).emit(chunk);
     chunk.writer().push(value).finish();
 }
 

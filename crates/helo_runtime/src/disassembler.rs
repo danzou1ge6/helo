@@ -299,6 +299,13 @@ impl<'c> Iterator for RowIter<'c> {
                     format!("{}, {}", s, (self.ip + branch).to_string()),
                 ));
             }
+            JUMP_IF_EQ_CHAR => {
+                let (r, value, branch) = reader.jump_if_eq_char();
+                rows.push(mk_row1(
+                    format!("{}, {}, {}", r, value, branch),
+                    format!(" {}", (self.ip + branch).to_string()),
+                ));
+            }
             JUMP => {
                 let branch = reader.jump();
                 rows.push(mk_row1(es(), (self.ip + branch).to_string()));
@@ -339,6 +346,10 @@ impl<'c> Iterator for RowIter<'c> {
                 let (to, addr) = reader.str();
                 let s = trunc_str(self.exe.str_chunk.read(addr));
                 rows.push(mk_row(to, addr.to_string(), s.to_string()))
+            }
+            CHAR => {
+                let (to, value) = reader.char();
+                rows.push(mk_row(to, value.to_string(), es()))
             }
             INT64 => {
                 let to = reader.int64();

@@ -279,6 +279,7 @@ where
             let s = str_list.get(*value);
             allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, s))
         }
+        Char(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
         Push(to, operand, args) => allocator
             .text(format!("x{:<3} <- PUSH x{} ", to, operand))
             .append(
@@ -344,8 +345,22 @@ where
                     .align()
                     .indent(4),
             ),
+        JumpSwitchChar(t, arms, default) => allocator
+            .text(format!("JUMP_SWITCH_CHAR x{}", t))
+            .append(allocator.space())
+            .append(
+                allocator
+                    .intersperse(
+                        arms.iter()
+                            .map(|(value, b)| allocator.text(format!("{} => b{}", *value, *b)))
+                            .chain([allocator.text(format!("_ => {}", *default))].into_iter()),
+                        allocator.hardline(),
+                    )
+                    .align()
+                    .indent(4),
+            ),
         JumpSwitchStr(t, arms, default) => allocator
-            .text(format!("JUMP_SWITCH_INT x{}", t))
+            .text(format!("JUMP_SWITCH_STR x{}", t))
             .append(allocator.space())
             .append(
                 allocator

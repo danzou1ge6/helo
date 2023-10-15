@@ -6,7 +6,6 @@ pub struct Compiler {
     local_cnt: usize,
     temp_cnt: usize,
     arity: usize,
-    fid: ir::FunctionId,
 }
 
 impl Compiler {
@@ -18,12 +17,11 @@ impl Compiler {
         self.temp_cnt += 1;
         r
     }
-    fn new(local_cnt: usize, arity: usize, fid: ir::FunctionId) -> Self {
+    fn new(local_cnt: usize, arity: usize) -> Self {
         Self {
             local_cnt,
             temp_cnt: local_cnt + 1,
             arity,
-            fid,
         }
     }
     fn ret_temp(&self) -> lir::TempId {
@@ -284,7 +282,7 @@ pub fn lower_function<'s>(
 
     functions.insert(fid.clone(), move |_, functions| {
         let f = ir_functions.get(fid).unwrap();
-        let mut compiler = Compiler::new(f.local_cnt, f.arity, fid.clone());
+        let mut compiler = Compiler::new(f.local_cnt, f.arity);
         let mut blocks = lir::BlockHeap::new();
 
         let body = blocks.new_block();
@@ -538,6 +536,17 @@ fn lower_switch<'s>(
                 lir::Jump::JumpSwitchStr(operand_temp, cases, default_branch),
             );
         }
+        ir::Immediate::Char(_) => {
+            let cases = arms
+                .iter()
+                .map(|(value, _)| value.clone().unwrap_char())
+                .zip(branches.into_iter())
+                .collect();
+            blocks.seal(
+                block,
+                lir::Jump::JumpSwitchChar(operand_temp, cases, default_branch),
+            );
+        }
         ir::Immediate::Float(_) => unreachable!(),
     }
 
@@ -758,6 +767,7 @@ fn lower_immediate<'s>(
         Immediate::Float(f) => Float(to, f),
         Immediate::Str(s) => Str(to, s),
         Immediate::Bool(b) => Bool(to, b),
+        Immediate::Char(c) => Char(to, c),
     };
 
     blocks[block].push(inst);

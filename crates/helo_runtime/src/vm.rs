@@ -4,13 +4,13 @@ use byte_code::{Addr, ChunkReader, JumpDistance, RegisterId};
 use executable::Executable;
 use mem::ValueSafe;
 
-struct CallFrame {
+pub struct CallFrame {
     register_offset: usize,
     return_addr: Addr,
     return_register: RegisterId,
 }
 
-struct CallStack {
+pub struct CallStack {
     stack: Vec<CallFrame>,
     current_reg_cnt: usize,
 }
@@ -166,18 +166,24 @@ where
         let mut call_stack = CallStack::new();
 
         macro_rules! do_call_builtin {
-            ($ret:expr, $builtin_id:expr, $args:expr, $f:ident) => {
-                let values = $args.map(|arg| call_stack.read_register(&registers, arg, &lock));
+            ($ret:expr, $builtin_id:expr, $args:expr, $pool:expr, $registers:expr, $call_stack:expr, $lock:expr, $f:ident) => {
+                let values = $args.map(|arg| call_stack.read_register(&registers, arg, $lock));
                 let builtin = builtins::get($builtin_id).$f();
-                let return_value = builtin(values);
+                let return_value = builtin(values, $pool, $registers, $call_stack, $lock)?;
                 call_stack.write_register(&mut registers, $ret, return_value);
 
                 self.ip_inc_8bytes();
             };
         }
 
-        self.do_call(&mut call_stack, &mut registers, RegisterId(0), self.ip, [], &lock);
-
+        self.do_call(
+            &mut call_stack,
+            &mut registers,
+            RegisterId(0),
+            self.ip,
+            [],
+            &lock,
+        );
 
         loop {
             use byte_code::OpCode;
@@ -187,7 +193,9 @@ where
             let (reader, op_code) = reader.read::<OpCode, _>();
 
             match op_code {
-                JUMP_TABLE => self.do_jump_table(&mut call_stack, &mut registers, reader, &lock),
+                JUMP_TABLE => {
+                    self.do_jump_table(&mut call_stack, &mut registers, reader, &mut lock)
+                }
                 JUMP_IF => {
                     let (test, jump) = reader.jump_if();
                     if let ValueSafe::Bool(true) = call_stack.read_register(&registers, test, &lock)
@@ -231,34 +239,105 @@ where
                     self.ip_inc_8bytes();
                     self.ip_inc_8bytes();
                 }
-                JUMP_IF_EQ_STR => unimplemented!(),
+                JUMP_IF_EQ_STR => {
+                    let (test, value, jump) = reader.jump_if_eq_str();
+                    let value = self.exe.str_chunk.read(value);
+                    let test_value = call_stack
+                        .read_register(&registers, test, &lock)
+                        .unwrap_obj()
+                        .cast::<mem::ObjString>();
+                    if test_value == *value {
+                        self.relative_jump(jump);
+                    }
+                    self.ip_inc_8bytes();
+                }
+                JUMP_IF_EQ_CHAR => {
+                    let (test, value, jump) = reader.jump_if_eq_char();
+                    let test_value = call_stack
+                        .read_register(&registers, test, &lock)
+                        .unwrap_obj()
+                        .cast::<mem::ObjChar>()
+                        .char();
+                    if test_value == value {
+                        self.relative_jump(jump);
+                    }
+                    self.ip_inc_8bytes();
+                }
                 JUMP => {
                     let offset = reader.jump();
                     self.relative_jump(offset);
                 }
                 APPLY1 => {
                     let (ret, callee, args) = reader.apply1();
-                    self.do_apply(&mut call_stack, &mut registers, ret, callee, args, &lock)?;
+                    self.do_apply(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        args,
+                        &mut lock,
+                    )?;
                 }
                 APPLY2 => {
                     let (ret, callee, args) = reader.apply2();
-                    self.do_apply(&mut call_stack, &mut registers, ret, callee, args, &lock)?;
+                    self.do_apply(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        args,
+                        &mut lock,
+                    )?;
                 }
                 APPLY3 => {
                     let (ret, callee, args) = reader.apply3();
-                    self.do_apply(&mut call_stack, &mut registers, ret, callee, args, &lock)?;
+                    self.do_apply(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        args,
+                        &mut lock,
+                    )?;
                 }
                 APPLY4 => {
                     let (ret, callee, args) = reader.apply4();
-                    self.do_apply(&mut call_stack, &mut registers, ret, callee, args, &lock)?;
+                    self.do_apply(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        args,
+                        &mut lock,
+                    )?;
                 }
                 APPLY5 => {
                     let (ret, callee, args) = reader.apply5();
-                    self.do_apply(&mut call_stack, &mut registers, ret, callee, args, &lock)?;
+                    self.do_apply(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        args,
+                        &mut lock,
+                    )?;
                 }
                 APPLY_MANY => {
                     let (ret, callee, cnt) = reader.apply_many();
-                    self.do_apply_many(&mut call_stack, &mut registers, ret, callee, cnt, &lock)?;
+                    self.do_apply_many(
+                        &mut call_stack,
+                        &mut registers,
+                        &mut pool,
+                        ret,
+                        callee,
+                        cnt,
+                        &mut lock,
+                    )?;
                 }
                 CALL1 => {
                     let (ret, f_addr, args) = reader.call1();
@@ -293,13 +372,7 @@ where
                 }
                 TAIL_CALL_MANY => {
                     let (f_addr, args_cnt) = reader.tail_call_many();
-                    self.do_tail_call_many(
-                        &mut call_stack,
-                        &mut registers,
-                        f_addr,
-                        args_cnt,
-                        &lock,
-                    )
+                    self.do_tail_call_many(&mut call_stack, &mut registers, f_addr, args_cnt, &lock)
                 }
                 TAIL_CALL_LOCAL1 => {
                     let (callee, args) = reader.tail_call_local1();
@@ -347,12 +420,32 @@ where
                     self.ip_inc_8bytes();
                     self.ip_inc_8bytes();
                 }
-                STR => unimplemented!(),
+                STR => {
+                    let (r, value) = reader.str();
+                    let value = self.exe.str_chunk.read(value);
+                    let obj_string = pool
+                        .allocate_string(value, &lock)
+                        .map_err(|_| errors::RunTimeError::OutOfMemory {})?;
+                    call_stack.write_register(
+                        &mut registers,
+                        r,
+                        ValueSafe::Obj(obj_string.cast_obj_ref()),
+                    );
+                    self.ip_inc_8bytes();
+                }
                 FLOAT => {
                     let r = reader.int64();
                     let value = self.exe.chunk.read::<f64, _>(self.ip + 8);
                     call_stack.write_register(&mut registers, r, ValueSafe::Float(value));
                     self.ip_inc_8bytes();
+                    self.ip_inc_8bytes();
+                }
+                CHAR => {
+                    let (to, value) = reader.char();
+                    let c = pool
+                        .allocate_char(value, &lock)
+                        .map_err(|_| errors::RunTimeError::OutOfMemory {})?;
+                    call_stack.write_register(&mut registers, to, ValueSafe::Obj(c.cast_obj_ref()));
                     self.ip_inc_8bytes();
                 }
                 BOOL => {
@@ -524,19 +617,55 @@ where
                 }
                 CALL_BUILTIN1 => {
                     let (ret, builtin_id, args) = reader.call_builtin1();
-                    do_call_builtin!(ret, builtin_id, args, unwrap1);
+                    do_call_builtin!(
+                        ret,
+                        builtin_id,
+                        args,
+                        &mut pool,
+                        &mut registers,
+                        &mut call_stack,
+                        &lock,
+                        unwrap1
+                    );
                 }
                 CALL_BUILTIN2 => {
                     let (ret, builtin_id, args) = reader.call_builtin2();
-                    do_call_builtin!(ret, builtin_id, args, unwrap2);
+                    do_call_builtin!(
+                        ret,
+                        builtin_id,
+                        args,
+                        &mut pool,
+                        &mut registers,
+                        &mut call_stack,
+                        &lock,
+                        unwrap2
+                    );
                 }
                 CALL_BUILTIN3 => {
                     let (ret, builtin_id, args) = reader.call_builtin3();
-                    do_call_builtin!(ret, builtin_id, args, unwrap3);
+                    do_call_builtin!(
+                        ret,
+                        builtin_id,
+                        args,
+                        &mut pool,
+                        &mut registers,
+                        &mut call_stack,
+                        &lock,
+                        unwrap3
+                    );
                 }
                 CALL_BUILTIN4 => {
                     let (ret, builtin_id, args) = reader.call_builtin4();
-                    do_call_builtin!(ret, builtin_id, args, unwrap4);
+                    do_call_builtin!(
+                        ret,
+                        builtin_id,
+                        args,
+                        &mut pool,
+                        &mut registers,
+                        &mut call_stack,
+                        &lock,
+                        unwrap4
+                    );
                 }
                 UNKNOWN(x) => {
                     return Err(errors::RunTimeError::BadOpCode(x));
@@ -780,6 +909,7 @@ where
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
+        pool: &mut mem::GcPool,
         ret: RegisterId,
         callee: RegisterId,
         args: [RegisterId; N],
@@ -794,6 +924,8 @@ where
                 .push_env(
                     args.into_iter()
                         .map(|r| call_stack.read_register(registers, r, lock)),
+                    pool,
+                    lock,
                 )
                 .map_err(|_| errors::RunTimeError::OutOfMemory)?;
             call_stack.write_register(
@@ -830,7 +962,9 @@ where
                     for arg in args {
                         args_sent.push(call_stack.read_register(registers, arg, lock));
                     }
-                    let result = builtins::call_adapted(builtin_id, args_sent);
+                    let result = builtins::call_adapted(
+                        builtin_id, args_sent, pool, registers, call_stack, lock,
+                    )?;
                     call_stack.write_register(registers, ret, result);
 
                     self.ip_inc_8bytes();
@@ -851,6 +985,7 @@ where
         &mut self,
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
+        pool: &mut mem::GcPool,
         ret: RegisterId,
         callee: RegisterId,
         args_cnt: u8,
@@ -869,6 +1004,8 @@ where
                         .chunk
                         .fetch_registers(self.ip, args_cnt as usize)
                         .map(|reg| call_stack.read_register(registers, reg, lock)),
+                    pool,
+                    lock,
                 )
                 .map_err(|_| errors::RunTimeError::OutOfMemory)?;
 
@@ -909,7 +1046,9 @@ where
                     for arg in self.exe.chunk.fetch_registers(self.ip, args_cnt as usize) {
                         args_sent.push(call_stack.read_register(registers, arg, lock));
                     }
-                    let result = builtins::call_adapted(builtin_id, args_sent);
+                    let result = builtins::call_adapted(
+                        builtin_id, args_sent, pool, registers, call_stack, lock,
+                    )?;
                     call_stack.write_register(registers, ret, result);
 
                     self.ip_inc_8bytes();

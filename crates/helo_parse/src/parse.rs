@@ -795,6 +795,7 @@ fn type_primitive<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast:
         ncomb::map(nbyte::tag("Float"), |_| ast::PrimitiveType::Float),
         ncomb::map(nbyte::tag("Str"), |_| ast::PrimitiveType::Str),
         ncomb::map(nbyte::tag("Bool"), |_| ast::PrimitiveType::Bool),
+        ncomb::map(nbyte::tag("Char"), |_| ast::PrimitiveType::Char),
     ))(s)?;
     let (s2, _) = empty(s1)?;
 

@@ -4,10 +4,11 @@ use crate::{ast, errors};
 use std::sync::Arc;
 
 const BUILTIN_SIGS: &'static str = r#"
-    let fn + a,b : [Int, Int] -> Int = ..
-    let fn - a,b : [Int, Int] -> Int = ..
-    let fn * a,b : [Int, Int] -> Int = ..
-    let fn / a,b : [Int, Int] -> Int = ..
+    let fn +  a,b : [Int, Int] -> Int = ..
+    let fn -  a,b : [Int, Int] -> Int = ..
+    let fn *  a,b : [Int, Int] -> Int = ..
+    let fn ** a,b : [Int, Int] -> Int = ..
+    let fn /  a,b : [Int, Int] -> Int = ..
 
     let fn == a,b : [Int, Int] -> Bool = ..
     let fn /= a,b : [Int, Int] -> Bool = ..
@@ -19,18 +20,24 @@ const BUILTIN_SIGS: &'static str = r#"
     let fn int_to_float a : [Int] -> Float  = ..
     let fn floot_float  a : [Float] -> Int  = ..
 
-    let fn +. a,b : [Float, Float] -> Float = ..
-    let fn -. a,b : [Float, Float] -> Float = ..
-    let fn *. a,b : [Float, Float] -> Float = ..
-    let fn /. a,b : [Float, Float] -> Float = ..
+    let fn +.   a,b : [Float, Float] -> Float = ..
+    let fn -.   a,b : [Float, Float] -> Float = ..
+    let fn *.   a,b : [Float, Float] -> Float = ..
+    let fn **.  a,b : [Float, Int] -> Float   = ..
+    let fn **.. a,b : [Float, Float] -> Float = ..
+    let fn /.   a,b : [Float, Float] -> Float = ..
 
     let fn and a,b : [Bool, Bool] -> Bool = ..
     let fn or  a,b : [Bool, Bool] -> Bool = ..
     let fn not a   : [Bool] -> Bool       = ..
 
     let fn str_cat      a,b   : [Str, Str] -> Str = ..
+    let fn str_head     a     : [Str] -> Char     = ..
+    let fn str_tail     a     : [Str] -> Str      = ..
+
     let fn int_to_str   a     : [Int] -> Str      = ..
     let fn bool_to_str  a     : [Bool] -> Str     = ..
+    let fn char_to_str  a     : [Char] -> Str     = ..
     let fn float_to_str a     : [Float] -> Str    = ..
 "#;
 
@@ -38,10 +45,12 @@ const BUILTIN_DEF: &'static str = r#"
     infix `and` 41 40
     infix `or` 41 40
 
-    infix + 41 40
-    infix - 41 40
-    infix * 51 50
-    infix / 51 50
+    infix +   41 40
+    infix -   41 40
+    infix *   51 50
+    infix **  61 60
+    infix /   51 50
+    infix mod 51 50
 
     infix == 31 30
     infix /= 31 30
@@ -50,10 +59,12 @@ const BUILTIN_DEF: &'static str = r#"
     infix >  31 30
     infix <  31 30
 
-    infix +. 41 40
-    infix -. 41 40
-    infix *. 51 50
-    infix /. 51 50
+    infix +.   41 40
+    infix -.   41 40
+    infix *.   51 50
+    infix **.  61 60
+    infix **.. 61 60
+    infix /.   51 50
 
     infix `str_cat` 41 40
 

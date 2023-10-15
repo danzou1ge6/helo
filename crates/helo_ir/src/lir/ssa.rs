@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::lir::{self, ssa, TempIdVec};
+use crate::lir::{self, TempIdVec};
 use lir::BlockId;
 
 use bitvec::prelude as bv;

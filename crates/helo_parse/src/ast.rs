@@ -92,6 +92,7 @@ pub enum Constant<'s> {
     Float(&'s str),
     Str(&'s str),
     Bool(bool),
+    Char(char),
 }
 
 impl<'s> Constant<'s> {
@@ -102,6 +103,7 @@ impl<'s> Constant<'s> {
             Float(_) => PrimitiveType::Float,
             Bool(_) => PrimitiveType::Bool,
             Str(_) => PrimitiveType::Str,
+            Char(_) => PrimitiveType::Char,
         }
     }
 }
@@ -459,6 +461,7 @@ pub enum PrimitiveType {
     Float,
     Str,
     Bool,
+    Char,
 }
 
 impl PrimitiveType {
@@ -469,6 +472,7 @@ impl PrimitiveType {
             Float => "Float",
             Str => "Str",
             Bool => "Bool",
+            Char => "Char",
         }
     }
 }

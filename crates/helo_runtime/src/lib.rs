@@ -2,6 +2,7 @@
 #![feature(split_array)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
+#![feature(round_char_boundary)]
 
 pub mod builtins;
 pub mod byte_code;

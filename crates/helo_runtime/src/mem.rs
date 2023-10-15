@@ -1,9 +1,17 @@
-mod gc;
+mod array;
+mod callable;
+mod list;
+mod objects;
+mod string;
 mod value;
 
 use std::marker::PhantomData;
 
-pub use gc::{GcPool, Lock, ObjArray, ObjCallable, ObjList, ObjRef, Ref, Routine};
+pub use objects::{Gc, GcPool, Lock, ObjPointer, ObjRef, Pointer, Ref};
+pub use list::ObjList;
+pub use array::ObjArray;
+pub use callable::{Routine, ObjCallable};
+pub use string::{ObjChar, ObjString};
 pub use value::ValueSafe;
 
 use self::value::Value;
@@ -23,7 +31,7 @@ impl ValueVec {
             self.v.iter_mut().for_each(|v| v.mark());
         }
     }
-    pub fn read<'p>(&self, idx: usize, lock: &'p Lock) -> ValueSafe<'p> {
+    pub fn read<'p>(&self, idx: usize, _lock: &'p Lock) -> ValueSafe<'p> {
         unsafe { self.v[idx].to_safe(PhantomData) }
     }
     pub fn write<'p>(&mut self, idx: usize, value: ValueSafe<'p>) {
