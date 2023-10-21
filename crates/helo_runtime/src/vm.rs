@@ -10,6 +10,17 @@ pub struct CallFrame {
     return_register: RegisterId,
 }
 
+impl std::fmt::Debug for CallFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entry(&"register_offset", &self.register_offset)
+            .entry(&"return_addr", &self.return_addr.to_string())
+            .entry(&"return_register", &self.return_register.to_string())
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub struct CallStack {
     stack: Vec<CallFrame>,
     current_reg_cnt: usize,
@@ -161,7 +172,7 @@ where
     fn ip_inc_8bytes(&mut self) {
         self.ip += 8;
     }
-    pub fn run(&mut self) -> Result<i64, errors::RunTimeError> {
+    pub fn run(&mut self) -> Result<(mem::MemPack, mem::Lock), errors::RunTimeError> {
         let (mut pool, mut registers, mut lock) = mem::GcPool::new();
         let mut call_stack = CallStack::new();
 
@@ -201,43 +212,35 @@ where
                     if let ValueSafe::Bool(true) = call_stack.read_register(&registers, test, &lock)
                     {
                         self.relative_jump(jump);
+                    } else {
+                        self.ip_inc_8bytes();
                     }
-                    self.ip_inc_8bytes();
                 }
                 JUMP_IF_EQ_BOOL => {
                     let (test, value, jump) = reader.jump_if_eq_bool();
-                    if let ValueSafe::Bool(value_test) =
-                        call_stack.read_register(&registers, test, &lock)
-                    {
-                        if value_test == value {
-                            self.relative_jump(jump);
-                        }
+                    if call_stack.read_register(&registers, test, &lock).unwrap_bool() == value {
+                        self.relative_jump(jump)
+                    } else {
+                        self.ip_inc_8bytes()
                     }
-                    self.ip_inc_8bytes();
                 }
                 JUMP_IF_EQ_I32 => {
                     let (test, value, jump) = reader.jump_if_eq_i32();
-                    if let ValueSafe::Int(value_test) =
-                        call_stack.read_register(&registers, test, &lock)
-                    {
-                        if value_test == value as i64 {
-                            self.relative_jump(jump);
-                        }
+                    if call_stack.read_register(&registers, test, &lock).unwrap_int() == value as i64 {
+                        self.relative_jump(jump)
+                    } else {
+                        self.ip_inc_8bytes()
                     }
-                    self.ip_inc_8bytes();
                 }
                 JUMP_IF_EQ_I64 => {
                     let (test, jump) = reader.jump_if_eq_i64();
                     let value = self.exe.chunk.read::<i64, _>(self.ip + 8);
-                    if let ValueSafe::Int(value_test) =
-                        call_stack.read_register(&registers, test, &lock)
-                    {
-                        if value_test == value {
-                            self.relative_jump(jump)
-                        }
+                    if call_stack.read_register(&registers, test, &lock).unwrap_int() == value {
+                        self.relative_jump(jump)
+                    } else {
+                        self.ip_inc_8bytes();
+                        self.ip_inc_8bytes();
                     }
-                    self.ip_inc_8bytes();
-                    self.ip_inc_8bytes();
                 }
                 JUMP_IF_EQ_STR => {
                     let (test, value, jump) = reader.jump_if_eq_str();
@@ -248,20 +251,20 @@ where
                         .cast::<mem::ObjString>();
                     if test_value == *value {
                         self.relative_jump(jump);
+                    } else {
+                        self.ip_inc_8bytes();
                     }
-                    self.ip_inc_8bytes();
                 }
                 JUMP_IF_EQ_CHAR => {
                     let (test, value, jump) = reader.jump_if_eq_char();
                     let test_value = call_stack
                         .read_register(&registers, test, &lock)
-                        .unwrap_obj()
-                        .cast::<mem::ObjChar>()
-                        .char();
+                        .unwrap_char();
                     if test_value == value {
                         self.relative_jump(jump);
+                    } else {
+                        self.ip_inc_8bytes();
                     }
-                    self.ip_inc_8bytes();
                 }
                 JUMP => {
                     let offset = reader.jump();
@@ -442,10 +445,7 @@ where
                 }
                 CHAR => {
                     let (to, value) = reader.char();
-                    let c = pool
-                        .allocate_char(value, &lock)
-                        .map_err(|_| errors::RunTimeError::OutOfMemory {})?;
-                    call_stack.write_register(&mut registers, to, ValueSafe::Obj(c.cast_obj_ref()));
+                    call_stack.write_register(&mut registers, to, ValueSafe::Char(value));
                     self.ip_inc_8bytes();
                 }
                 BOOL => {
@@ -612,7 +612,7 @@ where
                     {
                         self.ip = return_address;
                     } else {
-                        return Ok(return_value.unwrap_int());
+                        return Ok((pool.pack(return_value), lock));
                     }
                 }
                 CALL_BUILTIN1 => {
@@ -673,6 +673,13 @@ where
             }
 
             if self.gc_policy.if_do_gc(pool.memory_usage()) {
+                #[cfg(feature = "debug_gc")]
+                {
+                    println!("[ip = {}]", self.ip);
+                    dbg!(&call_stack);
+                    dbg!(&registers);
+                }
+
                 pool.sweep(&mut registers, &mut lock);
                 self.gc_policy.update(pool.memory_usage());
             }
@@ -919,7 +926,7 @@ where
             .read_register(registers, callee, lock)
             .unwrap_obj()
             .cast::<mem::ObjCallable>();
-        if N < callable.arity() {
+        if callable.env_len() + N < callable.arity() {
             let applied = callable
                 .push_env(
                     args.into_iter()
@@ -995,7 +1002,7 @@ where
             .read_register(registers, callee, lock)
             .unwrap_obj()
             .cast::<mem::ObjCallable>();
-        if (args_cnt as usize) < callable.arity() {
+        if callable.env_len() + (args_cnt as usize) < callable.arity() {
             self.ip_inc_8bytes();
 
             let applied = callable

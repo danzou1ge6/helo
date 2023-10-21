@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::ast;
 use crate::errors;
 
@@ -7,150 +5,27 @@ use nom::branch as nbr;
 use nom::bytes::complete as nbyte;
 use nom::character::complete as nchar;
 use nom::combinator as ncomb;
+use nom::error::context as nom_context;
 use nom::multi as nmulti;
 use nom::sequence as nseq;
 use nom::Finish;
 
-type OpPriority = u32;
+mod context;
+mod lower_tast;
+pub mod tast;
 
-pub struct Precedence(OpPriority, OpPriority);
+use context::OpPriority;
+pub use context::{Precedence, PrecedenceTable};
 
-impl Precedence {
-    pub fn left(&self) -> OpPriority {
-        self.0
-    }
-    pub fn right(&self) -> OpPriority {
-        self.1
-    }
-}
+pub use lower_tast::lower_symbols;
 
-pub struct PrecedenceTable<'s>(HashMap<&'s str, Precedence>);
-
-impl<'s> PrecedenceTable<'s> {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub fn insert(&mut self, k: &'s str, v: Precedence) -> Option<Precedence> {
-        self.0.insert(k, v)
-    }
-
-    pub fn get(&self, k: &str) -> Option<&Precedence> {
-        self.0.get(k)
-    }
-}
-
-type ResolutionEntry<'s> = (&'s str, ast::LocalId);
-
-#[derive(Default)]
-struct FunctionResolutionEnv<'s> {
-    locals: Vec<ResolutionEntry<'s>>,
-    scope_cnt: Vec<usize>,
-    id_cnt: ast::LocalId,
-}
-
-impl<'s> FunctionResolutionEnv<'s> {
-    fn new() -> Self {
-        Self {
-            locals: Vec::new(),
-            scope_cnt: vec![0],
-            id_cnt: 0.into(),
-        }
-    }
-    fn local_cnt(&self) -> usize {
-        self.id_cnt.into()
-    }
-}
-
-enum ResolutionEnv<'s> {
-    Normal(FunctionResolutionEnv<'s>),
-    InClosure {
-        parent: FunctionResolutionEnv<'s>,
-        current: FunctionResolutionEnv<'s>,
-        captures: Vec<ast::LocalId>,
-        caputures_meta: Vec<ast::Meta>,
-        this_name: &'s str,
-    },
-}
-
-impl<'s> ResolutionEnv<'s> {
-    fn current(&mut self) -> &mut FunctionResolutionEnv<'s> {
-        match self {
-            ResolutionEnv::Normal(current) => current,
-            ResolutionEnv::InClosure { current, .. } => current,
-        }
-    }
-    fn pop(&mut self, cnt: usize) {
-        let new_len = self.current().locals.len() - cnt;
-        self.current()
-            .locals
-            .resize_with(new_len, || unreachable!());
-    }
-    fn pop_scope(&mut self) {
-        let pop_cnt = self.current().scope_cnt.pop().unwrap();
-        self.pop(pop_cnt);
-    }
-}
-
-struct Context<'s, 'a> {
+#[derive(Clone)]
+struct Source {
     file_name: std::sync::Arc<String>,
     src: std::sync::Arc<String>,
-    ast_nodes: &'a mut ast::ExprHeap<'s>,
-    e: &'a mut errors::ManyError,
-    resolution_env: ResolutionEnv<'s>,
-    generic_params: Vec<&'s str>,
-    precedence_table: &'a mut PrecedenceTable<'s>,
-    allow_wildcard_in_type: bool,
-    pub symbols: &'a mut ast::Symbols<'s>,
 }
 
-impl<'s, 'a> Context<'s, 'a> {
-    pub fn new(
-        file_name: std::sync::Arc<String>,
-        src: std::sync::Arc<String>,
-        ast_nodes: &'a mut ast::ExprHeap<'s>,
-        e: &'a mut errors::ManyError,
-        ptable: &'a mut PrecedenceTable<'s>,
-        symbols: &'a mut ast::Symbols<'s>,
-    ) -> Self {
-        Self {
-            file_name,
-            src,
-            ast_nodes,
-            e,
-            resolution_env: ResolutionEnv::Normal(FunctionResolutionEnv::new()),
-            generic_params: Vec::new(),
-            precedence_table: ptable,
-            allow_wildcard_in_type: false,
-            symbols,
-        }
-    }
-
-    /// Get left priority of infix operator `id`. Record an error and return 0 if `id` is not registered as an infix operator
-    pub fn priority_left(&mut self, id: &str, id_meta: &ast::Meta) -> OpPriority {
-        self.precedence_table.get(id).map(|p| p.left()).map_or_else(
-            || {
-                self.e
-                    .push(errors::UndeclaredInfixOperator::new(id_meta, id));
-                0
-            },
-            |x| x,
-        )
-    }
-    pub fn priority_right(&mut self, id: &str, id_meta: &ast::Meta) -> OpPriority {
-        self.precedence_table
-            .get(id)
-            .map(|p| p.right())
-            .map_or_else(
-                || {
-                    self.e
-                        .push(errors::UndeclaredInfixOperator::new(id_meta, id));
-                    0
-                },
-                |x| x,
-            )
-    }
-
+impl Source {
     pub fn meta(&self, begin: &str, end: &str) -> ast::Meta {
         let span = (self.src.len() - begin.len(), begin.len() - end.len());
         ast::Meta {
@@ -159,195 +34,12 @@ impl<'s, 'a> Context<'s, 'a> {
             src: self.src.clone(),
         }
     }
-
-    /// Resolve identifier as local variable
-    pub fn resolve(&mut self, name: &str, meta: ast::Meta) -> Option<ast::Expr<'s>> {
-        match self {
-            Self {
-                resolution_env: ResolutionEnv::Normal(f_res),
-                ..
-            } => f_res
-                .locals
-                .iter()
-                .rfind(|(n, _)| *n == name)
-                .map(|(_, id)| ast::Expr::new_untyped(ast::ExprNode::Local(*id), meta)),
-
-            // See documentation on [`ast::Closure_`] for how locals are laid out
-            Self {
-                resolution_env:
-                    ResolutionEnv::InClosure {
-                        parent,
-                        current,
-                        captures,
-                        caputures_meta,
-                        this_name,
-                    },
-                ..
-            } => {
-                current
-                    .locals
-                    .iter()
-                    .rfind(|(n, _)| *n == name)
-                    .map_or_else(
-                        // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
-                        || {
-                            parent.locals.iter().rfind(|(n, _)| *n == name).map_or(
-                                None,
-                                |(_, id)| {
-                                    // Found in parent namespace
-                                    if let Some(i) = captures.iter().position(|i| *i == *id) {
-                                        Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured(i.into(), *this_name == name),
-                                            meta.clone(),
-                                        ))
-                                    } else {
-                                        captures.push(*id);
-                                        caputures_meta.push(meta.clone());
-                                        Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured(
-                                                (captures.len() - 1).into(),
-                                                *this_name == name,
-                                            ),
-                                            meta.clone(),
-                                        ))
-                                    }
-                                },
-                            )
-                        },
-                        // Local
-                        |(_, id)| {
-                            Some(ast::Expr::new_untyped(
-                                ast::ExprNode::Local(*id),
-                                meta.clone(),
-                            ))
-                        },
-                    )
-            }
-        }
-    }
-
-    pub fn push_expr(&mut self, node: ast::Expr<'s>) -> ast::ExprId {
-        self.ast_nodes.push(node)
-    }
-
-    pub fn define_local(&mut self, name: &'s str) -> ast::LocalId {
-        let id = self.resolution_env.current().id_cnt;
-        self.resolution_env.current().locals.push((name, id));
-        *self.resolution_env.current().scope_cnt.last_mut().unwrap() += 1;
-        self.resolution_env.current().id_cnt = id + 1;
-        id
-    }
-
-    pub fn with_function_scope<R>(&mut self, f: impl Fn(&mut Context<'s, '_>) -> R) -> (usize, R) {
-        self.resolution_env = ResolutionEnv::Normal(FunctionResolutionEnv::new());
-        let r = f(self);
-        (self.resolution_env.current().local_cnt(), r)
-    }
-
-    /// All variables defined in `f` will be popped upon exit
-    pub fn with_scope<R>(&mut self, f: impl FnOnce(&mut Context<'s, '_>) -> R) -> R {
-        self.resolution_env.current().scope_cnt.push(0);
-        let r = f(self);
-
-        self.resolution_env.pop_scope();
-        r
-    }
-
-    /// Set current status to "in-closure", that is , identifiers are resolved further in surrunding namespace
-    /// if they are not found in local namespace.
-    /// Return (captures, number of locals, result of `f`)
-    pub fn with_closure_scope<R>(
-        &mut self,
-        this_name: &'s str,
-        f: impl Fn(&mut Context<'s, '_>) -> R,
-    ) -> (Vec<ast::LocalId>, Vec<ast::Meta>, usize, R) {
-        let parent = match &mut self.resolution_env {
-            ResolutionEnv::Normal(p) => std::mem::take(p),
-            _ => unreachable!(),
-        };
-        self.resolution_env = ResolutionEnv::InClosure {
-            parent,
-            current: FunctionResolutionEnv::new(),
-            captures: Vec::new(),
-            caputures_meta: Vec::new(),
-            this_name,
-        };
-
-        let r = f(self);
-
-        let (parent, captures, captures_meta, locals_cnt) = match &mut self.resolution_env {
-            ResolutionEnv::InClosure {
-                parent,
-                captures,
-                current,
-                caputures_meta,
-                ..
-            } => (
-                std::mem::take(parent),
-                std::mem::take(captures),
-                std::mem::take(caputures_meta),
-                current.local_cnt(),
-            ),
-            _ => unreachable!(),
-        };
-        self.resolution_env = ResolutionEnv::Normal(parent);
-        (captures, captures_meta, locals_cnt, r)
-    }
-
-    fn with_allow_wildcard_in_type<R>(&mut self, f: impl Fn(&mut Context<'s, '_>) -> R) -> R {
-        self.allow_wildcard_in_type = true;
-        let r = f(self);
-        self.allow_wildcard_in_type = false;
-        r
-    }
-
-    pub fn set_generic_params(&mut self, v: Vec<&'s str>) {
-        self.generic_params = v;
-    }
-    pub fn resolve_generic_param(&self, name: &str) -> Option<ast::TypeVarId> {
-        self.generic_params
-            .iter()
-            .position(|p| *p == name)
-            .map(|i| i.into())
-    }
-
-    pub fn push_expr_many(
-        &mut self,
-        exprs: impl Iterator<Item = ast::Expr<'s>>,
-    ) -> Vec<ast::ExprId> {
-        self.ast_nodes.push_many(exprs)
-    }
-
-    pub fn generic_param_cnt(&self) -> usize {
-        self.generic_params.len()
-    }
-
-    pub fn push_error(&mut self, e: impl miette::Diagnostic + 'static + Send + Sync) {
-        self.e.push(e)
-    }
 }
 
-macro_rules! alt {
-    ($s:expr, $ctx:expr, $parser_first:ident $(,$parser:ident)* ) => {{
-            if let (s1, Some(p)) = ncomb::opt(|s| $parser_first(s, $ctx))($s)? {
-                return Ok((s1, p));
-            }
-         $(
-            if let (s1, Some(p)) = ncomb::opt(|s| $parser(s, $ctx))($s)? {
-                return Ok((s1, p));
-            }
-        )*
-        return Err(nom::Err::Error(nom::error::Error::new(
-            $s,
-            nom::error::ErrorKind::Alt,
-        )));
-    }  };
-}
-
-type NomE<'s> = nom::error::Error<&'s str>;
+type NomE<'s> = nom::error::VerboseError<&'s str>;
 type PResult<'s, T> = nom::IResult<&'s str, T, NomE<'s>>;
 type MResult<'s, U> = PResult<'s, (U, ast::Meta)>;
-type EResult<'s> = PResult<'s, ast::Expr<'s>>;
+type EResult<'s> = PResult<'s, tast::Expr<'s>>;
 
 fn empty(s: &str) -> PResult<'_, ()> {
     let (s, _) = nchar::multispace0(s)?;
@@ -364,350 +56,388 @@ where
     }
 }
 
+fn trailing_space_tag<'a>(tag: &'a str) -> impl FnMut(&'a str) -> PResult<'a, &'a str> {
+    move |s| {
+        let (s1, r) = nbyte::tag(tag)(s)?;
+        let (s1, _) = empty(s1)?;
+        Ok((s1, r))
+    }
+}
+
 // const symbolic_keywords: [&'static str; 3] = ["|", ")", ","];
 const ALPHABETICAL_KEYWORDS: [&'static str; 8] =
     ["then", "else", "of", "case", "let", "fn", "in", "data"];
 
 /// An identifier that is made purely of a set of symbols. NOTE that the `_a` suffix means trailing spaces
 /// are not consumed
-fn symbolic_identifier_str_a<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    let (s1, id) = nbyte::is_a("~!@#$%^&*<>=+-./")(s)?;
-    Ok((s1, (id, ctx.meta(s, s1))))
+fn symbolic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let parse = |s| {
+        let (s1, id) = nbyte::is_a("~!@#$%^&*<>=+-./")(s)?;
+        Ok((s1, id))
+    };
+    nom_context("symbolic identifier", parse)(s)
 }
 
 /// An identifier that is not started with a number, and doesn't contain any symbol
-fn alphabetic_identifier_str_a<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    let (s1, _) = nchar::none_of("0123456789~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n")(s)?;
-    let (s2, left) = ncomb::opt(nbyte::is_not("~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n"))(s1)?;
+fn alphabetic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let parse = |s| {
+        let (s1, _) = nchar::none_of("0123456789~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n")(s)?;
+        let (s2, left): (&str, Option<&str>) =
+            ncomb::opt(nbyte::is_not("~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n"))(s1)?;
 
-    let (s2, (id, meta)) = if let Some(left) = left {
-        (s2, (&s[0..left.len() + 1], ctx.meta(s, s2)))
-    } else {
-        (s2, (&s[0..1], ctx.meta(s, s2)))
+        let (s2, id) = if let Some(left) = left {
+            (s2, &s[0..left.len() + 1])
+        } else {
+            (s2, &s[0..1])
+        };
+
+        if ALPHABETICAL_KEYWORDS.contains(&id) {
+            Err(nom::Err::Error(nom::error::VerboseError {
+                errors: vec![(
+                    s,
+                    nom::error::VerboseErrorKind::Nom(nom::error::ErrorKind::Alpha),
+                )],
+            }))
+        } else {
+            Ok((s2, id))
+        }
     };
-
-    if ALPHABETICAL_KEYWORDS.contains(&id) {
-        Err(nom::Err::Error(nom::error::Error::new(
-            s,
-            nom::error::ErrorKind::Alpha,
-        )))
-    } else {
-        Ok((s2, (id, meta)))
-    }
+    nom_context("alphabetic identifier", parse)(s)
 }
 
 /// An `alphabetic_identifier` that is surrounded by "`", indicating that it's used as an infix operator
-fn infix_alphabetic_identifier_str_a<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    let (s1, _) = nbyte::tag("`")(s)?;
-    let (s2, (id_mid, _)) = alphabetic_identifier_str_a(s1, ctx)?;
-    let (s3, _) = nbyte::tag("`")(s2)?;
-    Ok((s3, (&s[0..id_mid.len() + 2], ctx.meta(s, s3))))
+fn infix_alphabetic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let parse = |s| {
+        let (s1, _) = nbyte::tag("`")(s)?;
+        let (s2, id_mid) = alphabetic_identifier_str_a(s1)?;
+        let (s3, _) = nbyte::tag("`")(s2)?;
+        Ok((s3, &s[0..id_mid.len() + 2]))
+    };
+    nom_context("infix alphabetic identifier", parse)(s)
 }
 
 /// An identifier that is used as an infix operator
-fn infix_identifier_str_a<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    alt!(
-        s,
-        ctx,
-        symbolic_identifier_str_a,
-        infix_alphabetic_identifier_str_a
-    );
+fn infix_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    nom_context(
+        "infix identifier",
+        nbr::alt((symbolic_identifier_str_a, infix_alphabetic_identifier_str_a)),
+    )(s)
 }
 
-fn infix_identifier_str<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    trailing_space(|s| infix_identifier_str_a(s, ctx))(s)
+fn infix_identifier_str<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    trailing_space(infix_identifier_str_a)(s)
 }
 
 /// Like `alphabetic_identifier_str_a`, but removes trailing space
-fn alphabetic_identifier_str<'s>(
-    s: &'s str,
-    ctx: &Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Meta)> {
-    let (s1, r) = alphabetic_identifier_str_a(s, ctx)?;
+fn alphabetic_identifier_str<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let (s1, r) = alphabetic_identifier_str_a(s)?;
     let (s2, _) = empty(s1)?;
     Ok((s2, r))
 }
 
-/// A declaration of an infix operator
-fn infix_decl<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ()> {
-    let (s1, _) = trailing_space(nbyte::tag("infix"))(s)?;
-
-    let (s2, (id, _)) = infix_identifier_str(s1, ctx)?;
-
-    let (s3, p_left) = trailing_space(nchar::u32)(s2)?;
-    let (s3, p_right) = trailing_space(nchar::u32)(s3)?;
-
-    ctx.precedence_table.insert(id, Precedence(p_left, p_right));
-    Ok((s3, ()))
+/// Like `alphabetic_identifier_str_a`, but removes trailing space
+fn alphabetic_identifier_str_with_meta<'s>(
+    s: &'s str,
+    ctx: &Source,
+) -> PResult<'s, (&'s str, ast::Meta)> {
+    let (s1, r) = alphabetic_identifier_str_a(s)?;
+    let (s2, _) = empty(s1)?;
+    Ok((s2, (r, ctx.meta(s, s1))))
 }
 
 /// A number literal, which can either be float or int. The `_expr` suffix indicates that it parses an expression.
-fn num_literal_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
+fn num_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     let (s1, (c, m)) = trailing_space(|s| num_literal_a(s, ctx))(s)?;
-    Ok((s1, ast::Expr::new_untyped(ast::ExprNode::Constant(c), m)))
+    Ok((s1, tast::Expr::new_untyped(tast::ExprNode::Constant(c), m)))
 }
 
-fn num_literal_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, ast::Constant<'s>> {
-    let (s1, d1) = nchar::digit1(s)?;
-    let (s2, d2) = ncomb::opt(nseq::preceded(nbyte::tag("."), nchar::digit1))(s1)?;
-    if let Some(d2) = d2 {
-        Ok((
-            s2,
-            (
-                ast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
-                ctx.meta(s, s2),
-            ),
-        ))
-    } else {
-        Ok((
-            s2,
-            (ast::Constant::Int(d1.parse().unwrap()), ctx.meta(s, s2)),
-        ))
-    }
+fn num_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, ast::Constant<'s>> {
+    let parse = |s| {
+        let (s1, d1): (_, &str) = nchar::digit1(s)?;
+        let (s2, d2) = ncomb::opt(nseq::preceded(nbyte::tag("."), nchar::digit1))(s1)?;
+        if let Some(d2) = d2 {
+            Ok((
+                s2,
+                (
+                    ast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
+                    ctx.meta(s, s2),
+                ),
+            ))
+        } else {
+            Ok((
+                s2,
+                (ast::Constant::Int(d1.parse().unwrap()), ctx.meta(s, s2)),
+            ))
+        }
+    };
+    nom_context("numerical literal", parse)(s)
 }
 
 /// Like `num_literal_expr`
-fn string_literal_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
+fn string_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     let (s1, (c, m)) = trailing_space(|s| string_literal_a(s, ctx))(s)?;
-    Ok((s1, ast::Expr::new_untyped(ast::ExprNode::Constant(c), m)))
+    Ok((s1, tast::Expr::new_untyped(tast::ExprNode::Constant(c), m)))
 }
 
-fn string_literal_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, ast::Constant<'s>> {
-    let (s1, _) = nbyte::tag("\"")(s)?;
-    let (s2, string) = nbyte::take_until("\"")(s1)?;
-    let (s3, _) = nbyte::tag("\"")(s2)?;
-    Ok((s3, (ast::Constant::Str(string), ctx.meta(s, s3))))
+fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, ast::Constant<'s>> {
+    let parse = |s| {
+        let (s1, _) = nbyte::tag("\"")(s)?;
+        let (s2, string) = nbyte::take_until("\"")(s1)?;
+        let (s3, _) = nbyte::tag("\"")(s2)?;
+        Ok((s3, (ast::Constant::Str(string), ctx.meta(s, s3))))
+    };
+    nom_context("string literal", parse)(s)
 }
 
-fn if_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s2, test) = expression(s, ctx)?;
-    let test = ctx.push_expr(test);
+fn if_expr<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let parse = |s| {
+        let (s2, test) = expression(s, ctx, precedence_table, generic_params)?;
 
-    let (s3, _) = trailing_space(nbyte::tag("then"))(s2)?;
-    let (s4, then) = expression(s3, ctx)?;
-    let then = ctx.push_expr(then);
+        let (s3, _) = trailing_space_tag("then")(s2)?;
+        let (s4, then) = expression(s3, ctx, precedence_table, generic_params)?;
 
-    let (s5, _) = trailing_space(nbyte::tag("else"))(s4)?;
-    let (s6, else_) = expression(s5, ctx)?;
-    let else_ = ctx.push_expr(else_);
+        let (s5, _) = trailing_space_tag("else")(s4)?;
+        let (s6, else_) = expression(s5, ctx, precedence_table, generic_params)?;
 
-    Ok((
-        s6,
-        ast::Expr::new_untyped(ast::ExprNode::IfElse { test, then, else_ }, ctx.meta(s, s6)),
-    ))
+        Ok((
+            s6,
+            tast::Expr::new_untyped(
+                tast::ExprNode::IfElse {
+                    test: Box::new(test),
+                    then: Box::new(then),
+                    else_: Box::new(else_),
+                },
+                ctx.meta(s, s6),
+            ),
+        ))
+    };
+    nom_context("if-expression", parse)(s)
 }
 
 /// A constructor pattern, like `Some 1`
-fn pattern_construct<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
-    let (s1, (constructor, template_meta)) = alphabetic_identifier_str(s, ctx)?;
-
-    if !constructor.chars().next().unwrap().is_uppercase() {
-        let local_id = ctx.define_local(constructor);
-        return Ok((s1, ast::Pattern::Bind(local_id, template_meta)));
-    }
-
-    let (s2, args) =
-        nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| pattern(s, ctx))(s1)?;
-    Ok((
-        s2,
-        ast::Pattern::Construct(constructor, args, ctx.meta(s, s2)),
-    ))
+fn pattern_construct<'s>(
+    s: &'s str,
+    begin: &'s str,
+    constructor: &'s str,
+    ctx: &Source,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let parse = |s| {
+        let (s1, args) = nmulti::separated_list0(trailing_space_tag(","), |s| pattern(s, ctx))(s)?;
+        Ok((
+            s1,
+            tast::Pattern::Construct(constructor, args, ctx.meta(begin, s1)),
+        ))
+    };
+    nom_context("construct-pattern", parse)(s)
 }
 
 /// A literal pattern
-fn pattern_literal<'s>(s: &'s str, ctx: &Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
-    let (s1, (value, meta)) =
-        nbr::alt((|s| string_literal_a(s, ctx), |s| num_literal_a(s, ctx)))(s)?;
-    let (s1, _) = empty(s1)?;
-    Ok((s1, ast::Pattern::Literal(value, meta)))
+fn pattern_literal<'s>(s: &'s str, ctx: &Source) -> PResult<'s, tast::Pattern<'s>> {
+    let parse = |s| {
+        let (s1, (value, meta)) =
+            nbr::alt((|s| string_literal_a(s, ctx), |s| num_literal_a(s, ctx)))(s)?;
+        let (s1, _) = empty(s1)?;
+        Ok((s1, tast::Pattern::Literal(value, meta)))
+    };
+    nom_context("literal pattern", parse)(s)
 }
 
-/// A bind pattern. NOTE that the bound identifier can only be alphabetic
-fn pattern_bind<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
-    let (s1, (id, meta)) = alphabetic_identifier_str(s, ctx)?;
-    let local_id = ctx.define_local(id);
-    Ok((s1, ast::Pattern::Bind(local_id, meta)))
-}
-
-fn parenthesed_pattern<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
-    let (s1, _) = trailing_space(nbyte::tag("("))(s)?;
-    let (s1, mut pats) =
-        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| pattern(s, ctx))(s1)?;
+fn parenthesed_pattern<'s>(
+    s: &'s str,
+    begin: &'s str,
+    ctx: &Source,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let (s1, mut pats) = nmulti::separated_list1(trailing_space_tag(","), |s| pattern(s, ctx))(s)?;
     let (s2, _) = nbyte::tag(")")(s1)?;
     let (s3, _) = empty(s2)?;
 
     if pats.len() == 1 {
         Ok((s3, pats.pop().unwrap()))
     } else {
-        Ok((s3, ast::Pattern::Tuple(pats, ctx.meta(s, s2))))
+        Ok((s3, tast::Pattern::Tuple(pats, ctx.meta(begin, s2))))
     }
 }
 
 /// A pattern
-fn pattern<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Pattern<'s>> {
-    alt!(
-        s,
-        ctx,
-        parenthesed_pattern,
-        pattern_construct,
-        pattern_literal,
-        pattern_bind
-    );
+fn pattern<'s>(s: &'s str, ctx: &Source) -> PResult<'s, tast::Pattern<'s>> {
+    let parse = |s| {
+        if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("("))(s)? {
+            parenthesed_pattern(s1, s, ctx)
+        } else if let (s1, Some(constructor)) = ncomb::opt(alphabetic_identifier_str)(s)? {
+            if !constructor.chars().next().unwrap().is_uppercase() {
+                return Ok((s1, tast::Pattern::Bind(constructor, ctx.meta(s, s1))));
+            } else {
+                pattern_construct(s1, s, constructor, ctx)
+            }
+        } else {
+            pattern_literal(s, ctx)
+        }
+    };
+    nom_context("pattern", parse)(s)
 }
 
-fn case_arm<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::CaseArm<'s>> {
-    ctx.with_scope(|ctx| {
+fn case_arm<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::CaseArm<'s>> {
+    let parse = |s| {
         let (s1, pat) = pattern(s, ctx)?;
 
-        let (s2, guard) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("if")))(s1)? {
-            let (s3, guard) = expression(s2, ctx)?;
+        let (s2, guard) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("if"))(s1)? {
+            let (s3, guard) = expression(s2, ctx, precedence_table, generic_params)?;
             (s3, Some(guard))
         } else {
             (s1, None)
         };
 
-        let (s2, _) = trailing_space(nbyte::tag("->"))(s2)?;
-        let (s3, result) = expression(s2, ctx)?;
+        let (s2, _) = trailing_space_tag("->")(s2)?;
+        let (s3, result) = expression(s2, ctx, precedence_table, generic_params)?;
         Ok((
             s3,
-            ast::CaseArm {
+            tast::CaseArm {
                 pattern: pat,
-                guard: guard.map(|x| ctx.push_expr(x)),
-                result: ctx.push_expr(result),
+                guard,
+                result,
             },
         ))
-    })
+    };
+    nom_context("case-of arm", parse)(s)
 }
 
-fn case_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s2, operand) = expression(s, ctx)?;
-    let operand = ctx.push_expr(operand);
+fn case_expr<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let parse = |s| {
+        let (s2, operand) = expression(s, ctx, precedence_table, generic_params)?;
 
-    let (s3, _) = trailing_space(nbyte::tag("of"))(s2)?;
+        let (s3, _) = trailing_space_tag("of")(s2)?;
 
-    let (s4, arms) =
-        nmulti::separated_list1(trailing_space(nbyte::tag("|")), |s| case_arm(s, ctx))(s3)?;
-    Ok((
-        s4,
-        ast::Expr::new_untyped(ast::ExprNode::Case { operand, arms }, ctx.meta(s, s4)),
-    ))
-}
-
-fn let_in_bind_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s1, value) = expression(s, ctx)?;
-    let value = ctx.push_expr(value);
-
-    let (s1, _) = trailing_space(nbyte::tag("of"))(s1)?;
-
-    ctx.with_scope(|ctx| {
-        let (s2, pattern) = pattern(s1, ctx)?;
-
-        let (s3, _) = trailing_space(nbyte::tag("in"))(s2)?;
-        let (s4, in_) = expression(s3, ctx)?;
+        let (s4, arms) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
+            case_arm(s, ctx, precedence_table, generic_params)
+        })(s3)?;
         Ok((
             s4,
-            ast::Expr::new_untyped(
-                ast::ExprNode::LetPatIn {
-                    bind: pattern,
-                    value,
-                    in_: ctx.push_expr(in_),
+            tast::Expr::new_untyped(
+                tast::ExprNode::Case {
+                    operand: Box::new(operand),
+                    arms,
                 },
                 ctx.meta(s, s4),
             ),
         ))
-    })
+    };
+    nom_context("case-of expression", parse)(s)
 }
 
-fn function_params<'s>(
+fn let_in_bind_expr<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
-) -> PResult<'s, (Vec<&'s str>, Vec<ast::Meta>)> {
-    let (s1, r) = nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| {
-        alphabetic_identifier_str(s, ctx)
-    })(s)?;
-    let (params, meta) = r.into_iter().unzip();
-    Ok((s1, (params, meta)))
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let parse = |s| {
+        let (s1, pattern) = pattern(s, ctx)?;
+
+        let (s1, _) = trailing_space_tag("=")(s1)?;
+
+        let (s2, value) = expression(s1, ctx, precedence_table, generic_params)?;
+
+        let (s3, _) = trailing_space_tag("in")(s2)?;
+        let (s4, in_) = expression(s3, ctx, precedence_table, generic_params)?;
+        Ok((
+            s4,
+            tast::Expr::new_untyped(
+                tast::ExprNode::LetPatIn {
+                    bind: pattern,
+                    value: Box::new(value),
+                    in_: Box::new(in_),
+                },
+                ctx.meta(s, s4),
+            ),
+        ))
+    };
+    nom_context("let-in expression", parse)(s)
 }
 
-fn let_in_closure_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s1, _) = trailing_space(nbyte::tag("fn"))(s)?;
+fn function_params<'s>(s: &'s str, ctx: &Source) -> PResult<'s, (Vec<&'s str>, Vec<ast::Meta>)> {
+    let parse = |s| {
+        let (s1, r) = nmulti::separated_list0(trailing_space_tag(","), |s| {
+            alphabetic_identifier_str_with_meta(s, ctx)
+        })(s)?;
+        let (params, meta) = r.into_iter().unzip();
+        Ok((s1, (params, meta)))
+    };
+    nom_context("function parameters", parse)(s)
+}
 
-    let (s1, (id, _)) = alphabetic_identifier_str(s1, ctx)?;
+fn let_in_closure_expr<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let parse = |s| {
+        let (s1, id) = alphabetic_identifier_str(s)?;
 
-    ctx.with_scope(|ctx| {
-        let local_id = ctx.define_local(id);
-
-        let (s2, params) = nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| {
-            alphabetic_identifier_str(s, ctx)
+        let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| {
+            alphabetic_identifier_str_with_meta(s, ctx)
         })(s1)?;
         let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
 
-        let (s3, _) = trailing_space(nbyte::tag("="))(s2)?;
+        let (s3, _) = trailing_space_tag("=")(s2)?;
 
-        let (captures, captures_meta, local_cnt, r) = ctx.with_closure_scope(id, |ctx| {
-            params.iter().for_each(|p| {
-                ctx.define_local(p);
-            });
-            expression(s3, ctx)
-        });
-        let (s4, body) = r?;
+        let (s4, body) = expression(s3, ctx, precedence_table, generic_params)?;
 
-        let f = ast::Function {
+        let f = tast::Function {
             type_: None,
             var_cnt: 0,
-            local_cnt,
-            arity: params.len(),
-            body: ctx.push_expr(body),
+            body: Box::new(body),
             meta: ctx.meta(s, s4),
+            params,
             param_metas: params_meta,
-            captures,
-            captures_meta,
         };
-        let closure_meta = ctx.meta(s, s4);
-        let closure_id = closure_meta.closure_id();
-        ctx.symbols.add_function(closure_id.clone(), f);
 
-        let closure_expr = ctx.push_expr(ast::Expr::new_untyped(
-            ast::ExprNode::MakeClosure(closure_id),
-            closure_meta,
-        ));
+        let (s5, _) = trailing_space_tag("in")(s4)?;
+        let (s6, in_) = expression(s5, ctx, precedence_table, generic_params)?;
 
-        let (s5, _) = trailing_space(nbyte::tag("in"))(s4)?;
-        let (s6, in_) = expression(s5, ctx)?;
-        Ok((
-            s6,
-            ast::Expr::new_untyped(
-                ast::ExprNode::LetIn {
-                    bind: local_id,
-                    value: closure_expr,
-                    in_: ctx.push_expr(in_),
-                },
-                ctx.meta(s, s6),
-            ),
-        ))
-    })
+        let closure_expr = tast::Expr::new_untyped(
+            tast::ExprNode::LetFnIn {
+                identifier: id,
+                f,
+                in_: Box::new(in_),
+            },
+            ctx.meta(s, s6),
+        );
+
+        Ok((s6, closure_expr))
+    };
+    nom_context("let-fn-in expression", parse)(s)
 }
 
-fn let_in_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    alt!(s, ctx, let_in_closure_expr, let_in_bind_expr)
+fn let_in_expr<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("fn"))(s)? {
+        let_in_closure_expr(s1, ctx, precedence_table, generic_params)
+    } else {
+        let_in_bind_expr(s, ctx, precedence_table, generic_params)
+    }
 }
 
-fn generic_param_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, &'s str> {
+fn generic_param_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, &'s str> {
     let (s1, _) = nbyte::tag("'")(s)?;
     let (s2, name) = nchar::alphanumeric1(s1)?;
     Ok((s2, (name, ctx.meta(s, s2))))
@@ -715,258 +445,314 @@ fn generic_param_a<'s>(s: &'s str, ctx: &Context<'s, '_>) -> MResult<'s, &'s str
 
 fn generic_params_decl<'s>(
     s: &'s str,
-    ctx: &Context<'s, '_>,
+    ctx: &Source,
 ) -> PResult<'s, (Vec<&'s str>, Vec<ast::Meta>)> {
-    let (s1, generics) = nmulti::separated_list0(
-        trailing_space(nbyte::tag(",")),
-        trailing_space(|s| generic_param_a(s, ctx)),
-    )(s)?;
-    Ok((s1, generics.into_iter().unzip()))
-}
-
-fn type_generic<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, (template, template_meta)) = alphabetic_identifier_str(s, ctx)?;
-
-    if template == "_" && ctx.allow_wildcard_in_type {
-        return Ok((
-            s1,
-            ast::Type {
-                node: ast::TypeNode::WildCard,
-                meta: ctx.meta(s, s1),
-            },
-        ));
-    }
-
-    let (s4, args, meta) = if let (s2, Some(_)) = ncomb::opt(trailing_space(nbyte::tag("[")))(s1)? {
-        let (s3, args) =
-            nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s2)?;
-        let (s4, _) = nbyte::tag("]")(s3)?;
-        let (s5, _) = empty(s4)?;
-        (s5, args, ctx.meta(s, s4))
-    } else {
-        (s1, vec![], template_meta)
+    let parse = |s| {
+        let (s1, generics) = nmulti::separated_list0(
+            trailing_space_tag(","),
+            trailing_space(|s| generic_param_a(s, ctx)),
+        )(s)?;
+        Ok((s1, generics.into_iter().unzip()))
     };
-
-    Ok((
-        s4,
-        ast::Type {
-            node: ast::TypeNode::Generic(template, args),
-            meta,
-        },
-    ))
+    nom_context("generic parameters", parse)(s)
 }
 
-fn type_callable<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, callable) = type_callable_type(s, ctx)?;
+fn type_generic<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Type<'s>> {
+    let parse = |s| {
+        let (s1, (template, template_meta)) = alphabetic_identifier_str_with_meta(s, ctx)?;
 
-    Ok((
-        s1,
-        ast::Type {
-            node: ast::TypeNode::Callable(callable),
-            meta: ctx.meta(s, s1),
-        },
-    ))
+        macro_rules! return_constant {
+            ($ty:ident) => {
+                return Ok((
+                    s1,
+                    tast::Type {
+                        node: tast::TypeNode::Primitive(ast::PrimitiveType::$ty),
+                        meta: ctx.meta(s, s1),
+                    },
+                ))
+            };
+        }
+
+        match template {
+            "Int" => return_constant!(Int),
+            "Float" => return_constant!(Float),
+            "Str" => return_constant!(Str),
+            "Bool" => return_constant!(Bool),
+            "Char" => return_constant!(Char),
+            _ => {}
+        }
+
+        if template == "_" {
+            return Ok((
+                s1,
+                tast::Type {
+                    node: tast::TypeNode::WildCard,
+                    meta: ctx.meta(s, s1),
+                },
+            ));
+        }
+
+        let (s4, args, meta) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("["))(s1)? {
+            let (s3, args) = nmulti::separated_list1(trailing_space_tag(","), |s| {
+                type_(s, ctx, generic_params)
+            })(s2)?;
+            let (s4, _) = nbyte::tag("]")(s3)?;
+            let (s5, _) = empty(s4)?;
+            (s5, args, ctx.meta(s, s4))
+        } else {
+            (s1, vec![], template_meta)
+        };
+
+        Ok((
+            s4,
+            tast::Type {
+                node: tast::TypeNode::Generic(template, args),
+                meta,
+            },
+        ))
+    };
+    nom_context("generic type", parse)(s)
+}
+
+fn type_callable<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Type<'s>> {
+    let parse = |s| {
+        let (s1, _) = trailing_space_tag("[")(s)?;
+        let (s2, params) =
+            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
+                s1,
+            )?;
+        let (s3, _) = trailing_space_tag("]")(s2)?;
+
+        let (s3, _) = trailing_space_tag("->")(s3)?;
+        let (s4, ret) = type_(s3, ctx, generic_params)?;
+
+        Ok((
+            s4,
+            tast::Type {
+                node: tast::TypeNode::Callable(tast::CallableType {
+                    params,
+                    ret: Box::new(ret),
+                }),
+                meta: ctx.meta(s, s4),
+            },
+        ))
+    };
+    nom_context("callable type", parse)(s)
 }
 
 fn type_callable_type<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
-) -> PResult<'s, ast::CallableType<'s>> {
-    let (s1, _) = trailing_space(nbyte::tag("["))(s)?;
-    let (s2, params) =
-        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s1)?;
-    let (s3, _) = trailing_space(nbyte::tag("]"))(s2)?;
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::CallableType<'s>> {
+    let parse = |s| {
+        let (s1, _) = trailing_space_tag("[")(s)?;
+        let (s2, params) =
+            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
+                s1,
+            )?;
+        let (s3, _) = trailing_space_tag("]")(s2)?;
 
-    let (s3, _) = trailing_space(nbyte::tag("->"))(s3)?;
-    let (s4, ret) = type_(s3, ctx)?;
+        let (s3, _) = trailing_space_tag("->")(s3)?;
+        let (s4, ret) = type_(s3, ctx, generic_params)?;
 
-    Ok((
-        s4,
-        ast::CallableType {
-            params,
-            ret: Box::new(ret),
-        },
-    ))
+        Ok((
+            s4,
+            tast::CallableType {
+                params,
+                ret: Box::new(ret),
+            },
+        ))
+    };
+    nom_context("callable type", parse)(s)
 }
 
-fn type_primitive<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, pri) = nbr::alt((
-        ncomb::map(nbyte::tag("Int"), |_| ast::PrimitiveType::Int),
-        ncomb::map(nbyte::tag("Float"), |_| ast::PrimitiveType::Float),
-        ncomb::map(nbyte::tag("Str"), |_| ast::PrimitiveType::Str),
-        ncomb::map(nbyte::tag("Bool"), |_| ast::PrimitiveType::Bool),
-        ncomb::map(nbyte::tag("Char"), |_| ast::PrimitiveType::Char),
-    ))(s)?;
-    let (s2, _) = empty(s1)?;
-
-    Ok((
-        s2,
-        ast::Type {
-            node: ast::TypeNode::Primitive(pri),
-            meta: ctx.meta(s, s1),
-        },
-    ))
-}
-
-fn type_unit<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
+fn type_unit<'s>(s: &'s str, ctx: &Source) -> PResult<'s, tast::Type<'s>> {
     let (s1, _) = nbyte::tag("()")(s)?;
     let (s2, _) = empty(s1)?;
     Ok((
         s2,
-        ast::Type {
-            node: ast::TypeNode::Unit,
+        tast::Type {
+            node: tast::TypeNode::Unit,
             meta: ctx.meta(s, s1),
         },
     ))
 }
 
-fn type_var<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, (gp, meta)) = trailing_space(|s| generic_param_a(s, ctx))(s)?;
-    let type_node = ctx
-        .resolve_generic_param(gp)
-        .map_or(ast::TypeNode::Never, |var_id| ast::TypeNode::Var(var_id));
-    Ok((
-        s1,
-        ast::Type {
-            node: type_node,
-            meta,
-        },
-    ))
+fn type_tuple<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Type<'s>> {
+    let parse = |s| {
+        let (s2, args) =
+            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(s)?;
+        let (s3, _) = nbyte::tag(")")(s2)?;
+        let (s4, _) = empty(s3)?;
+
+        Ok((
+            s4,
+            tast::Type {
+                node: tast::TypeNode::Tuple(args),
+                meta: ctx.meta(s, s3),
+            },
+        ))
+    };
+    nom_context("tuple type", parse)(s)
 }
 
-fn type_tuple<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    let (s1, _) = trailing_space(nbyte::tag("("))(s)?;
-    let (s2, args) =
-        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s1)?;
-    let (s3, _) = nbyte::tag(")")(s2)?;
-    let (s4, _) = empty(s3)?;
+fn type_var<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Type<'s>> {
+    let (s1, id) = alphabetic_identifier_str(s)?;
 
-    Ok((
-        s4,
-        ast::Type {
-            node: ast::TypeNode::Tuple(args),
-            meta: ctx.meta(s, s3),
-        },
-    ))
+    if let Some(idx) = generic_params.iter().position(|p| *p == id) {
+        Ok((
+            s1,
+            tast::Type {
+                node: tast::TypeNode::Var(idx.into()),
+                meta: ctx.meta(s, s1),
+            },
+        ))
+    } else {
+        Err(nom::Err::Error(nom::error::VerboseError {
+            errors: vec![(
+                s,
+                nom::error::VerboseErrorKind::Nom(nom::error::ErrorKind::Verify),
+            )],
+        }))
+    }
 }
 
-fn type_<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ast::Type<'s>> {
-    alt!(
-        s,
-        ctx,
-        type_var,
-        type_tuple,
-        type_primitive,
-        type_generic,
-        type_callable,
-        type_unit
-    );
+fn type_<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Type<'s>> {
+    if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
+        nbr::alt((
+            |s| type_tuple(s, ctx, generic_params),
+            |s| type_unit(s, ctx),
+        ))(s1)
+    } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("["))(s)? {
+        type_callable(s1, ctx, generic_params)
+    } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("'"))(s)? {
+        type_var(s1, ctx, generic_params)
+    } else {
+        type_generic(s, ctx, generic_params)
+    }
 }
 
 fn constructor<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
+    ctx: &Source,
     data_name: &'s str,
-) -> PResult<'s, ast::Constructor<'s>> {
-    let (s1, (name, c_meta)) = alphabetic_identifier_str(s, ctx)?;
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, tast::Constructor<'s>> {
+    let parse = |s| {
+        let (s1, name) = alphabetic_identifier_str(s)?;
 
-    if !name.chars().next().unwrap().is_uppercase() {
-        ctx.push_error(errors::ConstructorNameNotUppercase::new(&c_meta));
-    }
-
-    let (s2, params) =
-        nmulti::separated_list0(trailing_space(nbyte::tag(",")), |s| type_(s, ctx))(s1)?;
-    Ok((
-        s2,
-        ast::Constructor {
-            name,
-            params,
-            belongs_to: data_name,
-            meta: ctx.meta(s, s2),
-        },
-    ))
+        let (s2, params) =
+            nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
+                s1,
+            )?;
+        Ok((
+            s2,
+            tast::Constructor {
+                name,
+                params,
+                belongs_to: data_name,
+                meta: ctx.meta(s, s2),
+            },
+        ))
+    };
+    nom_context("constructor", parse)(s)
 }
 
 fn data<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Data<'s>, Vec<ast::Constructor<'s>>)> {
-    let (s1, _) = trailing_space(nbyte::tag("data"))(s)?;
-    let (s2, (data_name, _)) = alphabetic_identifier_str(s1, ctx)?;
-    let (s2, _) = trailing_space(nbyte::tag("["))(s2)?;
+    ctx: &Source,
+) -> PResult<'s, (&'s str, ast::Data<'s>, Vec<tast::Constructor<'s>>)> {
+    let parse = |s| {
+        let (s2, (data_name, _)) = alphabetic_identifier_str_with_meta(s, ctx)?;
+        let (s2, _) = trailing_space_tag("[")(s2)?;
 
-    let (s3, (generic_params, generic_metas)) = generic_params_decl(s2, ctx)?;
-    let kind_arity = generic_params.len();
-    ctx.set_generic_params(generic_params);
+        let (s3, (generic_params, generic_metas)) = generic_params_decl(s2, ctx)?;
+        let kind_arity = generic_params.len();
 
-    let (s3, _) = trailing_space(nbyte::tag("]"))(s3)?;
+        let (s3, _) = trailing_space_tag("]")(s3)?;
 
-    let (s4, _) = trailing_space(nbyte::tag("="))(s3)?;
+        let (s4, _) = trailing_space_tag("=")(s3)?;
 
-    let (s5, constructors) = nmulti::separated_list1(trailing_space(nbyte::tag("|")), |s| {
-        constructor(s, ctx, data_name)
-    })(s4)?;
+        let (s5, constructors) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
+            constructor(s, ctx, data_name, &generic_params)
+        })(s4)?;
 
-    let meta = ctx.meta(s, s5);
+        let meta = ctx.meta(s, s5);
 
-    if constructors.len() > u8::MAX as usize {
-        ctx.push_error(errors::TooManyVariants::new(&meta, constructors.len()))
-    }
+        let data = ast::Data {
+            name: data_name,
+            kind_arity,
+            constructors: constructors.iter().map(|c| c.name).collect(),
+            meta,
+            generic_metas,
+        };
 
-    let data = ast::Data {
-        name: data_name,
-        kind_arity,
-        constructors: constructors.iter().map(|c| c.name).collect(),
-        meta,
-        generic_metas,
+        Ok((s5, (data_name, data, constructors)))
     };
-
-    Ok((s5, (data_name, data, constructors)))
+    nom_context("data", parse)(s)
 }
 
-fn resolve_identifier<'s>(
-    id: &'s str,
-    meta: ast::Meta,
-    ctx: &mut Context<'s, '_>,
-) -> ast::Expr<'s> {
-    if let Some(result) = ctx.resolve(id, meta.clone()) {
-        result
-    } else {
-        ast::Expr::new_untyped(ast::ExprNode::Global(id), meta)
-    }
+fn function_name_identifier_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, &'s str> {
+    let parse = |s| {
+        let (s1, id) = nbr::alt((symbolic_identifier_str_a, alphabetic_identifier_str_a))(s)?;
+        Ok((s1, (id, ctx.meta(s, s1))))
+    };
+    nom_context("function name identifier", parse)(s)
 }
 
-fn function_name_identifier_a<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> MResult<'s, &'s str> {
-    alt!(
-        s,
-        ctx,
-        symbolic_identifier_str_a,
-        alphabetic_identifier_str_a
-    );
-}
-
-fn function_name_identifier<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> MResult<'s, &'s str> {
+fn function_name_identifier<'s>(s: &'s str, ctx: &Source) -> MResult<'s, &'s str> {
     trailing_space(|s| function_name_identifier_a(s, ctx))(s)
 }
 
-fn identifier_expr<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
+fn identifier_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     let (s1, (id, meta)) = trailing_space(|s| function_name_identifier_a(s, ctx))(s)?;
-    Ok((s1, resolve_identifier(id, meta, ctx)))
+    Ok((
+        s1,
+        tast::Expr::new_untyped(tast::ExprNode::Identifier(id), meta),
+    ))
 }
 
-fn expression_item<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    alt!(
-        s,
-        ctx,
-        identifier_expr,
-        num_literal_expr,
-        string_literal_expr
-    );
+fn expression_item<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
+    nom_context(
+        "identifier, number literal or string literal",
+        nbr::alt((
+            |s| identifier_expr(s, ctx),
+            |s| num_literal_expr(s, ctx),
+            |s| string_literal_expr(s, ctx),
+        )),
+    )(s)
 }
 
-fn expression_parenthesed<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    let (s1, mut exprs) =
-        nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| expression(s, ctx))(s)?;
+fn expression_parenthesed<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let (s1, mut exprs) = nmulti::separated_list1(trailing_space_tag(","), |s| {
+        expression(s, ctx, precedence_table, generic_params)
+    })(s)?;
     let (s2, _) = nbyte::tag(")")(s1)?;
     let (s3, _) = empty(s2)?;
 
@@ -975,82 +761,101 @@ fn expression_parenthesed<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<
     } else {
         Ok((
             s3,
-            ast::Expr::new_untyped(
-                ast::ExprNode::Tuple(ctx.push_expr_many(exprs.into_iter())),
-                ctx.meta(s, s2),
-            ),
+            tast::Expr::new_untyped(tast::ExprNode::Tuple(exprs), ctx.meta(s, s2)),
         ))
     }
 }
 
-fn prefix_expression<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
+fn prefix_expression<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
     // Parenthesed
     if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
         let (s1, _) = empty(s1)?;
-        expression_parenthesed(s1, ctx)
+        expression_parenthesed(s1, ctx, precedence_table, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("if"))(s)? {
         let (s1, _) = empty(s1)?;
-        if_expr(s1, ctx)
+        if_expr(s1, ctx, precedence_table, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("case"))(s)? {
         let (s1, _) = empty(s1)?;
-        case_expr(s1, ctx)
+        case_expr(s1, ctx, precedence_table, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("let"))(s)? {
         let (s1, _) = empty(s1)?;
-        let_in_expr(s1, ctx)
+        let_in_expr(s1, ctx, precedence_table, generic_params)
     } else {
         expression_item(s, ctx)
     }
 }
 
 fn build_infix_expr<'s>(
-    lhs: ast::Expr<'s>,
+    lhs: tast::Expr<'s>,
     op_id: &'s str,
     op_meta: ast::Meta,
-    ctx: &mut Context<'s, '_>,
+    ctx: &Source,
     rest: &'s str,
     lhs_begin: &'s str,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
-    let p_right = ctx.priority_right(op_id, &op_meta);
-    let (s1, rhs) = experssion_with_precedence(rest, ctx, p_right)?;
-    let callee = resolve_identifier(op_id, op_meta, ctx);
+    let p_right = precedence_table.priority_right(op_id);
+    let (s1, rhs) =
+        experssion_with_precedence(rest, ctx, p_right, precedence_table, generic_params)?;
+    let callee = tast::Expr::new_untyped(tast::ExprNode::Identifier(op_id), op_meta);
     let args = [lhs, rhs];
     Ok((
         s1,
-        ast::Expr::new_untyped(
-            ast::ExprNode::Call {
-                callee: ctx.push_expr(callee),
-                args: ctx.push_expr_many(args.into_iter()),
+        tast::Expr::new_untyped(
+            tast::ExprNode::Apply {
+                callee: Box::new(callee),
+                args: args.to_vec(),
             },
             ctx.meta(lhs_begin, s1),
         ),
     ))
 }
 
-fn expression_series<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, Vec<ast::Expr<'s>>> {
-    nmulti::separated_list1(trailing_space(nbyte::tag(",")), |s| expression(s, ctx))(s)
+fn expression_series<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, Vec<tast::Expr<'s>>> {
+    nmulti::separated_list1(trailing_space_tag(","), |s| {
+        expression(s, ctx, precedence_table, generic_params)
+    })(s)
 }
 
 fn build_application_expr<'s>(
-    lhs: ast::Expr<'s>,
-    ctx: &mut Context<'s, '_>,
+    lhs: tast::Expr<'s>,
+    ctx: &Source,
     rest: &'s str,
     lhs_begin: &'s str,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
-    let (s1, arguments) = expression_series(rest, ctx)?;
+    let (s1, arguments) = expression_series(rest, ctx, precedence_table, generic_params)?;
     Ok((
         s1,
-        ast::Expr::new_untyped(
-            ast::ExprNode::Call {
-                callee: ctx.push_expr(lhs),
-                args: ctx.push_expr_many(arguments.into_iter()),
+        tast::Expr::new_untyped(
+            tast::ExprNode::Apply {
+                callee: Box::new(lhs),
+                args: arguments,
             },
             ctx.meta(lhs_begin, s1),
         ),
     ))
 }
 
-fn add_type<'s>(mut lhs: ast::Expr<'s>, ctx: &mut Context<'s, '_>, rest: &'s str) -> EResult<'s> {
-    let (s1, type_) = ctx.with_allow_wildcard_in_type(|ctx| type_(rest, ctx))?;
+fn add_type<'s>(
+    mut lhs: tast::Expr<'s>,
+    ctx: &Source,
+    rest: &'s str,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let (s1, type_) = type_(rest, ctx, generic_params)?;
     lhs.type_ = Some(type_);
     Ok((s1, lhs))
 }
@@ -1063,6 +868,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         nbyte::tag("of"),
         nbyte::tag("in"),
         nbyte::tag("let"),
+        nbyte::tag("fn"),
         nbyte::tag("data"),
         nbyte::tag("->"),
         nbyte::tag(")"),
@@ -1072,11 +878,13 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
 
 fn experssion_with_precedence<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
+    ctx: &Source,
     prec: OpPriority,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let lhs_begin = s;
-    let (mut s, mut lhs) = prefix_expression(s, ctx)?;
+    let (mut s, mut lhs) = prefix_expression(s, ctx, precedence_table, generic_params)?;
     while s.len() > 0 {
         if let (_, Some(_)) = ncomb::opt(expression_boundary)(s)? {
             break;
@@ -1084,157 +892,169 @@ fn experssion_with_precedence<'s>(
         // Annotate `lhs` with some user provided type
         if let (s1, Some(_)) = ncomb::opt(nbyte::tag(":"))(s)? {
             let (s1, _) = empty(s1)?;
-            (s, lhs) = add_type(lhs, ctx, s1)?;
+            (s, lhs) = add_type(lhs, ctx, s1, generic_params)?;
             continue;
         }
 
         // Infix operator
-        let (s1, r) = ncomb::opt(|s| infix_identifier_str(s, ctx))(s)?;
-        if let Some((op_id, op_meta)) = r {
-            if ctx.priority_left(op_id, &op_meta) < prec {
+        let (s1, r) = ncomb::opt(infix_identifier_str)(s)?;
+        if let Some(op_id) = r {
+            if precedence_table.priority_left(op_id) < prec {
                 break;
             }
-            (s, lhs) = build_infix_expr(lhs, op_id, op_meta, ctx, s1, lhs_begin)?;
+            (s, lhs) = build_infix_expr(
+                lhs,
+                op_id,
+                ctx.meta(s, s1),
+                ctx,
+                s1,
+                lhs_begin,
+                precedence_table,
+                generic_params,
+            )?;
             continue;
         }
 
         // Function application
-        (s, lhs) = build_application_expr(lhs, ctx, s1, lhs_begin)?;
+        (s, lhs) =
+            build_application_expr(lhs, ctx, s1, lhs_begin, precedence_table, generic_params)?;
     }
 
     Ok((s, lhs))
 }
 
-fn expression<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> EResult<'s> {
-    experssion_with_precedence(s, ctx, 0)
+fn expression<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    experssion_with_precedence(s, ctx, 0, precedence_table, generic_params)
 }
 
 fn function_signature<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::CallableType<'s>, usize, ast::Meta)> {
-    let (s1, _) = trailing_space(nbyte::tag("let"))(s)?;
-    let (s1, _) = trailing_space(nbyte::tag("fn"))(s1)?;
+    ctx: &Source,
+) -> PResult<'s, (&'s str, tast::CallableType<'s>, usize, ast::Meta)> {
+    let (s1, _) = trailing_space_tag("fn")(s)?;
 
     let (s1, (f_name, _)) = function_name_identifier(s1, ctx)?;
 
     let (s2, (generic_params, _)) = generic_params_decl(s1, ctx)?;
-    ctx.set_generic_params(generic_params);
 
     let (s3, (_, _)) = function_params(s2, ctx)?;
-    let (s3, _) = trailing_space(nbyte::tag(":"))(s3)?;
+    let (s3, _) = trailing_space_tag(":")(s3)?;
 
-    let (s4, t) = type_callable_type(s3, ctx)?;
+    let (s4, t) = type_callable_type(s3, ctx, &generic_params)?;
 
-    let (s5, _) = trailing_space(nbyte::tag("="))(s4)?;
+    let (s5, _) = trailing_space_tag("=")(s4)?;
     let (s5, _) = nbyte::tag("..")(s5)?;
     let (s6, _) = empty(s5)?;
 
-    Ok((s6, (f_name, t, ctx.generic_param_cnt(), ctx.meta(s, s5))))
+    Ok((s6, (f_name, t, generic_params.len(), ctx.meta(s, s5))))
 }
 
 fn function<'s>(
     s: &'s str,
-    ctx: &mut Context<'s, '_>,
-) -> PResult<'s, (&'s str, ast::Function<'s>)> {
-    let (s1, _) = trailing_space(nbyte::tag("let"))(s)?;
-    let (s1, _) = trailing_space(nbyte::tag("fn"))(s1)?;
-
-    let (s1, (f_name, _)) = function_name_identifier(s1, ctx)?;
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, (&'s str, tast::Function<'s>)> {
+    let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
 
     let (s2, (generic_params, _)) = generic_params_decl(s1, ctx)?;
-    ctx.set_generic_params(generic_params);
 
     let (s3, (params, param_metas)) = function_params(s2, ctx)?;
 
     let (s4, f_type) = if let (s4, Some(_)) = ncomb::opt(nbyte::tag(":"))(s3)? {
         let (s4, _) = empty(s4)?;
-        let (s4, t) = type_callable_type(s4, ctx)?;
+        let (s4, t) = type_callable_type(s4, ctx, &generic_params)?;
         (s4, Some(t))
     } else {
         (s3, None)
     };
 
-    let (s5, _) = trailing_space(nbyte::tag("="))(s4)?;
+    let (s5, _) = trailing_space_tag("=")(s4)?;
 
-    let (local_cnt, r) = ctx.with_function_scope(|ctx| {
-        ctx.with_scope(|ctx| {
-            params.iter().for_each(|p| {
-                ctx.define_local(p);
-            });
-            expression(s5, ctx)
-        })
-    });
-    let (s6, body) = r?;
+    let (s6, body) = expression(s5, ctx, precedence_table, &generic_params)?;
 
-    let f = ast::Function {
+    let f = tast::Function {
         type_: f_type,
-        var_cnt: ctx.generic_param_cnt(),
-        local_cnt,
-        arity: params.len(),
-        body: ctx.push_expr(body),
+        var_cnt: generic_params.len(),
+        body: Box::new(body),
         meta: ctx.meta(s, s6),
         param_metas,
-        captures: vec![],
-        captures_meta: vec![],
+        params,
     };
 
     Ok((s6, (f_name, f)))
 }
 
 use std::sync::Arc;
-fn parse_ast_<'s>(s: &'s str, ctx: &mut Context<'s, '_>) -> PResult<'s, ()> {
-    let (mut s, _) = empty(s)?;
+fn parse_ast_<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &mut PrecedenceTable<'s>,
+    symbols: &mut tast::Symbols<'s>,
+) -> PResult<'s, ()> {
+    let parse = |s| {
+        let (mut s, _) = empty(s)?;
 
-    while s.len() > 0 {
-        let (s1, r) = ncomb::opt(|s| data(s, ctx))(s)?;
-        if let Some((data_name, data, constructors)) = r {
-            ctx.symbols.add_data(data_name, data);
-            constructors
-                .into_iter()
-                .for_each(|c| ctx.symbols.add_constructor(c.name, c));
-            s = s1;
-            continue;
+        while s.len() > 0 {
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("data"))(s)? {
+                let (s2, (data_name, data, constructors)) = data(s1, ctx)?;
+                symbols.add_data(data_name, data);
+                constructors
+                    .into_iter()
+                    .for_each(|c| symbols.add_constructor(c.name, c));
+                s = s2;
+                continue;
+            }
+
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("fn"))(s)? {
+                let (s1, (f_name, f)) = function(s1, ctx, precedence_table)?;
+                s = s1;
+                symbols.add_function(f_name.to_string(), f);
+                continue;
+            }
+
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("infix"))(s)? {
+                let (s1, (id, prece)) = infix_decl(s1)?;
+                precedence_table.insert(id, prece);
+                s = s1;
+                continue;
+            }
+
+            // Error
+            return Err(nom::Err::Error(nom::error::VerboseError {
+                errors: vec![(
+                    s,
+                    nom::error::VerboseErrorKind::Nom(nom::error::ErrorKind::Alt),
+                )],
+            }));
         }
 
-        if let (s1, Some(_)) = ncomb::opt(|s| infix_decl(s, ctx))(s)? {
-            s = s1;
-            continue;
-        }
-
-        let (s1, r) = ncomb::opt(|s| function(s, ctx))(s)?;
-        if let Some((f_name, f)) = r {
-            s = s1;
-            ctx.symbols.add_function(f_name.to_string(), f);
-            continue;
-        }
-
-        // Error
-        return Err(nom::Err::Error(nom::error::Error::new(
-            s,
-            nom::error::ErrorKind::Alt,
-        )));
-    }
-
-    Ok((s, ()))
+        Ok((s, ()))
+    };
+    nom_context("data, function or declaration of infix operator", parse)(s)
 }
 
 pub fn parse_ast<'s>(
     s: &'s str,
     src: Arc<String>,
     file_name: Arc<String>,
-    symbols: &mut ast::Symbols<'s>,
-    ast_nodes: &mut ast::ExprHeap<'s>,
-    e: &mut errors::ManyError,
+    symbols: &mut tast::Symbols<'s>,
     precedence_table: &mut PrecedenceTable<'s>,
 ) -> Result<(), errors::ParseError> {
-    let mut ctx = Context::new(file_name, src, ast_nodes, e, precedence_table, symbols);
-
-    let r = parse_ast_(s, &mut ctx).finish();
+    let src_len = src.len();
+    let ctx = Source { file_name, src };
+    let r = parse_ast_(s, &ctx, precedence_table, symbols).finish();
 
     if let Err(e) = r {
-        let m = ctx.meta(e.input, e.input);
-        return Err(errors::ParseError::new(&m));
+        return Err(errors::ParseError::new(
+            e,
+            ctx.meta(s, s).named_source(),
+            src_len,
+        ));
     }
     Ok(())
 }
@@ -1245,13 +1065,10 @@ pub fn parse_builtin_function_signatures<'s>(
     file_name: Arc<String>,
     symbols: &mut ast::Symbols<'s>,
 ) {
-    let mut ast_ndoes = ast::ExprHeap::new();
-    let mut e = errors::ManyError::new();
-    let mut ptable = PrecedenceTable::new();
-    let mut ctx = Context::new(file_name, src, &mut ast_ndoes, &mut e, &mut ptable, symbols);
+    let ctx = Source { file_name, src };
 
     let (s, _) = empty(s).unwrap();
-    let (_, sigs) = nmulti::many1(|s| function_signature(s, &mut ctx))(s).unwrap();
+    let (_, sigs) = nmulti::many1(|s| function_signature(s, &ctx))(s).unwrap();
 
     for (name, type_, var_cnt, meta) in sigs.into_iter() {
         symbols.add_builtin(
@@ -1263,4 +1080,49 @@ pub fn parse_builtin_function_signatures<'s>(
             },
         )
     }
+}
+
+pub fn parse_builtin_data<'s>(
+    s: &'s str,
+    src: Arc<String>,
+    file_name: Arc<String>,
+    symbols: &mut ast::Symbols<'s>,
+) {
+    let ctx = Source { file_name, src };
+    let (s, _) = empty(s).unwrap();
+
+    let data_complete = |s| {
+        let (s, _) = trailing_space_tag("data")(s)?;
+        data(s, &ctx)
+    };
+
+    let (_, datas) = nmulti::many1(data_complete)(s).unwrap();
+
+    for (data_name, data, constructors) in datas.into_iter() {
+        symbols.add_data(data_name, data);
+        for constructor in constructors.into_iter() {
+            symbols.add_constructor(constructor.name, constructor);
+        }
+    }
+}
+
+pub fn parse_infix_declarations<'s>(s: &'s str, precedence_table: &mut PrecedenceTable<'s>) {
+    let (s, _) = empty(s).unwrap();
+    let infix_decl_complete = |s| {
+        let (s, _) = trailing_space_tag("infix")(s)?;
+        infix_decl(s)
+    };
+    let (_, decls) = nmulti::many1(infix_decl_complete)(s).unwrap();
+    for (id, prec) in decls.into_iter() {
+        precedence_table.insert(id, prec);
+    }
+}
+
+fn infix_decl<'s>(s: &'s str) -> PResult<'s, (&'s str, Precedence)> {
+    let (s2, id) = infix_identifier_str(s)?;
+
+    let (s3, p_left) = trailing_space(nchar::u32)(s2)?;
+    let (s3, p_right) = trailing_space(nchar::u32)(s3)?;
+
+    Ok((s3, (id, Precedence(p_left, p_right))))
 }

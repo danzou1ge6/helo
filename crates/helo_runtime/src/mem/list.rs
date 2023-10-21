@@ -30,15 +30,17 @@ impl Gc for ObjList {
         self.next_obj
     }
     fn mark(&mut self) {
-        self.gc_marker = true;
-        if let Some(v) = &mut self.v {
-            // Here we believe that `is_obj` ensures `v` is an object pointer;
-            // And `ObjList` itself ensures `v` points to a valid object
-            unsafe { v.mark() }
-        }
-        if let Some(next) = &mut self.next {
-            // Here `ObjList` itself ensures `next` points to a valid object
-            unsafe { next.mark() }
+        if !self.gc_marker {
+            self.gc_marker = true;
+            if let Some(v) = &mut self.v {
+                // Here we believe that `is_obj` ensures `v` is an object pointer;
+                // And `ObjList` itself ensures `v` points to a valid object
+                unsafe { v.mark() }
+            }
+            if let Some(next) = &mut self.next {
+                // Here `ObjList` itself ensures `next` points to a valid object
+                unsafe { next.mark() }
+            }
         }
     }
     fn unmark(&mut self) {
@@ -46,6 +48,14 @@ impl Gc for ObjList {
     }
     fn is_marked(&self) -> bool {
         self.gc_marker
+    }
+}
+
+impl std::fmt::Debug for ObjList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(unsafe { Pointer(self.into()).to_ref(PhantomData).iter() })
+            .finish()
     }
 }
 
@@ -64,13 +74,11 @@ impl ObjList {
                 return Err(());
             }
 
-            let obj_arr = &mut *ptr;
-            *obj_arr = ObjList {
-                v: None,
-                next: None,
-                gc_marker: false,
-                next_obj: None,
-            };
+            let obj_list = &mut *ptr;
+            obj_list.v = None;
+            obj_list.next = None;
+            obj_list.gc_marker = false;
+            obj_list.next_obj = None;
 
             let trait_ptr = ptr::NonNull::new(ptr).unwrap();
             Ok(trait_ptr.into())

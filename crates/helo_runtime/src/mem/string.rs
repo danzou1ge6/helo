@@ -20,9 +20,11 @@ impl Gc for ObjString {
         self.next_obj
     }
     fn mark(&mut self) {
-        self.gc_marker = true;
-        if let Some(next) = &mut self.next {
-            unsafe { next.mark() }
+        if !self.gc_marker {
+            self.gc_marker = true;
+            if let Some(next) = &mut self.next {
+                unsafe { next.mark() }
+            }
         }
     }
     fn unmark(&mut self) {
@@ -36,6 +38,19 @@ impl Gc for ObjString {
 impl StaticObjKind for ObjString {
     fn kind() -> ObjectKind {
         ObjectKind::String
+    }
+}
+
+impl std::fmt::Debug for ObjString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"")?;
+        f.write_str(&self.v)?;
+        if let Some(next) = self.next {
+            unsafe { next.as_ref().fmt(f) }?;
+        } else {
+            Ok(())?;
+        }
+        write!(f, "\"")
     }
 }
 
@@ -56,13 +71,11 @@ impl ObjString {
                 return Err(());
             }
 
-            let obj_arr = &mut *ptr;
-            *obj_arr = ObjString {
-                v: String::new(),
-                next: None,
-                gc_marker: false,
-                next_obj: None,
-            };
+            let obj_str = &mut *ptr;
+            ptr::write(ptr::addr_of!(obj_str.v) as *mut _, String::new());
+            obj_str.next = None;
+            obj_str.gc_marker = false;
+            obj_str.next_obj = None;
 
             let trait_ptr = ptr::NonNull::new(ptr).unwrap();
             Ok(trait_ptr.into())
@@ -144,13 +157,8 @@ impl Pointer<ObjString> {
         }
         concat(Some(self), rhs.clone_chunk(pool, lock)?)
     }
-    pub unsafe fn head(self, pool: &mut GcPool, lock: &Lock) -> Option<Pointer<ObjChar>> {
-        self.as_ref()
-            .v
-            .chars()
-            .next()
-            // `ObjChar` takes rather small space, so you've got to be in big trouble when `allocate` here fails.
-            .map(|c| Pointer::from_ref(pool.allocate_char(c, lock).unwrap()))
+    pub unsafe fn head(self) -> Option<char> {
+        self.as_ref().v.chars().next()
     }
     pub unsafe fn tail(self, pool: &mut GcPool, lock: &Lock) -> Option<Pointer<ObjString>> {
         let mut new_head = Pointer::from_ref(pool.allocate_string_empty(lock).unwrap());
@@ -230,12 +238,8 @@ impl<'p> Ref<'p, ObjString> {
                 .map(|p| p.to_ref(PhantomData))
         }
     }
-    pub fn head(self, pool: &mut GcPool, lock: &Lock) -> Option<Ref<'p, ObjChar>> {
-        unsafe {
-            Pointer::from_ref(self)
-                .head(pool, lock)
-                .map(|p| p.to_ref(PhantomData))
-        }
+    pub fn head(self) -> Option<char> {
+        unsafe { Pointer::from_ref(self).head() }
     }
     pub fn tail(self, pool: &mut GcPool, lock: &Lock) -> Option<Ref<'p, ObjString>> {
         unsafe {
@@ -265,91 +269,5 @@ impl<'p> PartialEq<str> for Ref<'p, ObjString> {
     }
     fn ne(&self, other: &str) -> bool {
         !self.eq(other)
-    }
-}
-
-pub struct ObjChar {
-    v: char,
-    gc_marker: bool,
-    next_obj: Option<ObjPointer>,
-}
-
-impl Gc for ObjChar {
-    fn set_next_obj(&mut self, p: Option<ObjPointer>) {
-        self.next_obj = p
-    }
-    fn next_obj(&self) -> Option<ObjPointer> {
-        self.next_obj
-    }
-    fn mark(&mut self) {
-        self.gc_marker = true;
-    }
-    fn unmark(&mut self) {
-        self.gc_marker = false;
-    }
-    fn is_marked(&self) -> bool {
-        self.gc_marker
-    }
-}
-
-impl StaticObjKind for ObjChar {
-    fn kind() -> ObjectKind {
-        ObjectKind::Char
-    }
-}
-
-impl Obj for ObjChar {
-    fn kind(&self) -> ObjectKind {
-        ObjectKind::Char
-    }
-}
-
-impl ObjChar {
-    pub fn allocate(c: char) -> Result<Pointer<ObjChar>, ()> {
-        unsafe {
-            let layout = alloc::Layout::new::<ObjChar>();
-            let ptr = alloc::alloc(layout) as *mut ObjChar;
-            if ptr.is_null() {
-                return Err(());
-            }
-
-            let obj_arr = &mut *ptr;
-            *obj_arr = ObjChar {
-                v: c,
-                gc_marker: false,
-                next_obj: None,
-            };
-
-            let trait_ptr = ptr::NonNull::new(ptr).unwrap();
-            Ok(trait_ptr.into())
-        }
-    }
-}
-
-impl<'p> PartialEq for Ref<'p, ObjChar> {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_ref().v.eq(&other.as_ref().v)
-    }
-    fn ne(&self, other: &Self) -> bool {
-        !self.eq(other)
-    }
-}
-impl<'p> Eq for Ref<'p, ObjChar> {}
-
-impl<'p> Ref<'p, ObjChar> {
-    pub fn is_digit(self, radix: u32) -> bool {
-        self.as_ref().v.is_digit(radix)
-    }
-    pub fn is_alphabetic(self) -> bool {
-        self.as_ref().v.is_alphabetic()
-    }
-    pub fn to_string(self, pool: &mut GcPool, lock: &'p Lock) -> Ref<'p, ObjString> {
-        let s = self.as_ref().v.to_string();
-        let mut chunk = pool.allocate_string(&s, lock).unwrap();
-        chunk.as_mut().v = s;
-        chunk
-    }
-    pub fn char(self) -> char {
-        self.as_ref().v
     }
 }

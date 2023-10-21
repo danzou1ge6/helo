@@ -33,14 +33,36 @@ impl Gc for ObjCallable {
         self.next_obj
     }
     fn mark(&mut self) {
-        self.gc_marker = true;
-        unsafe { self.env.mark() };
+        if !self.gc_marker {
+            self.gc_marker = true;
+            unsafe { self.env.mark() };
+        }
     }
     fn unmark(&mut self) {
         self.gc_marker = false;
     }
     fn is_marked(&self) -> bool {
         self.gc_marker
+    }
+}
+
+impl std::fmt::Debug for ObjCallable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.f {
+            Routine::User(addr) => write!(f, "<Callable {}, Env {:?}", addr, self.env.0),
+            Routine::Builtin(id) => write!(
+                f,
+                "<Builtin '{}', Env {:?}",
+                builtins::name_by_id(id),
+                self.env.0
+            ),
+        }?;
+        unsafe {
+            f.debug_list()
+                .entries(self.env.to_ref(PhantomData).iter())
+                .finish()?;
+        }
+        write!(f, ">")
     }
 }
 
@@ -61,6 +83,7 @@ impl ObjCallable {
         f: Routine,
         arity: usize,
         env: Pointer<ObjList>,
+        env_len: usize,
     ) -> Result<Pointer<ObjCallable>, ()> {
         unsafe {
             let layout = alloc::Layout::new::<ObjCallable>();
@@ -69,15 +92,13 @@ impl ObjCallable {
                 return Err(());
             }
 
-            let obj_arr = &mut *ptr;
-            *obj_arr = ObjCallable {
-                f,
-                arity,
-                env_len: 0,
-                env,
-                gc_marker: false,
-                next_obj: None,
-            };
+            let obj_callable = &mut *ptr;
+            obj_callable.f = f;
+            obj_callable.arity = arity;
+            obj_callable.env_len = env_len;
+            obj_callable.env = env;
+            obj_callable.gc_marker = false;
+            obj_callable.next_obj = None;
 
             let trait_ptr = ptr::NonNull::new(ptr).unwrap();
             Ok(trait_ptr.into())
@@ -85,7 +106,7 @@ impl ObjCallable {
     }
     pub(super) fn allocate(f: Routine, arity: usize) -> Result<Pointer<ObjCallable>, ()> {
         let env = ObjList::allocate()?;
-        Ok(ObjCallable::allocate_with_env(f, arity, env)?)
+        Ok(ObjCallable::allocate_with_env(f, arity, env, 0)?)
     }
 }
 
@@ -115,15 +136,19 @@ impl<'p> Ref<'p, ObjCallable> {
         self,
         values: impl Iterator<Item = ValueSafe<'p>>,
         pool: &mut GcPool,
-        lock: &Lock,
+        lock: &'p Lock,
     ) -> Result<Ref<'p, ObjCallable>, ()> {
         let mut new_env = self.env();
+        let mut env_len = self.env_len();
+
         for value in values {
             new_env = new_env.con(value, pool, lock)?;
+            env_len += 1;
         }
         let new_env = Pointer::from_ref(new_env);
-        let callable = ObjCallable::allocate_with_env(self.routine(), self.arity(), new_env)?;
-        unsafe { Ok(callable.to_ref(PhantomData)) }
+        let callable =
+            pool.allocate_callable_with_env(self.routine(), self.arity(), new_env, env_len, lock)?;
+        Ok(callable)
     }
     pub fn env_iter(&self) -> ListRefIter<'p> {
         self.env().iter()

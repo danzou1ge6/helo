@@ -54,7 +54,7 @@ pub type FunctionId = String;
 
 #[derive(Debug, Clone)]
 pub enum ExprNode<'s> {
-    Call {
+    Apply {
         callee: ExprId,
         args: Vec<ExprId>,
     },
@@ -119,9 +119,12 @@ impl<'s> Expr<'s> {
     pub fn new_untyped(node: ExprNode<'s>, meta: Meta) -> Self {
         Self {
             node,
-            type_: None,
             meta,
+            type_: None,
         }
+    }
+    pub fn new(node: ExprNode<'s>, meta: Meta, type_: Option<Type<'s>>) -> Self {
+        Self { node, meta, type_ }
     }
 }
 
@@ -691,14 +694,16 @@ pub struct BuiltinFunction<'s> {
     pub meta: Meta,
 }
 
-pub struct Symbols<'s> {
-    pub(crate) functions: HashMap<FunctionId, Function<'s>>,
+pub struct Symbols_<'s, F> {
+    pub(crate) functions: HashMap<FunctionId, F>,
     pub(crate) constructors: HashMap<&'s str, Constructor<'s>>,
     pub(crate) datas: HashMap<&'s str, Data<'s>>,
     pub(crate) builtins: HashMap<&'s str, BuiltinFunction<'s>>,
 }
 
-impl<'s> Symbols<'s> {
+pub type Symbols<'s> = Symbols_<'s, Function<'s>>;
+
+impl<'s, F> Symbols_<'s, F> {
     pub fn function_names(&self) -> impl Iterator<Item = &str> {
         self.functions.keys().map(|x| &x[..])
     }
@@ -714,10 +719,10 @@ impl<'s> Symbols<'s> {
     pub fn data(&self, name: &str) -> &Data<'s> {
         self.datas.get(name).unwrap()
     }
-    pub fn function(&self, name: &str) -> &Function<'s> {
+    pub fn function(&self, name: &str) -> &F {
         self.functions.get(name).unwrap()
     }
-    pub fn get_function(&self, name: &str) -> Option<&Function<'s>> {
+    pub fn get_function(&self, name: &str) -> Option<&F> {
         self.functions.get(name)
     }
 
@@ -768,7 +773,7 @@ impl<'s> Symbols<'s> {
     }
 }
 
-impl<'s> Symbols<'s> {
+impl<'s, F> Symbols_<'s, F> {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
@@ -777,7 +782,7 @@ impl<'s> Symbols<'s> {
             builtins: HashMap::new(),
         }
     }
-    pub fn add_function(&mut self, name: FunctionId, f: Function<'s>) {
+    pub fn add_function(&mut self, name: FunctionId, f: F) {
         self.functions.insert(name, f);
     }
     pub fn add_constructor(&mut self, name: &'s str, c: Constructor<'s>) {

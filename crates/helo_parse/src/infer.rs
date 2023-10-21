@@ -16,7 +16,7 @@ fn infer_expr<'s>(
     let expr = &ast_nodes[expr_id];
     use ast::ExprNode;
     let typed_expr = match &expr.node {
-        ExprNode::Call { callee, args } => infer_call(
+        ExprNode::Apply { callee, args } => infer_call(
             *callee,
             args,
             &expr.meta,
@@ -679,12 +679,7 @@ fn infer_case<'s>(
     let typed_arms = arms
         .iter()
         .map(|arm| {
-            if let Err(err) = arm.pattern.validate(symbols) {
-                e.push_boxed(err);
-            }
 
-            // Infer type of pattern
-            let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
             let result = infer_expr(
                 arm.result,
                 symbols,
@@ -720,12 +715,24 @@ fn infer_case<'s>(
             });
 
             inferer
-                .unify(&operand.type_, &pat_type, arm.pattern.meta())
-                .commit(e);
-            inferer
                 .unify(&ret_type, &result.type_, &result.meta)
                 .commit(e);
 
+            if let Err(err) = arm.pattern.validate(symbols) {
+                e.push_boxed(err);
+                return typed::CaseArm {
+                    pattern: arm.pattern.clone(),
+                    guard,
+                    result: typed_nodes.push(result),
+                };
+            }
+
+            // Infer type of pattern
+            let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
+
+            inferer
+                .unify(&operand.type_, &pat_type, arm.pattern.meta())
+                .commit(e);
             typed::CaseArm {
                 pattern: arm.pattern.clone(),
                 guard,

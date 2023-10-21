@@ -1,11 +1,11 @@
 use super::{
-    value::Value, ObjArray, ObjCallable, ObjChar, ObjList, ObjString, Routine, ValueSafe, ValueVec,
+    value::Value, ObjArray, ObjCallable, ObjList, ObjString, Routine, ValueSafe, ValueVec,
 };
 
 use core::ptr;
-use std::{alloc, marker::PhantomData};
+use std::{alloc, marker::PhantomData, ptr::NonNull};
 
-pub struct Pointer<T>(ptr::NonNull<T>)
+pub struct Pointer<T>(pub(super) ptr::NonNull<T>)
 where
     T: ?Sized + Obj;
 
@@ -43,12 +43,6 @@ where
             Pointer(ptr)
         }
     }
-    pub unsafe fn as_ref(&self) -> &T {
-        self.0.as_ref()
-    }
-    pub unsafe fn as_mut(&mut self) -> &mut T {
-        self.0.as_mut()
-    }
 }
 
 pub type ObjPointer = Pointer<dyn Obj>;
@@ -60,8 +54,8 @@ impl ObjPointer {
             ObjectKind::List => alloc::Layout::new::<ObjList>(),
             ObjectKind::Callable => alloc::Layout::new::<ObjCallable>(),
             ObjectKind::String => alloc::Layout::new::<ObjString>(),
-            ObjectKind::Char => alloc::Layout::new::<ObjChar>(),
         };
+        std::ptr::drop_in_place(self.0.as_ptr());
         alloc::dealloc(self.0.as_ptr() as *mut u8, layout);
     }
     pub unsafe fn size(self) -> usize {
@@ -70,7 +64,6 @@ impl ObjPointer {
             ObjectKind::List => std::mem::size_of::<ObjList>(),
             ObjectKind::Callable => std::mem::size_of::<ObjCallable>(),
             ObjectKind::String => std::mem::size_of::<ObjString>(),
-            ObjectKind::Char => std::mem::size_of::<ObjChar>(),
         }
     }
 }
@@ -86,10 +79,14 @@ where
         self.0.as_ref().next_obj()
     }
     pub unsafe fn mark(&mut self) {
-        self.0.as_mut().mark()
+        #[cfg(feature = "debug_gc")]
+        println!("Marked [{:?}] {:?}", self.0, self.as_ref());
+        self.0.as_mut().mark();
     }
     pub unsafe fn unmark(&mut self) {
-        self.0.as_mut().unmark()
+        #[cfg(feature = "debug_gc")]
+        println!("UnMarked [{:?}] {:?}", self.0, self.as_ref());
+        self.0.as_mut().unmark();
     }
     pub unsafe fn is_marked(&self) -> bool {
         self.0.as_ref().is_marked()
@@ -103,6 +100,12 @@ where
             _m: PhantomData,
         }
     }
+    pub unsafe fn as_ref(&self) -> &T {
+        self.0.as_ref()
+    }
+    pub unsafe fn as_mut(&mut self) -> &mut T {
+        self.0.as_mut()
+    }
 }
 
 impl<'p, T> Ref<'p, T>
@@ -114,6 +117,15 @@ where
     }
     pub fn kind(&self) -> ObjectKind {
         unsafe { self.p.as_ref().kind() }
+    }
+    pub fn as_ref(&self) -> &T {
+        unsafe { self.p.as_ref() }
+    }
+    pub fn as_mut(&mut self) -> &mut T {
+        unsafe { self.p.as_mut() }
+    }
+    pub fn addr(&self) -> NonNull<T> {
+        self.p
     }
 }
 
@@ -127,12 +139,6 @@ where
                 .cast_obj_pointer()
                 .to_ref(PhantomData)
         }
-    }
-    pub fn as_ref(&self) -> &T {
-        unsafe { self.p.as_ref() }
-    }
-    pub fn as_mut(&mut self) -> &mut T {
-        unsafe { self.p.as_mut() }
     }
 }
 
@@ -202,7 +208,7 @@ where
     T: Obj + ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Ref({:?})", self.p)
+        write!(f, "{:?}{:?}",self.addr(), self.as_ref())
     }
 }
 
@@ -221,7 +227,7 @@ pub trait Gc {
 }
 
 /// Describes an object in the VM
-pub trait Obj: Gc {
+pub trait Obj: Gc + std::fmt::Debug {
     fn kind(&self) -> ObjectKind;
 }
 
@@ -236,7 +242,6 @@ pub enum ObjectKind {
     List,
     Callable,
     String,
-    Char,
 }
 
 pub struct Lock {
@@ -257,6 +262,20 @@ pub struct GcPool {
     first: Option<ObjPointer>,
     /// In bytes
     memory_usage: usize,
+}
+
+impl std::fmt::Debug for GcPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_list = f.debug_list();
+        let mut p = self.first;
+        while let Some(obj) = p {
+            unsafe {
+                debug_list.entry(&obj.to_ref(PhantomData));
+                p = obj.next_obj();
+            }
+        }
+        debug_list.finish()
+    }
 }
 
 static mut GC_POOL_CNT: usize = 0;
@@ -313,6 +332,24 @@ impl GcPool {
             _m: PhantomData,
         })
     }
+    pub fn allocate_callable_with_env<'p>(
+        &mut self,
+        f: Routine,
+        arity: usize,
+        env: Pointer<ObjList>,
+        env_len: usize,
+        _lock: &'p Lock,
+    ) -> Result<Ref<'p, ObjCallable>, ()> {
+        let ptr = ObjCallable::allocate_with_env(f, arity, env, env_len)?;
+        unsafe {
+            self.push(ptr.clone().cast_obj_pointer());
+        }
+        self.memory_usage += std::mem::size_of::<ObjCallable>();
+        Ok(Ref {
+            p: ptr.0,
+            _m: PhantomData,
+        })
+    }
     pub fn allocate_string<'p>(
         &mut self,
         s: &str,
@@ -325,22 +362,27 @@ impl GcPool {
         let ptr = ObjString::allocate()?;
         Ok(unsafe { self.push_and_cast(ptr) })
     }
-    pub fn allocate_char<'p>(&mut self, c: char, _lock: &'p Lock) -> Result<Ref<'p, ObjChar>, ()> {
-        let ptr = ObjChar::allocate(c)?;
-        Ok(unsafe { self.push_and_cast(ptr) })
-    }
     /// Remove unmarked objects. a [`ValueVecMarked`] must be consumed as objects are no longer marked
     /// after this function is called.
     pub fn sweep<'p>(&'p mut self, vv: &mut ValueVec, _lock: &'p mut Lock) {
         // All pointer here should be valid
+
+        #[cfg(feature = "debug_gc")]
+        println!("--- GC SWEEP BEGIN ---");
+
         unsafe {
             vv.mark();
             while let Some(mut first) = self.first {
                 if !first.is_marked() {
                     let new_first = first.next_obj();
                     self.memory_usage -= first.size();
+
+                    #[cfg(feature = "debug_gc")]
+                    println!("Deallocated [{:?}] {:?}", first.0, first.as_ref());
+
                     first.deallocate();
                     self.first = new_first;
+
                 } else {
                     first.unmark();
                     break;
@@ -352,8 +394,13 @@ impl GcPool {
                     if !p_next.is_marked() {
                         let new_next = p_next.next_obj();
                         self.memory_usage -= p_next.size();
+
+                        #[cfg(feature = "debug_gc")]
+                        println!("Deallocated [{:?}] {:?}", p_next.0, p_next.as_ref());
+
                         p_next.deallocate();
                         p.set_next_obj(new_next);
+
                     } else {
                         p_next.unmark();
                         p = p_next;
@@ -361,6 +408,9 @@ impl GcPool {
                 }
             }
         }
+
+        #[cfg(feature = "debug_gc")]
+        println!("--- GC SWEEP END ---");
     }
     pub fn new() -> (Self, super::ValueVec, Lock) {
         unsafe {
@@ -387,10 +437,13 @@ impl GcPool {
             value: Value::from_safe(value),
         }
     }
-}
+    pub fn clear<'p>(&mut self, _lock: &'p mut Lock) {
+        #[cfg(feature = "debug_gc")]
+        {
+            println!("--- GC CLEAR ---");
+            println!("{:#?}", self);
+        }
 
-impl Drop for GcPool {
-    fn drop(&mut self) {
         while let Some(obj) = self.first {
             unsafe {
                 self.first = obj.next_obj();

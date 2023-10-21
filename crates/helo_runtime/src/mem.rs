@@ -7,11 +7,11 @@ mod value;
 
 use std::marker::PhantomData;
 
-pub use objects::{Gc, GcPool, Lock, ObjPointer, ObjRef, Pointer, Ref};
-pub use list::ObjList;
 pub use array::ObjArray;
-pub use callable::{Routine, ObjCallable};
-pub use string::{ObjChar, ObjString};
+pub use callable::{ObjCallable, Routine};
+pub use list::ObjList;
+pub use objects::{Gc, GcPool, Lock, MemPack, ObjPointer, ObjRef, Pointer, Ref};
+pub use string::ObjString;
 pub use value::ValueSafe;
 
 use self::value::Value;
@@ -20,6 +20,14 @@ use self::value::Value;
 /// All pointer should be valid
 pub struct ValueVec {
     v: Vec<value::Value>,
+}
+
+impl std::fmt::Debug for ValueVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            f.debug_list().entries(self.v.iter().map(|v| v.to_safe(PhantomData))).finish()
+        }
+    }
 }
 
 impl ValueVec {

@@ -10,6 +10,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Char(char),
     Obj(Pointer<dyn Obj>),
 }
 
@@ -19,12 +20,26 @@ impl Default for Value {
     }
 }
 
+impl<'p> std::fmt::Debug for ValueSafe<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ValueSafe::*;
+        match self {
+            Int(i) => write!(f, "{i}"),
+            Float(i) => write!(f, "{i}",),
+            Bool(b) => write!(f, "{b}"),
+            Char(c) => write!(f, "{c}"),
+            Obj(obj) => write!(f, "{:?}{:?}", obj.addr(), obj.as_ref()),
+        }
+    }
+}
+
 /// Same as `Value`, but the lifetime '`p` guarantees that `Obj` variant points to a valid object.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum ValueSafe<'p> {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Char(char),
     Obj(ObjRef<'p>),
 }
 
@@ -35,6 +50,7 @@ impl Value {
             Int(i) => Value::Int(i),
             Float(f) => Value::Float(f),
             Bool(b) => Value::Bool(b),
+            Char(c) => Value::Char(c),
             Obj(o) => Value::Obj(Pointer::from_ref(o)),
         }
     }
@@ -44,6 +60,7 @@ impl Value {
             Int(i) => ValueSafe::Int(i),
             Float(f) => ValueSafe::Float(f),
             Bool(b) => ValueSafe::Bool(b),
+            Char(c) => ValueSafe::Char(c),
             Obj(o) => ValueSafe::Obj(o.to_ref(_phantom)),
         }
     }
@@ -56,12 +73,6 @@ impl Value {
 }
 
 impl<'p> ValueSafe<'p> {
-    pub fn mark(&mut self) {
-        match self {
-            ValueSafe::Obj(o) => o.mark(),
-            _ => {}
-        }
-    }
     pub fn unwrap_int(self) -> i64 {
         if let Self::Int(i) = self {
             i
@@ -74,6 +85,13 @@ impl<'p> ValueSafe<'p> {
             i
         } else {
             panic!("Type Exception: Unwrapping a Value of type Float")
+        }
+    }
+    pub fn unwrap_char(self) -> char {
+        if let Self::Char(i) = self {
+            i
+        } else {
+            panic!("Type Exception: Unwrapping a Value of type Char")
         }
     }
     pub fn unwrap_bool(self) -> bool {

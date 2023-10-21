@@ -5,7 +5,7 @@ use helo_macro::{ChunkReaderReadArgs, ConstStrName, Emit, ToOpCode};
 /// Takes 2 bytes
 use crate::builtins::BuiltinId;
 /// Takes 1 bytes
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
 pub struct RegisterId(pub(crate) u8);
 /// Takes 4 bytes
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]

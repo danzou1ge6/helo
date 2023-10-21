@@ -8,16 +8,24 @@ use crate::ast;
 pub struct ParseError {
     #[source_code]
     pub src: NamedSource,
-    #[label("Here")]
+    #[label("Here {}", context)]
     pub span: SourceSpan,
+    pub context: String
 }
 
 impl ParseError {
-    pub fn new(meta: &ast::Meta) -> Self {
-        Self {
-            src: meta.named_source(),
-            span: meta.span(),
+    pub fn new(e: nom::error::VerboseError<&str>, src: NamedSource, src_len: usize) -> Self {
+        let mut offset = 0;
+        let mut context = String::from("");
+
+        for (input, layer) in e.errors {
+            if let nom::error::VerboseErrorKind::Context(c) = layer {
+                context = format!("when trying to parse {}", c);
+                break;
+            }
+            offset = src_len - input.len();
         }
+        Self { src, span: (offset, 1).into(), context }
     }
 }
 

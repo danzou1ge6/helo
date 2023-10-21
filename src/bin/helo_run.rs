@@ -99,7 +99,11 @@ fn run(exe: &executable::Executable) {
     let r = vm.run();
 
     match r {
-        Ok(result) => println!("Return value = {}", result),
+        Ok((pack, mut lock)) => {
+            let (mut pool, val) = pack.unpack(&lock);
+            println!("Return value = {:?}", val);
+            pool.clear(&mut lock);
+        }
         Err(e) => println!("{:?}", e),
     }
 }

@@ -1,47 +1,46 @@
+use crate::ast;
 use crate::parse;
-use crate::{ast, errors};
 
 use std::sync::Arc;
 
 const BUILTIN_SIGS: &'static str = r#"
-    let fn +  a,b : [Int, Int] -> Int = ..
-    let fn -  a,b : [Int, Int] -> Int = ..
-    let fn *  a,b : [Int, Int] -> Int = ..
-    let fn ** a,b : [Int, Int] -> Int = ..
-    let fn /  a,b : [Int, Int] -> Int = ..
+    fn +  a,b : [Int, Int] -> Int = ..
+    fn -  a,b : [Int, Int] -> Int = ..
+    fn *  a,b : [Int, Int] -> Int = ..
+    fn ** a,b : [Int, Int] -> Int = ..
+    fn /  a,b : [Int, Int] -> Int = ..
 
-    let fn == a,b : [Int, Int] -> Bool = ..
-    let fn /= a,b : [Int, Int] -> Bool = ..
-    let fn >= a,b : [Int, Int] -> Bool = ..
-    let fn <= a,b : [Int, Int] -> Bool = ..
-    let fn >  a,b : [Int, Int] -> Bool = ..
-    let fn <  a,b : [Int, Int] -> Bool = ..
+    fn == a,b : [Int, Int] -> Bool = ..
+    fn /= a,b : [Int, Int] -> Bool = ..
+    fn >= a,b : [Int, Int] -> Bool = ..
+    fn <= a,b : [Int, Int] -> Bool = ..
+    fn >  a,b : [Int, Int] -> Bool = ..
+    fn <  a,b : [Int, Int] -> Bool = ..
 
-    let fn int_to_float a : [Int] -> Float  = ..
-    let fn floot_float  a : [Float] -> Int  = ..
+    fn int_to_float a : [Int] -> Float  = ..
 
-    let fn +.   a,b : [Float, Float] -> Float = ..
-    let fn -.   a,b : [Float, Float] -> Float = ..
-    let fn *.   a,b : [Float, Float] -> Float = ..
-    let fn **.  a,b : [Float, Int] -> Float   = ..
-    let fn **.. a,b : [Float, Float] -> Float = ..
-    let fn /.   a,b : [Float, Float] -> Float = ..
+    fn +.   a,b : [Float, Float] -> Float = ..
+    fn -.   a,b : [Float, Float] -> Float = ..
+    fn *.   a,b : [Float, Float] -> Float = ..
+    fn **.  a,b : [Float, Int] -> Float   = ..
+    fn **.. a,b : [Float, Float] -> Float = ..
+    fn /.   a,b : [Float, Float] -> Float = ..
 
-    let fn and a,b : [Bool, Bool] -> Bool = ..
-    let fn or  a,b : [Bool, Bool] -> Bool = ..
-    let fn not a   : [Bool] -> Bool       = ..
+    fn and a,b : [Bool, Bool] -> Bool = ..
+    fn or  a,b : [Bool, Bool] -> Bool = ..
+    fn not a   : [Bool] -> Bool       = ..
 
-    let fn str_cat      a,b   : [Str, Str] -> Str = ..
-    let fn str_head     a     : [Str] -> Char     = ..
-    let fn str_tail     a     : [Str] -> Str      = ..
+    fn str_cat      a,b   : [Str, Str] -> Str = ..
+    fn str_head     a     : [Str] -> Char     = ..
+    fn str_tail     a     : [Str] -> Str      = ..
 
-    let fn int_to_str   a     : [Int] -> Str      = ..
-    let fn bool_to_str  a     : [Bool] -> Str     = ..
-    let fn char_to_str  a     : [Char] -> Str     = ..
-    let fn float_to_str a     : [Float] -> Str    = ..
+    fn int_to_str   a     : [Int] -> Str      = ..
+    fn bool_to_str  a     : [Bool] -> Str     = ..
+    fn char_to_str  a     : [Char] -> Str     = ..
+    fn float_to_str a     : [Float] -> Str    = ..
 "#;
 
-const BUILTIN_DEF: &'static str = r#"
+const PRECEDENCE_DEF: &'static str = r#"
     infix `and` 41 40
     infix `or` 41 40
 
@@ -68,6 +67,10 @@ const BUILTIN_DEF: &'static str = r#"
 
     infix `str_cat` 41 40
 
+
+"#;
+
+const DATA_DEF: &'static str = r#"
     data Option['a] = Some 'a
                     | None
 
@@ -78,30 +81,16 @@ const BUILTIN_DEF: &'static str = r#"
                   | Nil
 
     data Pair['a, 'b] = Pair 'a, 'b
-
 "#;
 
 pub fn add_builtins_to<'s>(
     symbols: &mut ast::Symbols<'s>,
-    ast_nodes: &mut ast::ExprHeap<'s>,
     precedence_table: &mut parse::PrecedenceTable<'s>,
 ) {
     let sigs_src = Arc::new(BUILTIN_SIGS.to_owned());
+    let data_src = Arc::new(DATA_DEF.to_string());
     let file_name = Arc::new("<builtins>".to_owned());
-    let defs_src = Arc::new(BUILTIN_DEF.to_owned());
-
-    let mut e = errors::ManyError::new();
-    parse::parse_ast(
-        BUILTIN_DEF,
-        defs_src,
-        file_name.clone(),
-        symbols,
-        ast_nodes,
-        &mut e,
-        precedence_table,
-    )
-    .unwrap();
-    e.unwrap();
-
-    parse::parse_builtin_function_signatures(BUILTIN_SIGS, sigs_src, file_name, symbols);
+    parse::parse_infix_declarations(PRECEDENCE_DEF, precedence_table);
+    parse::parse_builtin_function_signatures(BUILTIN_SIGS, sigs_src, file_name.clone(), symbols);
+    parse::parse_builtin_data(DATA_DEF, data_src, file_name, symbols);
 }

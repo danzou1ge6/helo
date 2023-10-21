@@ -6,77 +6,16 @@ use std::sync::Arc;
 use miette::Context;
 use miette::IntoDiagnostic;
 fn compile(src: String, file_name: String) -> miette::Result<()> {
-    use helo_parse::ast;
-    use helo_parse::builtins;
-    use helo_parse::errors;
-    use helo_parse::infer;
-    use helo_parse::parse;
-    use helo_parse::typed;
+    use helo_ir::artifect;
+    use helo_ir::pretty_print;
 
     let src = Arc::new(src);
     let file_name = Arc::new(file_name);
-    let s = src.clone();
+    let s = &src.clone()[..];
 
-    let mut symbols = ast::Symbols::new();
-    let mut ast_ndoes = ast::ExprHeap::new();
-    let mut e = errors::ManyError::new();
-    let mut ptable = parse::PrecedenceTable::new();
-
-    builtins::add_builtins_to(&mut symbols, &mut ast_ndoes, &mut ptable);
-
-    parse::parse_ast(
-        &s[..],
-        src.clone(),
-        file_name,
-        &mut symbols,
-        &mut ast_ndoes,
-        &mut e,
-        &mut ptable,
-    )?;
-    e.emit()?;
-    let mut e = errors::ManyError::new();
-
-    let mut typed_nodes = typed::ExprHeap::new();
-    let mut typed_functions = typed::FunctionTable::new();
-
-    for f_name in symbols.function_names() {
-        let f = infer::infer_function(
-            &f_name,
-            &symbols,
-            &ast_ndoes,
-            &mut typed_nodes,
-            &mut typed_functions,
-            &mut e,
-        );
-        if let Some(f) = f {
-            typed_functions.insert(f_name.to_string(), f);
-        }
-    }
-
-    e.emit()?;
-
-    let symbols = typed::Symbols::new(symbols, typed_functions);
-
-    use helo_ir::ir;
-    use helo_ir::lower_ast;
-    use helo_ir::pretty_print;
-
-    let mut ir_nodes = ir::ExprHeap::new();
-    let mut str_table = ir::StrTable::new();
-    let mut ir_functions = ir::FunctionTable::new();
-
-    for f_name in symbols.function_names() {
-        let f = lower_ast::lower_function(
-            f_name,
-            &symbols,
-            &typed_nodes,
-            &mut ir_nodes,
-            &mut str_table,
-        );
-        ir_functions.insert(f_name.clone(), f);
-    }
-
-    let str_list = str_table.to_list();
+    let (ast_symbols, ast_nodes) = artifect::parse(s, src, file_name)?;
+    let (typed_symbols, typed_nodes) = artifect::infer_type(ast_symbols, ast_nodes)?;
+    let (ir_functions, ir_nodes, str_list) = artifect::compiler_ir(typed_symbols, typed_nodes);
 
     for f_name in ir_functions.function_names() {
         #[cfg(feature = "term_width")]

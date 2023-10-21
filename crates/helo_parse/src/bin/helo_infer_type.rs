@@ -16,23 +16,7 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
     let file_name = Arc::new(file_name);
     let s = src.clone();
 
-    let mut symbols = ast::Symbols::new();
-    let mut ast_ndoes = ast::ExprHeap::new();
-    let mut e = errors::ManyError::new();
-    let mut ptable = parse::PrecedenceTable::new();
-
-    builtins::add_builtins_to(&mut symbols, &mut ast_ndoes, &mut ptable);
-
-    parse::parse_ast(
-        &s[..],
-        src.clone(),
-        file_name,
-        &mut symbols,
-        &mut ast_ndoes,
-        &mut e,
-        &mut ptable,
-    )?;
-    e.emit()?;
+    let (ast_symbols, ast_nodes) = artifect::parse(s, src, file_name)?;
     let mut e = errors::ManyError::new();
 
     let mut typed_nodes = typed::ExprHeap::new();

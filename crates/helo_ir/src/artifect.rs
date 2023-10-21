@@ -21,17 +21,17 @@ pub fn parse<'s>(
     let mut e = errors::ManyError::new();
     let mut ptable = parse::PrecedenceTable::new();
 
-    builtins::add_builtins_to(&mut symbbols, &mut ast_nodes, &mut ptable);
+    builtins::add_builtins_to(&mut symbbols, &mut ptable);
 
+    let mut tast_symbols = parse::tast::Symbols::new();
     parse::parse_ast(
         src_str,
         src.clone(),
         file_name,
-        &mut symbbols,
-        &mut ast_nodes,
-        &mut e,
+        &mut tast_symbols,
         &mut ptable,
     )?;
+    parse::lower_symbols(tast_symbols, &mut symbbols, &mut ast_nodes, &mut e);
     e.emit()?;
 
     Ok((symbbols, ast_nodes))

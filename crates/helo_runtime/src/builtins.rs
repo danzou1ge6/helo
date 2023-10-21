@@ -393,9 +393,10 @@ fn char_to_string<'p>(
     lock: &'p mem::Lock,
 ) -> BuiltinRet<'p> {
     let s = arg0
-        .unwrap_obj()
-        .cast::<mem::ObjChar>()
-        .to_string(pool, lock);
+        .unwrap_char()
+        .to_string();
+    let s = pool.allocate_string(&s, lock)
+        .map_err(|_| RunTimeError::OutOfMemory)?;
     Ok(ValueSafe::Obj(s.cast_obj_ref()))
 }
 
