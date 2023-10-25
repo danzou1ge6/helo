@@ -1,14 +1,19 @@
-use super::objects::{Gc, Obj, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
+use crate::mem::value::value_debug_fmt_list;
+
+use super::objects::{Gc, Obj, ObjDebug, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
 use super::value::{Value, ValueSafe};
+
+use smallvec::SmallVec;
 
 use core::ptr;
 use std::alloc;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 /// An array object
 pub struct ObjArray {
     tag: u32,
-    v: Vec<Value>,
+    v: SmallVec<[Value; 4]>,
     gc_marker: bool,
     next_obj: Option<ObjPointer>,
 }
@@ -40,13 +45,24 @@ impl Gc for ObjArray {
     }
 }
 
+impl ObjDebug for ObjArray {
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        visited: &mut std::collections::HashSet<*const u8>,
+    ) -> std::fmt::Result {
+        visited.insert(Pointer(self.into()).addr());
+        write!(f, "<Tag {} ", self.tag)?;
+        unsafe {
+            value_debug_fmt_list(self.v.iter().map(|v| v.to_safe(PhantomData)), f, visited)?;
+        }
+        write!(f, ">")
+    }
+}
+
 impl std::fmt::Debug for ObjArray {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<Tag {} ", self.tag)?;
-        f.debug_list()
-            .entries(self.v.iter().map(|v| unsafe { v.to_safe(PhantomData) }))
-            .finish()?;
-        write!(f, ">")
+        self.debug_fmt(f, &mut HashSet::new())
     }
 }
 
@@ -67,7 +83,10 @@ impl ObjArray {
 
             let obj_arr = &mut *ptr;
             obj_arr.tag = tag;
-            ptr::write(ptr::addr_of!(obj_arr.v) as *mut _, Vec::<Value>::new());
+            ptr::write(
+                ptr::addr_of!(obj_arr.v) as *mut _,
+                SmallVec::<[Value; 4]>::new(),
+            );
             obj_arr.gc_marker = false;
             obj_arr.next_obj = None;
 

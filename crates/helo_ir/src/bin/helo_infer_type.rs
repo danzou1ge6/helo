@@ -1,9 +1,6 @@
-use helo_parse::ast;
-use helo_parse::builtins;
+use helo_ir::artifect;
 use helo_parse::errors;
 use helo_parse::infer;
-use helo_parse::inferer;
-use helo_parse::parse;
 use helo_parse::typed;
 use miette::Context;
 use miette::IntoDiagnostic;
@@ -16,17 +13,17 @@ fn type_src(src: String, file_name: String) -> miette::Result<()> {
     let file_name = Arc::new(file_name);
     let s = src.clone();
 
-    let (ast_symbols, ast_nodes) = artifect::parse(s, src, file_name)?;
+    let (ast_symbols, ast_nodes) = artifect::parse(&s, src, file_name)?;
     let mut e = errors::ManyError::new();
 
     let mut typed_nodes = typed::ExprHeap::new();
     let mut typed_functions = typed::FunctionTable::new();
 
-    for f_name in symbols.function_names() {
+    for f_name in ast_symbols.function_names() {
         let f = infer::infer_function(
             &f_name,
-            &symbols,
-            &ast_ndoes,
+            &ast_symbols,
+            &ast_nodes,
             &mut typed_nodes,
             &mut typed_functions,
             &mut e,
@@ -54,7 +51,7 @@ fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_infer_type <file_name>"))
     //     .clone();
-    let file_name = "helo_scripts/recursion.helo".to_string();
+    let file_name = "helo_scripts/byte_code.helo".to_string();
     let mut file = fs::File::open(&file_name)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

@@ -1,9 +1,10 @@
-use super::objects::{Gc, Obj, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
+use super::objects::{Gc, Obj, ObjDebug, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
 use super::value::{Value, ValueSafe};
 use super::{GcPool, Lock};
 
 use core::ptr;
 use std::alloc;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 /// A list with each node garbage collected
@@ -53,9 +54,35 @@ impl Gc for ObjList {
 
 impl std::fmt::Debug for ObjList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list()
-            .entries(unsafe { Pointer(self.into()).to_ref(PhantomData).iter() })
-            .finish()
+        self.debug_fmt(f, &mut HashSet::new())
+    }
+}
+
+impl ObjDebug for ObjList {
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        visited: &mut std::collections::HashSet<*const u8>,
+    ) -> std::fmt::Result {
+        visited.insert(Pointer(self.into()).addr());
+        unsafe {
+            write!(f, "[")?;
+            for value in Pointer(self.into()).to_ref(PhantomData).iter() {
+                if let ValueSafe::Obj(obj) = value {
+                    if !visited.contains(&obj.addr()) {
+                        value.debug_fmt(f, visited)?;
+                        write!(f, ", ")?;
+                    } else {
+                        write!(f, "..")?;
+                        break;
+                    }
+                } else {
+                    value.debug_fmt(f, visited)?;
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "]")
+        }
     }
 }
 

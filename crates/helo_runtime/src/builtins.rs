@@ -21,414 +21,7 @@ type BuiltinFunc<const N: usize> = for<'p> fn(
 
 type BuiltinRet<'p> = Result<ValueSafe<'p>, RunTimeError>;
 
-fn int_add<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_int() + arg1.unwrap_int()))
-}
-
-fn int_subtract<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_int() - arg1.unwrap_int()))
-}
-
-fn int_mul<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_int() * arg1.unwrap_int()))
-}
-
-fn int_pow<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(
-        arg0.unwrap_int().pow(
-            u32::try_from(arg1.unwrap_int())
-                .map_err(|_| RunTimeError::IntExponentOutOfRange(arg1.unwrap_int()))?,
-        ),
-    ))
-}
-
-fn int_div<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    let (a, b) = (arg0.unwrap_int(), arg1.unwrap_int());
-    if b != 0 {
-        Ok(ValueSafe::Int(a / b))
-    } else {
-        Err(RunTimeError::ZeroDivision)
-    }
-}
-
-fn int_mod<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    let (a, b) = (arg0.unwrap_int(), arg1.unwrap_int());
-    if b != 0 {
-        Ok(ValueSafe::Int(a.rem_euclid(b)))
-    } else {
-        Err(RunTimeError::ZeroDivision)
-    }
-}
-
-fn int_eq<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() == arg1.unwrap_int()))
-}
-
-fn int_ne<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() != arg1.unwrap_int()))
-}
-
-fn int_le<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() <= arg1.unwrap_int()))
-}
-
-fn int_ge<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() >= arg1.unwrap_int()))
-}
-
-fn int_lt<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() < arg1.unwrap_int()))
-}
-
-fn int_gt<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_int() > arg1.unwrap_int()))
-}
-
-fn int_to_float<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(arg0.unwrap_int() as f64))
-}
-
-fn floor_float<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_float().floor() as i64))
-}
-
-fn ceil_float<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_float().ceil() as i64))
-}
-
-fn round_float<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Int(arg0.unwrap_float().round() as i64))
-}
-
-fn float_add<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(arg0.unwrap_float() + arg1.unwrap_float()))
-}
-
-fn float_subtract<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(arg0.unwrap_float() - arg1.unwrap_float()))
-}
-
-fn float_mul<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(arg0.unwrap_float() * arg1.unwrap_float()))
-}
-
-fn float_powi<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(
-        arg0.unwrap_float().powi(
-            i32::try_from(arg1.unwrap_int())
-                .map_err(|_| RunTimeError::FloatExponentOutOfRange(arg1.unwrap_int()))?,
-        ),
-    ))
-}
-
-fn float_powf<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(
-        arg0.unwrap_float().powf(arg1.unwrap_float()),
-    ))
-}
-
-fn float_div<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Float(arg0.unwrap_float() / arg1.unwrap_float()))
-}
-
-fn float_apr<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(
-        (arg0.unwrap_float() - arg1.unwrap_float()).abs() <= 1e-6,
-    ))
-}
-
-fn float_napr<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(
-        (arg0.unwrap_float() - arg1.unwrap_float()).abs() > 1e-6,
-    ))
-}
-
-fn float_le<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_float() <= arg1.unwrap_float()))
-}
-
-fn float_ge<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_float() >= arg1.unwrap_float()))
-}
-
-fn float_lt<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_float() < arg1.unwrap_float()))
-}
-
-fn float_gt<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_float() > arg1.unwrap_float()))
-}
-
-fn str_concat<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    lock: &mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Obj(
-        arg0.unwrap_obj()
-            .cast::<mem::ObjString>()
-            .concat(arg1.unwrap_obj().cast::<mem::ObjString>(), pool, lock)
-            .map_err(|_| RunTimeError::OutOfMemory)?
-            .cast_obj_ref(),
-    ))
-}
-
-fn int_to_str<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    let s = arg0.unwrap_int().to_string();
-    let s = pool
-        .allocate_string(&s, lock)
-        .map_err(|_| RunTimeError::OutOfMemory)?;
-    Ok(ValueSafe::Obj(s.cast_obj_ref()))
-}
-
-fn float_to_str<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    let s = arg0.unwrap_float().to_string();
-    let s = pool
-        .allocate_string(&s, lock)
-        .map_err(|_| RunTimeError::OutOfMemory)?;
-    Ok(ValueSafe::Obj(s.cast_obj_ref()))
-}
-
-fn bool_to_string<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    let s = arg0.unwrap_bool().to_string();
-    let s = pool
-        .allocate_string(&s, lock)
-        .map_err(|_| RunTimeError::OutOfMemory)?;
-    Ok(ValueSafe::Obj(s.cast_obj_ref()))
-}
-
-fn char_to_string<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    let s = arg0
-        .unwrap_char()
-        .to_string();
-    let s = pool.allocate_string(&s, lock)
-        .map_err(|_| RunTimeError::OutOfMemory)?;
-    Ok(ValueSafe::Obj(s.cast_obj_ref()))
-}
-
-fn bool_not<'p>(
-    [arg0]: [ValueSafe<'p>; 1],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(!arg0.unwrap_bool()))
-}
-
-fn bool_and<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_bool() && arg1.unwrap_bool()))
-}
-
-fn bool_or<'p>(
-    [arg0, arg1]: [ValueSafe<'p>; 2],
-    _pool: &mut mem::GcPool,
-    _registers: &mut mem::ValueVec,
-    _call_stack: &mut vm::CallStack,
-    _lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    Ok(ValueSafe::Bool(arg0.unwrap_bool() || arg1.unwrap_bool()))
-}
+mod functions;
 
 #[derive(Clone, Copy)]
 pub enum Builtin {
@@ -485,52 +78,6 @@ impl Builtin {
         }
     }
 }
-
-const BUILTINS: [(&'static str, Builtin); 36] = [
-    // Int arithmatics
-    ("+", B2(int_add)),
-    ("-", B2(int_subtract)),
-    ("*", B2(int_mul)),
-    ("**", B2(int_pow)),
-    ("/", B2(int_div)),
-    ("mod", B2(int_mod)),
-    // Int comparison
-    ("==", B2(int_eq)),
-    ("/=", B2(int_ne)),
-    (">=", B2(int_ge)),
-    ("<=", B2(int_le)),
-    (">", B2(int_gt)),
-    ("<", B2(int_lt)),
-    // Float arithmatics
-    ("+.", B2(float_add)),
-    ("-.", B2(float_subtract)),
-    ("*.", B2(float_mul)),
-    ("**.", B2(float_powi)),
-    ("**..", B2(float_powf)),
-    ("/.", B2(float_div)),
-    // Float comparison
-    ("~=", B2(float_apr)),
-    ("/~=", B2(float_napr)),
-    (">=.", B2(float_ge)),
-    ("<=.", B2(float_le)),
-    (">.", B2(float_gt)),
-    ("<.", B2(float_lt)),
-    // Float <-> Int
-    ("int_to_float", B1(int_to_float)),
-    ("floor_float", B1(floor_float)),
-    ("ceil_float", B1(ceil_float)),
-    ("round_float", B1(round_float)),
-    // To Str
-    ("int_to_str", B1(int_to_str)),
-    ("float_to_str", B1(float_to_str)),
-    ("bool_to_str", B1(bool_to_string)),
-    ("char_to_str", B1(char_to_string)),
-    ("str_cat", B2(str_concat)),
-    // Bool arithmatic
-    ("and", B2(bool_and)),
-    ("or", B2(bool_or)),
-    ("not", B1(bool_not)),
-];
 
 pub fn name_by_id(id: BuiltinId) -> &'static str {
     BUILTINS[id.0 as usize].0
@@ -589,3 +136,58 @@ impl BuiltinTable {
         get_arity(*id)
     }
 }
+
+use functions::*;
+const BUILTINS: [(&'static str, Builtin); 42] = [
+    // Int arithmatics
+    ("+", B2(int_add)),
+    ("-", B2(int_subtract)),
+    ("*", B2(int_mul)),
+    ("**", B2(int_pow)),
+    ("/", B2(int_div)),
+    ("mod", B2(int_mod)),
+    // Int comparison
+    ("==", B2(int_eq)),
+    ("/=", B2(int_ne)),
+    (">=", B2(int_ge)),
+    ("<=", B2(int_le)),
+    (">", B2(int_gt)),
+    ("<", B2(int_lt)),
+    // Float arithmatics
+    ("+.", B2(float_add)),
+    ("-.", B2(float_subtract)),
+    ("*.", B2(float_mul)),
+    ("**.", B2(float_powi)),
+    ("**..", B2(float_powf)),
+    ("/.", B2(float_div)),
+    // Float comparison
+    ("=.", B2(float_apr)),
+    ("/=.", B2(float_napr)),
+    (">=.", B2(float_ge)),
+    ("<=.", B2(float_le)),
+    (">.", B2(float_gt)),
+    ("<.", B2(float_lt)),
+    // Float <-> Int
+    ("int_to_float", B1(int_to_float)),
+    ("floor_float", B1(floor_float)),
+    ("ceil_float", B1(ceil_float)),
+    ("round_float", B1(round_float)),
+    // To Str
+    ("int_to_str", B1(int_to_str)),
+    ("float_to_str", B1(float_to_str)),
+    ("bool_to_str", B1(bool_to_string)),
+    ("char_to_str", B1(char_to_string)),
+    // Bool arithmatic
+    ("and", B2(bool_and)),
+    ("or", B2(bool_or)),
+    ("not", B1(bool_not)),
+    // Char
+    ("char_eq", B2(char_eq)),
+    // String operations
+    ("str_cat", B2(str_concat)),
+    ("str_some", B1(string_some)),
+    ("str_len", B1(string_len)),
+    ("str_eq", B2(string_eq)),
+    ("str_head", B1(string_head)),
+    ("str_tail", B1(string_tail)),
+];

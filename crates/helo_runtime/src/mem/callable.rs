@@ -1,12 +1,14 @@
 use super::list::{ListRefIter, ObjList};
-use super::objects::{Gc, Obj, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
+use super::objects::{Gc, Obj, ObjDebug, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
 use super::value::ValueSafe;
 use super::{GcPool, Lock};
 
+use crate::mem::value::value_debug_fmt_list;
 use crate::{builtins, byte_code};
 
 use core::ptr;
 use std::alloc;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 #[derive(Clone, Copy)]
@@ -48,6 +50,17 @@ impl Gc for ObjCallable {
 
 impl std::fmt::Debug for ObjCallable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.debug_fmt(f, &mut HashSet::new())
+    }
+}
+
+impl ObjDebug for ObjCallable {
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        visited: &mut std::collections::HashSet<*const u8>,
+    ) -> std::fmt::Result {
+        visited.insert(Pointer(self.into()).addr());
         match self.f {
             Routine::User(addr) => write!(f, "<Callable {}, Env {:?}", addr, self.env.0),
             Routine::Builtin(id) => write!(
@@ -58,9 +71,7 @@ impl std::fmt::Debug for ObjCallable {
             ),
         }?;
         unsafe {
-            f.debug_list()
-                .entries(self.env.to_ref(PhantomData).iter())
-                .finish()?;
+            value_debug_fmt_list(self.env.to_ref(PhantomData).iter(), f, visited)?;
         }
         write!(f, ">")
     }
@@ -131,6 +142,26 @@ impl<'p> Ref<'p, ObjCallable> {
     }
     fn env(self) -> Ref<'p, ObjList> {
         unsafe { Pointer::from_ref(self).env().to_ref(PhantomData) }
+    }
+    pub fn push_env_in_place(
+        mut self,
+        values: impl Iterator<Item = ValueSafe<'p>>,
+        pool: &mut GcPool,
+        lock: &'p Lock,
+    ) -> Result<(), ()> {
+        let mut new_env = self.env();
+        let mut env_len = self.env_len();
+
+        for value in values {
+            new_env = new_env.con(value, pool, lock)?;
+            env_len += 1;
+        }
+        let new_env = Pointer::from_ref(new_env);
+
+        self.as_mut().env = new_env;
+        self.as_mut().env_len = env_len;
+
+        Ok(())
     }
     pub fn push_env(
         self,

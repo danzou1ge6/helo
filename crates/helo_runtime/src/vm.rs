@@ -218,7 +218,11 @@ where
                 }
                 JUMP_IF_EQ_BOOL => {
                     let (test, value, jump) = reader.jump_if_eq_bool();
-                    if call_stack.read_register(&registers, test, &lock).unwrap_bool() == value {
+                    if call_stack
+                        .read_register(&registers, test, &lock)
+                        .unwrap_bool()
+                        == value
+                    {
                         self.relative_jump(jump)
                     } else {
                         self.ip_inc_8bytes()
@@ -226,7 +230,11 @@ where
                 }
                 JUMP_IF_EQ_I32 => {
                     let (test, value, jump) = reader.jump_if_eq_i32();
-                    if call_stack.read_register(&registers, test, &lock).unwrap_int() == value as i64 {
+                    if call_stack
+                        .read_register(&registers, test, &lock)
+                        .unwrap_int()
+                        == value as i64
+                    {
                         self.relative_jump(jump)
                     } else {
                         self.ip_inc_8bytes()
@@ -235,7 +243,11 @@ where
                 JUMP_IF_EQ_I64 => {
                     let (test, jump) = reader.jump_if_eq_i64();
                     let value = self.exe.chunk.read::<i64, _>(self.ip + 8);
-                    if call_stack.read_register(&registers, test, &lock).unwrap_int() == value {
+                    if call_stack
+                        .read_register(&registers, test, &lock)
+                        .unwrap_int()
+                        == value
+                    {
                         self.relative_jump(jump)
                     } else {
                         self.ip_inc_8bytes();
@@ -452,6 +464,72 @@ where
                     let (to, value) = reader.bool();
                     call_stack.write_register(&mut registers, to, ValueSafe::Bool(value));
                     self.ip_inc_8bytes();
+                }
+                ADD_TO_ENV1 => {
+                    let (to, args) = reader.add_to_env1();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
+                }
+                ADD_TO_ENV2 => {
+                    let (to, args) = reader.add_to_env2();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
+                }
+                ADD_TO_ENV3 => {
+                    let (to, args) = reader.add_to_env3();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
+                }
+                ADD_TO_ENV4 => {
+                    let (to, args) = reader.add_to_env4();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
+                }
+                ADD_TO_ENV5 => {
+                    let (to, args) = reader.add_to_env5();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
+                }
+                ADD_TO_ENV6 => {
+                    let (to, args) = reader.add_to_env6();
+                    self.do_add_to_env(
+                        &mut call_stack,
+                        &mut registers,
+                        to,
+                        args,
+                        &mut pool,
+                        &lock,
+                    )?;
                 }
                 PUSH1 => {
                     let (to, args) = reader.push1();
@@ -722,6 +800,31 @@ where
         args.into_iter()
             .for_each(|arg| array.push(call_stack.read_register(registers, arg, lock)));
         self.ip_inc_8bytes();
+    }
+
+    fn do_add_to_env<'p, const N: usize>(
+        &mut self,
+        call_stack: &mut CallStack,
+        registers: &mut mem::ValueVec,
+        to: RegisterId,
+        args: [RegisterId; N],
+        pool: &mut mem::GcPool,
+        lock: &'p mem::Lock,
+    ) -> Result<(), errors::RunTimeError> {
+        let callable = call_stack
+            .read_register(&registers, to, lock)
+            .unwrap_obj()
+            .cast::<mem::ObjCallable>();
+        callable
+            .push_env_in_place(
+                args.into_iter()
+                    .map(|arg| call_stack.read_register(&registers, arg, lock)),
+                pool,
+                lock,
+            )
+            .map_err(|_| errors::RunTimeError::OutOfMemory {})?;
+        self.ip_inc_8bytes();
+        Ok(())
     }
 
     fn do_tail_call_local<'p, const N: usize>(

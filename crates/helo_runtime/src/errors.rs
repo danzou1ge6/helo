@@ -14,4 +14,6 @@ pub enum RunTimeError {
     IntExponentOutOfRange(i64),
     #[error("Exponent Out of Range: Should be a i32, got {}", .0)]
     FloatExponentOutOfRange(i64),
+    #[error("Called `string_head` or `string_tail` on an empty string")]
+    EmptyString,
 }

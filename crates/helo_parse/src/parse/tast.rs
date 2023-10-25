@@ -7,7 +7,7 @@ pub struct CaseArm<'s> {
     pub result: Expr<'s>,
 }
 
-pub use ast::{Constant, Meta};
+pub use ast::Meta;
 
 #[derive(Clone, Debug)]
 pub enum Pattern<'s> {
@@ -33,6 +33,15 @@ impl<'s> Expr<'s> {
             type_: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Constant<'s> {
+    Int(i64),
+    Float(&'s str),
+    Str(&'s str),
+    Bool(bool),
+    Char(&'s str),
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +70,7 @@ pub enum ExprNode<'s> {
         in_: Box<Expr<'s>>,
     },
     Tuple(Vec<Expr<'s>>),
-    Constant(ast::Constant<'s>),
+    Constant(Constant<'s>),
     Identifier(&'s str),
 }
 

@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
-use super::{objects, GcPool};
+use super::{
+    objects::{self, ObjDebug},
+    GcPool, ObjPointer,
+};
 use objects::{Obj, ObjRef, Pointer};
 
 /// A cheap to copy value in registers.
@@ -70,6 +73,50 @@ impl Value {
             _ => {}
         }
     }
+    pub unsafe fn get_obj(self) -> Option<ObjPointer> {
+        match self {
+            Value::Obj(p) => Some(p),
+            _ => None,
+        }
+    }
+}
+
+impl<'p> ObjDebug for ValueSafe<'p> {
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        visited: &mut std::collections::HashSet<*const u8>,
+    ) -> std::fmt::Result {
+        use ValueSafe::*;
+        match self {
+            Int(i) => write!(f, "{i}"),
+            Float(i) => write!(f, "{i}",),
+            Bool(b) => write!(f, "{b}"),
+            Char(c) => write!(f, "{c}"),
+            Obj(obj) => {
+                if !visited.contains(&obj.addr()) {
+                    visited.insert(obj.addr());
+                    write!(f, "{:?}{:?}", obj.addr(), obj.as_ref())?;
+                } else {
+                    write!(f, "{:?}", obj.addr())?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+pub fn value_debug_fmt_list<'p>(
+    list: impl Iterator<Item = ValueSafe<'p>>,
+    f: &mut std::fmt::Formatter<'_>,
+    visited: &mut std::collections::HashSet<*const u8>,
+) -> std::fmt::Result {
+    write!(f, "[")?;
+    for v in list {
+        v.debug_fmt(f, visited)?;
+        write!(f, ", ")?;
+    }
+    write!(f, "]")
 }
 
 impl<'p> ValueSafe<'p> {

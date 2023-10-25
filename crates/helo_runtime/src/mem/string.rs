@@ -1,8 +1,9 @@
-use super::objects::{Gc, Obj, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
+use super::objects::{Gc, Obj, ObjDebug, ObjPointer, ObjectKind, Pointer, Ref, StaticObjKind};
 use super::{GcPool, Lock};
 
 use core::ptr;
 use std::alloc;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 pub struct ObjString {
@@ -43,10 +44,20 @@ impl StaticObjKind for ObjString {
 
 impl std::fmt::Debug for ObjString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.debug_fmt(f, &mut HashSet::new())
+    }
+}
+
+impl ObjDebug for ObjString {
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        _visited: &mut std::collections::HashSet<*const u8>,
+    ) -> std::fmt::Result {
         write!(f, "\"")?;
         f.write_str(&self.v)?;
         if let Some(next) = self.next {
-            unsafe { next.as_ref().fmt(f) }?;
+            unsafe { next.as_ref().debug_fmt(f, _visited) }?;
         } else {
             Ok(())?;
         }
@@ -160,6 +171,9 @@ impl Pointer<ObjString> {
     pub unsafe fn head(self) -> Option<char> {
         self.as_ref().v.chars().next()
     }
+    pub unsafe fn non_empty(self) -> bool {
+        !self.as_ref().v.is_empty()
+    }
     pub unsafe fn tail(self, pool: &mut GcPool, lock: &Lock) -> Option<Pointer<ObjString>> {
         let mut new_head = Pointer::from_ref(pool.allocate_string_empty(lock).unwrap());
         if self.as_ref().v.len() != 0 {
@@ -237,6 +251,9 @@ impl<'p> Ref<'p, ObjString> {
                 .concat(Pointer::from_ref(rhs), pool, lock)
                 .map(|p| p.to_ref(PhantomData))
         }
+    }
+    pub fn non_empty(self) -> bool {
+        unsafe { Pointer::from_ref(self).non_empty() }
     }
     pub fn head(self) -> Option<char> {
         unsafe { Pointer::from_ref(self).head() }

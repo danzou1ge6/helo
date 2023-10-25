@@ -224,6 +224,7 @@ fn lower_instruction(
         Str(to, v) => lower_str(*to, *v, str_index, chunk),
         Char(to, v) => lower_char(*to, *v, chunk),
         Push(to, from, args) => lower_push(*to, *from, &args, chunk),
+        AddToEnv(to, from, args) => lower_add_to_env(*to, *from, &args, chunk, functions),
         Function(to, fid) => lower_function_inst(*to, *fid, chunk, functions),
         Buitltin(to, bid) => lower_builtin(*to, *bid, chunk),
         Field(to, from, n) => lower_field(*to, *from, *n, chunk),
@@ -542,7 +543,6 @@ fn lower_float(to: lir::TempId, value: f64, chunk: &mut byte_code::Chunk) {
 
 fn lower_char(to: lir::TempId, value: char, chunk: &mut byte_code::Chunk) {
     Instruction::Char(to.register(), value).emit(chunk);
-    chunk.writer().push(value).finish();
 }
 
 fn lower_bool(to: lir::TempId, value: bool, chunk: &mut byte_code::Chunk) {
@@ -556,6 +556,41 @@ fn lower_str(
     chunk: &mut byte_code::Chunk,
 ) {
     Instruction::Str(to.register(), str_index[value]).emit(chunk);
+}
+
+fn lower_add_to_env(
+    to: lir::TempId,
+    from: lir::TempId,
+    mut args: &[lir::TempId],
+    chunk: &mut byte_code::Chunk,
+    _functions: &mut FunctionRelocations,
+) {
+    let to = to.register();
+    let from = from.register();
+
+    while args.len() > 6 {
+        Instruction::AddToEnv6(
+            from,
+            collect_to_array(args[0..6].iter().map(|a| a.register())),
+        )
+        .emit(chunk);
+        args = &args[6..]
+    }
+
+    let args = args.iter().map(|a| a.register());
+    let inst = match args.len() {
+        0 => return,
+        1 => Instruction::AddToEnv1(from, collect_to_array(args)),
+        2 => Instruction::AddToEnv2(from, collect_to_array(args)),
+        3 => Instruction::AddToEnv3(from, collect_to_array(args)),
+        4 => Instruction::AddToEnv4(from, collect_to_array(args)),
+        5 => Instruction::AddToEnv5(from, collect_to_array(args)),
+        6 => Instruction::AddToEnv6(from, collect_to_array(args)),
+        _ => unreachable!(),
+    };
+
+    inst.emit(chunk);
+    Instruction::Mov(from, to).emit(chunk);
 }
 
 fn lower_push(

@@ -68,6 +68,28 @@ fn lower_function<'s>(
     ast_f
 }
 
+fn lower_constant<'s>(
+    c: &tast::Constant<'s>,
+    meta: &Meta,
+    e: &mut errors::ManyError,
+) -> ast::Constant<'s> {
+    use ast::Constant::*;
+    use tast::Constant;
+    match c {
+        Constant::Bool(b) => Bool(*b),
+        Constant::Char(c) => match c.chars().next() {
+            Some(ch) if c.len() == ch.len_utf8() => Char(ch),
+            _ => {
+                e.push(errors::NotAChar::new(meta));
+                Char('\0')
+            }
+        },
+        Constant::Float(f) => Float(*f),
+        Constant::Int(i) => Int(*i),
+        Constant::Str(s) => Str(*s),
+    }
+}
+
 fn lower_expr<'s>(
     expr: tast::Expr<'s>,
     resolver: &mut Resolver<'s>,
@@ -94,7 +116,11 @@ fn lower_expr<'s>(
         ),
         Tuple(args) => lower_tuple(args, expr.meta, expr.type_, resolver, symbols, ast_heap, e),
         Constant(c) => {
-            let expr = ast::Expr::new(ast::ExprNode::Constant(c), expr.meta, expr.type_);
+            let expr = ast::Expr::new(
+                ast::ExprNode::Constant(lower_constant(&c, &expr.meta, e)),
+                expr.meta,
+                expr.type_,
+            );
             ast_heap.push(expr)
         }
         Identifier(id) => {
@@ -146,21 +172,25 @@ fn lower_if_else<'s>(
     ))
 }
 
-fn lower_pattern<'s>(pat: tast::Pattern<'s>, resolver: &mut Resolver<'s>) -> ast::Pattern<'s> {
+fn lower_pattern<'s>(
+    pat: tast::Pattern<'s>,
+    resolver: &mut Resolver<'s>,
+    e: &mut errors::ManyError,
+) -> ast::Pattern<'s> {
     use tast::Pattern::*;
     match pat {
         Construct(template, args, meta) => ast::Pattern::Construct(
             &template,
             args.into_iter()
-                .map(|p| lower_pattern(p, resolver))
+                .map(|p| lower_pattern(p, resolver, e))
                 .collect(),
             meta,
         ),
         Bind(id, meta) => ast::Pattern::Bind(resolver.define_local(id), meta),
-        Literal(constant, meta) => ast::Pattern::Literal(constant.clone(), meta),
+        Literal(constant, meta) => ast::Pattern::Literal(lower_constant(&constant, &meta, e), meta),
         Tuple(args, meta) => ast::Pattern::Tuple(
             args.into_iter()
-                .map(|p| lower_pattern(p, resolver))
+                .map(|p| lower_pattern(p, resolver, e))
                 .collect(),
             meta,
         ),
@@ -180,7 +210,7 @@ fn lower_let_pat<'s>(
 ) -> ast::ExprId {
     let value = lower_expr(value, resolver, symbols, ast_heap, e);
     resolver.with_scope(|resolver| {
-        let pat = lower_pattern(pat, resolver);
+        let pat = lower_pattern(pat, resolver, e);
         let in_ = lower_expr(in_, resolver, symbols, ast_heap, e);
         ast_heap.push(ast::Expr::new(
             ast::ExprNode::LetPatIn {
@@ -209,7 +239,7 @@ fn lower_case_of<'s>(
         .into_iter()
         .map(|arm| {
             resolver.with_scope(|resolver| {
-                let pat = lower_pattern(arm.pattern, resolver);
+                let pat = lower_pattern(arm.pattern, resolver, e);
                 let guard = arm
                     .guard
                     .map(|g| lower_expr(g, resolver, symbols, ast_heap, e));

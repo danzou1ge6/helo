@@ -5,12 +5,6 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "helo_infer_type"
-required-features = ["fancy_miette"]
-
-[features]
-fancy_miette = ["miette/fancy"]
 
 [dependencies]
 miette = "5.10"

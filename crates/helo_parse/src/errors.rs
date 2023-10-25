@@ -10,7 +10,7 @@ pub struct ParseError {
     pub src: NamedSource,
     #[label("Here {}", context)]
     pub span: SourceSpan,
-    pub context: String
+    pub context: String,
 }
 
 impl ParseError {
@@ -25,7 +25,30 @@ impl ParseError {
             }
             offset = src_len - input.len();
         }
-        Self { src, span: (offset, 1).into(), context }
+        Self {
+            src,
+            span: (offset, 1).into(),
+            context,
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("This is not a char")]
+#[diagnostic()]
+pub struct NotAChar {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Char literal expression here")]
+    pub span: SourceSpan,
+}
+
+impl NotAChar {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
     }
 }
 

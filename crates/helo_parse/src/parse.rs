@@ -111,7 +111,7 @@ fn infix_alphabetic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
         let (s1, _) = nbyte::tag("`")(s)?;
         let (s2, id_mid) = alphabetic_identifier_str_a(s1)?;
         let (s3, _) = nbyte::tag("`")(s2)?;
-        Ok((s3, &s[0..id_mid.len() + 2]))
+        Ok((s3, &s1[0..id_mid.len()]))
     };
     nom_context("infix alphabetic identifier", parse)(s)
 }
@@ -151,7 +151,7 @@ fn num_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     Ok((s1, tast::Expr::new_untyped(tast::ExprNode::Constant(c), m)))
 }
 
-fn num_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, ast::Constant<'s>> {
+fn num_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
         let (s1, d1): (_, &str) = nchar::digit1(s)?;
         let (s2, d2) = ncomb::opt(nseq::preceded(nbyte::tag("."), nchar::digit1))(s1)?;
@@ -159,14 +159,14 @@ fn num_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, ast::Constant<'s>>
             Ok((
                 s2,
                 (
-                    ast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
+                    tast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
                     ctx.meta(s, s2),
                 ),
             ))
         } else {
             Ok((
                 s2,
-                (ast::Constant::Int(d1.parse().unwrap()), ctx.meta(s, s2)),
+                (tast::Constant::Int(d1.parse().unwrap()), ctx.meta(s, s2)),
             ))
         }
     };
@@ -179,12 +179,29 @@ fn string_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     Ok((s1, tast::Expr::new_untyped(tast::ExprNode::Constant(c), m)))
 }
 
-fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, ast::Constant<'s>> {
+fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
+    let parse = |s| {
+        let (s1, _) = nbyte::tag("'")(s)?;
+        let (s2, string) = nbyte::take_until("'")(s1)?;
+        let (s3, _) = nbyte::tag("'")(s2)?;
+        let (s3, _) = empty(s3)?;
+        Ok((
+            s3,
+            tast::Expr::new_untyped(
+                tast::ExprNode::Constant(tast::Constant::Char(string)),
+                ctx.meta(s, s3),
+            ),
+        ))
+    };
+    nom_context("char literal", parse)(s)
+}
+
+fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
         let (s1, _) = nbyte::tag("\"")(s)?;
         let (s2, string) = nbyte::take_until("\"")(s1)?;
         let (s3, _) = nbyte::tag("\"")(s2)?;
-        Ok((s3, (ast::Constant::Str(string), ctx.meta(s, s3))))
+        Ok((s3, (tast::Constant::Str(string), ctx.meta(s, s3))))
     };
     nom_context("string literal", parse)(s)
 }
@@ -735,11 +752,12 @@ fn identifier_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
 
 fn expression_item<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     nom_context(
-        "identifier, number literal or string literal",
+        "identifier, number literal, char literal or string literal",
         nbr::alt((
             |s| identifier_expr(s, ctx),
             |s| num_literal_expr(s, ctx),
             |s| string_literal_expr(s, ctx),
+            |s| char_literal_expr(s, ctx)
         )),
     )(s)
 }

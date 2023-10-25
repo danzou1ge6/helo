@@ -336,15 +336,13 @@ pub fn construct_ssa(
     ) {
         let mut new_temp = || TempId::new(temp_cnt);
 
+        let mut rename_stack_pops = Vec::new();
+
         let mut push_new_rename = |original_temp: TempId, stack: &mut TempIdVec<Vec<TempId>>| {
-            if stack[original_temp].len() == 0 {
-                stack[original_temp].push(original_temp);
-                original_temp
-            } else {
-                let new = new_temp();
-                stack[original_temp].push(new);
-                new
-            }
+            rename_stack_pops.push(original_temp);
+            let new = new_temp();
+            stack[original_temp].push(new);
+            new
         };
 
         for Phi(to, _) in ssa_blocks[block].phis.iter_mut() {
@@ -389,7 +387,7 @@ pub fn construct_ssa(
             );
         }
 
-        for def in block_defs[block].iter().copied() {
+        for def in rename_stack_pops {
             rename_stacks[def].pop().unwrap();
         }
     }

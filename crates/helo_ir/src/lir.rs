@@ -87,6 +87,9 @@ pub enum Instruction {
     /// Different from `Apply`, this instruction also implies that .1 is actually he executing closure.
     /// This information is useful for tail recursion optimization
     CallThisClosure(TempId, TempId, Vec<TempId>),
+    /// Push values at .2 to .1. Unlike [`Apply`], this instruction loads a function and then mutates its environment.
+    /// This makes recursive closure possible.
+    AddToEnv(TempId, TempId, Vec<TempId>),
     /// Load immediate to register .0
     Int(TempId, i64),
     Float(TempId, String),
@@ -212,6 +215,7 @@ impl Instruction {
             | Function(_, _)
             | Buitltin(_, _)
             | Field(_, _, _)
+            | AddToEnv(_, _, _)
             | Tagged(_, _, _)
             | Mov(_, _) => true,
         }
@@ -222,13 +226,19 @@ impl Instruction {
             Call(out, _, _)
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
-            | CallBuiltin(out, _, _) => *out,
-            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) | Char(out, _) => *out,
-            Push(out, _, _) => *out,
-            Function(out, _) | Buitltin(out, _) => *out,
-            Field(out, _, _) => *out,
-            Tagged(out, _, _) => *out,
-            Mov(out, _) => *out,
+            | CallBuiltin(out, _, _)
+            | Int(out, _)
+            | Float(out, _)
+            | Bool(out, _)
+            | Str(out, _)
+            | Char(out, _)
+            | AddToEnv(out, _, _)
+            | Push(out, _, _)
+            | Function(out, _)
+            | Buitltin(out, _)
+            | Field(out, _, _)
+            | Tagged(out, _, _)
+            | Mov(out, _) => *out,
         }
     }
     pub fn def_mut(&mut self) -> &mut TempId {
@@ -237,13 +247,19 @@ impl Instruction {
             Call(out, _, _)
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
-            | CallBuiltin(out, _, _) => out,
-            Int(out, _) | Float(out, _) | Bool(out, _) | Str(out, _) | Char(out, _) => out,
-            Push(out, _, _) => out,
-            Function(out, _) | Buitltin(out, _) => out,
-            Field(out, _, _) => out,
-            Tagged(out, _, _) => out,
-            Mov(out, _) => out,
+            | CallBuiltin(out, _, _)
+            | Int(out, _)
+            | Float(out, _)
+            | Bool(out, _)
+            | Str(out, _)
+            | Char(out, _)
+            | AddToEnv(out, _, _)
+            | Push(out, _, _)
+            | Function(out, _)
+            | Buitltin(out, _)
+            | Field(out, _, _)
+            | Tagged(out, _, _)
+            | Mov(out, _) => out,
         }
     }
     pub fn uses<'a>(&'a self) -> Box<dyn Iterator<Item = TempId> + 'a> {
@@ -256,7 +272,10 @@ impl Instruction {
             | Function(_, _)
             | Buitltin(_, _)
             | Char(_, _) => Box::new([].into_iter()),
-            Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
+            Apply(_, a, args)
+            | Push(_, a, args)
+            | CallThisClosure(_, a, args)
+            | AddToEnv(_, a, args) => {
                 Box::new([a].into_iter().copied().chain(args.iter().copied()))
             }
             Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
@@ -275,9 +294,10 @@ impl Instruction {
             | Function(_, _)
             | Buitltin(_, _)
             | Char(_, _) => Box::new([].into_iter()),
-            Apply(_, a, args) | Push(_, a, args) | CallThisClosure(_, a, args) => {
-                Box::new([a].into_iter().chain(args.iter_mut()))
-            }
+            Apply(_, a, args)
+            | Push(_, a, args)
+            | CallThisClosure(_, a, args)
+            | AddToEnv(_, a, args) => Box::new([a].into_iter().chain(args.iter_mut())),
             Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
                 Box::new(args.iter_mut())
             }

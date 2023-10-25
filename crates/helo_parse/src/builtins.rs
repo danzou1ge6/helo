@@ -4,11 +4,12 @@ use crate::parse;
 use std::sync::Arc;
 
 const BUILTIN_SIGS: &'static str = r#"
-    fn +  a,b : [Int, Int] -> Int = ..
-    fn -  a,b : [Int, Int] -> Int = ..
-    fn *  a,b : [Int, Int] -> Int = ..
-    fn ** a,b : [Int, Int] -> Int = ..
-    fn /  a,b : [Int, Int] -> Int = ..
+    fn +   a,b : [Int, Int] -> Int = ..
+    fn -   a,b : [Int, Int] -> Int = ..
+    fn *   a,b : [Int, Int] -> Int = ..
+    fn **  a,b : [Int, Int] -> Int = ..
+    fn /   a,b : [Int, Int] -> Int = ..
+    fn mod a,b : [Int, Int] -> Int = ..
 
     fn == a,b : [Int, Int] -> Bool = ..
     fn /= a,b : [Int, Int] -> Bool = ..
@@ -17,8 +18,6 @@ const BUILTIN_SIGS: &'static str = r#"
     fn >  a,b : [Int, Int] -> Bool = ..
     fn <  a,b : [Int, Int] -> Bool = ..
 
-    fn int_to_float a : [Int] -> Float  = ..
-
     fn +.   a,b : [Float, Float] -> Float = ..
     fn -.   a,b : [Float, Float] -> Float = ..
     fn *.   a,b : [Float, Float] -> Float = ..
@@ -26,18 +25,35 @@ const BUILTIN_SIGS: &'static str = r#"
     fn **.. a,b : [Float, Float] -> Float = ..
     fn /.   a,b : [Float, Float] -> Float = ..
 
+    fn =.   a,b : [Float, Float] -> Bool = ..
+    fn /=.  a,b : [Float, Float] -> Bool = ..
+    fn <=.  a,b : [Float, Float] -> Bool = ..
+    fn >=.  a,b : [Float, Float] -> Bool = ..
+    fn >.   a,b : [Float, Float] -> Bool = ..
+    fn <.   a,b : [Float, Float] -> Bool = ..
+
+    fn int_to_float a : [Int] -> Float   = ..
+    fn floor_float  a : [Float] -> Int   = ..
+    fn ceil_float   a : [Float] -> Int   = ..
+    fn round_float  a : [Float] -> Int   = ..
+
+    fn int_to_str   a     : [Int] -> Str      = ..
+    fn float_to_str a     : [Float] -> Str    = ..
+    fn bool_to_str  a     : [Bool] -> Str     = ..
+    fn char_to_str  a     : [Char] -> Str     = ..
+
     fn and a,b : [Bool, Bool] -> Bool = ..
     fn or  a,b : [Bool, Bool] -> Bool = ..
     fn not a   : [Bool] -> Bool       = ..
 
-    fn str_cat      a,b   : [Str, Str] -> Str = ..
-    fn str_head     a     : [Str] -> Char     = ..
-    fn str_tail     a     : [Str] -> Str      = ..
+    fn char_eq      a,b   : [Char, Char] -> Bool = ..
 
-    fn int_to_str   a     : [Int] -> Str      = ..
-    fn bool_to_str  a     : [Bool] -> Str     = ..
-    fn char_to_str  a     : [Char] -> Str     = ..
-    fn float_to_str a     : [Float] -> Str    = ..
+    fn str_cat      a,b   : [Str, Str] -> Str  = ..
+    fn str_some     a     : [Str] -> Bool      = ..
+    fn str_len      a     : [Str] -> Int       = ..
+    fn str_eq       a,b   : [Str, Str] -> Bool = ..
+    fn str_head     a     : [Str] -> Char      = ..
+    fn str_tail     a     : [Str] -> Str       = ..
 "#;
 
 const PRECEDENCE_DEF: &'static str = r#"
@@ -66,8 +82,8 @@ const PRECEDENCE_DEF: &'static str = r#"
     infix /.   51 50
 
     infix `str_cat` 41 40
-
-
+    infix `str_eq` 31 30
+    infix `char_eq` 31 30
 "#;
 
 const DATA_DEF: &'static str = r#"
@@ -80,7 +96,6 @@ const DATA_DEF: &'static str = r#"
     data List['a] = Con 'a, List['a] 
                   | Nil
 
-    data Pair['a, 'b] = Pair 'a, 'b
 "#;
 
 pub fn add_builtins_to<'s>(

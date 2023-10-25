@@ -9,6 +9,9 @@ edition = "2021"
 name = "helo_compile_ir"
 required-features = ["pretty_print"]
 
+[[bin]]
+name = "helo_infer_type"
+required-features = ["pretty_print"]
 
 [features]
 default = ["pretty_print"]

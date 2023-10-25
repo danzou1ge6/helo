@@ -3,7 +3,7 @@ use super::{
 };
 
 use core::ptr;
-use std::{alloc, marker::PhantomData, ptr::NonNull};
+use std::{alloc, marker::PhantomData,  collections::HashSet};
 
 pub struct Pointer<T>(pub(super) ptr::NonNull<T>)
 where
@@ -106,6 +106,9 @@ where
     pub unsafe fn as_mut(&mut self) -> &mut T {
         self.0.as_mut()
     }
+    pub fn addr(self) -> *const u8 {
+        self.0.as_ptr() as *const u8
+    }
 }
 
 impl<'p, T> Ref<'p, T>
@@ -124,8 +127,8 @@ where
     pub fn as_mut(&mut self) -> &mut T {
         unsafe { self.p.as_mut() }
     }
-    pub fn addr(&self) -> NonNull<T> {
-        self.p
+    pub fn addr(&self) -> *const u8 {
+        self.p.as_ptr() as *const u8
     }
 }
 
@@ -227,8 +230,15 @@ pub trait Gc {
 }
 
 /// Describes an object in the VM
-pub trait Obj: Gc + std::fmt::Debug {
+pub trait Obj: Gc + ObjDebug + std::fmt::Debug {
     fn kind(&self) -> ObjectKind;
+}
+
+
+/// Special formating trait for Vm objects. `debug_fmt` requires a set of already formatted
+/// objects to prevent endless recursion
+pub trait ObjDebug {
+    fn debug_fmt(&self, f: &mut std::fmt::Formatter<'_>, visited: &mut HashSet<*const u8>) -> std::fmt::Result;
 }
 
 /// Used for dynamic checked cast
@@ -327,6 +337,7 @@ impl GcPool {
             self.push(ptr.env().cast_obj_pointer());
         }
         self.memory_usage += std::mem::size_of::<ObjCallable>();
+        self.memory_usage += std::mem::size_of::<ObjList>();
         Ok(Ref {
             p: ptr.0,
             _m: PhantomData,
@@ -378,7 +389,7 @@ impl GcPool {
                     self.memory_usage -= first.size();
 
                     #[cfg(feature = "debug_gc")]
-                    println!("Deallocated [{:?}] {:?}", first.0, first.as_ref());
+                    println!("Deallocated [{:?}]", first.0);
 
                     first.deallocate();
                     self.first = new_first;
@@ -396,7 +407,7 @@ impl GcPool {
                         self.memory_usage -= p_next.size();
 
                         #[cfg(feature = "debug_gc")]
-                        println!("Deallocated [{:?}] {:?}", p_next.0, p_next.as_ref());
+                        println!("Deallocated [{:?}]", p_next.0);
 
                         p_next.deallocate();
                         p.set_next_obj(new_next);
@@ -441,7 +452,7 @@ impl GcPool {
         #[cfg(feature = "debug_gc")]
         {
             println!("--- GC CLEAR ---");
-            println!("{:#?}", self);
+            println!("Objects {:#?}", self);
         }
 
         while let Some(obj) = self.first {

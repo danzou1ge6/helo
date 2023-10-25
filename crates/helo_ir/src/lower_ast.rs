@@ -47,7 +47,7 @@ pub fn lower_function<'s>(
         let body = lower_expr(f.body, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
         ir::Function {
             local_cnt: lower_ctx.local_cnt,
-            arity: f.type_.params.len(),
+            arity: f.type_.params.len() + f.type_.captures.len(),
             body,
             meta: f.meta.clone(),
             name: f_name_id,

@@ -793,9 +793,8 @@ fn lower_make_closure<'s>(
         .collect();
 
     use lir::Instruction::*;
-    let f_temp = compiler.new_temp();
-    blocks[block].push(Function(f_temp, lir_fid));
-    blocks[block].push(Apply(to, f_temp, temps));
+    blocks[block].push(Function(to, lir_fid));
+    blocks[block].push(AddToEnv(to, to, temps));
     block
 }
 

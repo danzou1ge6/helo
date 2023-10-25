@@ -131,7 +131,7 @@ where
         IfElse { test, then, else_ } => allocator
             .text("IF ")
             .append(pretty_ir(*test, nodes, str_list, allocator))
-            .append(allocator.softline())
+            .append(allocator.hardline())
             .append("THEN")
             .append(
                 allocator
@@ -139,7 +139,7 @@ where
                     .append(pretty_ir(*then, nodes, str_list, allocator))
                     .indent(2),
             )
-            .append(allocator.softline())
+            .append(allocator.hardline())
             .append("ELSE")
             .append(
                 allocator
@@ -279,7 +279,10 @@ where
             let s = str_list.get(*value);
             allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, s))
         }
-        Char(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
+        Char(ret, value) => allocator.text(format!("x{:<3} <- '{}'", ret, value)),
+        AddToEnv(to, fid, args) => allocator.text(format!("x{:<3} <- ADD_TO_ENV f{} ", to, fid)).append(
+            allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+        ),
         Push(to, operand, args) => allocator
             .text(format!("x{:<3} <- PUSH x{} ", to, operand))
             .append(

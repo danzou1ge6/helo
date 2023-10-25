@@ -1,7 +1,10 @@
-fn filter predicate,xs =
-    case xs of Con y,ys if predicate y -> Con y,(filter predicate,ys)
-             | Con y,ys                -> filter predicate,ys
-             | Nil                     -> Nil
-fn main =
-    let list = Con 5,(Con 4,(Con 3,(Con 2,(Con 1,Nil)))) in
-    filter (< 1),list
+fn count_a s =
+    let fn cnt s,n =
+        if str_some s
+        then if (str_head s) `char_eq` 'a'
+             then cnt (str_tail s),(n + 1)
+             else cnt (str_tail s),n
+        else n
+    in cnt s,0
+
+fn main = count_a "ababc"

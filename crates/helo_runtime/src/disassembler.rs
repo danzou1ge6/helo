@@ -118,7 +118,7 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_tail_call {
+        macro_rules! arm_tail_call_local {
             ($f:ident, $rows:ident) => {{
                 let (callee, args) = reader.$f();
                 $rows.push(mk_row1(
@@ -127,7 +127,7 @@ impl<'c> Iterator for RowIter<'c> {
                 ));
             }};
         }
-        macro_rules! arm_tail_call_u {
+        macro_rules! arm_tail_call {
             ($f:ident, $rows:ident) => {{
                 let (callee, args) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
@@ -179,7 +179,7 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_tail_call_many {
+        macro_rules! arm_tail_call_local_many {
             ($f:ident, $rows:ident) => {{
                 let (callee, cnt) = reader.$f();
                 let registers = self
@@ -195,7 +195,7 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_call_many {
+        macro_rules! arm_call_local_many {
             ($f:ident, $rows:ident) => {{
                 let (ret, callee, cnt) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
@@ -213,7 +213,7 @@ impl<'c> Iterator for RowIter<'c> {
             }};
         }
 
-        macro_rules! arm_tail_call_u_many {
+        macro_rules! arm_tail_call_many {
             ($f:ident, $rows:ident) => {{
                 let (callee, cnt) = reader.$f();
                 let name = self.exe.str_chunk.read(self.exe.symbols.find(callee));
@@ -233,6 +233,16 @@ impl<'c> Iterator for RowIter<'c> {
         }
 
         macro_rules! arm_push {
+            ($f:ident, $rows:ident) => {{
+                let (to, args) = reader.$f();
+                $rows.push(mk_row1(
+                    format!("{}, {}", to, RegisterArray::from(args)),
+                    es(),
+                ));
+            }};
+        }
+
+        macro_rules! arm_add_to_env {
             ($f:ident, $rows:ident) => {{
                 let (to, args) = reader.$f();
                 $rows.push(mk_row1(
@@ -318,18 +328,18 @@ impl<'c> Iterator for RowIter<'c> {
             APPLY_MANY => arm_apply_many!(apply_many, rows),
             CALL1 => arm_call!(call1, rows),
             CALL2 => arm_call!(call2, rows),
-            CALL_MANY => arm_call_many!(call_many, rows),
-            TAIL_CALL1 => arm_tail_call_u!(tail_call1, rows),
-            TAIL_CALL2 => arm_tail_call_u!(tail_call2, rows),
-            TAIL_CALL3 => arm_tail_call_u!(tail_call3, rows),
-            TAIL_CALL_MANY => arm_tail_call_u_many!(tail_call_many, rows),
-            TAIL_CALL_LOCAL1 => arm_tail_call!(tail_call_local1, rows),
-            TAIL_CALL_LOCAL2 => arm_tail_call!(tail_call_local2, rows),
-            TAIL_CALL_LOCAL3 => arm_tail_call!(tail_call_local3, rows),
-            TAIL_CALL_LOCAL4 => arm_tail_call!(tail_call_local4, rows),
-            TAIL_CALL_LOCAL5 => arm_tail_call!(tail_call_local5, rows),
-            TAIL_CALL_LOCAL6 => arm_tail_call!(tail_call_local6, rows),
-            TAIL_CALL_LOCAL_MANY => arm_tail_call_many!(tail_call_many, rows),
+            CALL_MANY => arm_call_local_many!(call_many, rows),
+            TAIL_CALL1 => arm_tail_call!(tail_call1, rows),
+            TAIL_CALL2 => arm_tail_call!(tail_call2, rows),
+            TAIL_CALL3 => arm_tail_call!(tail_call3, rows),
+            TAIL_CALL_MANY => arm_tail_call_many!(tail_call_many, rows),
+            TAIL_CALL_LOCAL1 => arm_tail_call_local!(tail_call_local1, rows),
+            TAIL_CALL_LOCAL2 => arm_tail_call_local!(tail_call_local2, rows),
+            TAIL_CALL_LOCAL3 => arm_tail_call_local!(tail_call_local3, rows),
+            TAIL_CALL_LOCAL4 => arm_tail_call_local!(tail_call_local4, rows),
+            TAIL_CALL_LOCAL5 => arm_tail_call_local!(tail_call_local5, rows),
+            TAIL_CALL_LOCAL6 => arm_tail_call_local!(tail_call_local6, rows),
+            TAIL_CALL_LOCAL_MANY => arm_tail_call_local_many!(tail_call_many, rows),
             CALL_BUILTIN1 => arm_call_builtin!(call_builtin1, rows),
             CALL_BUILTIN2 => arm_call_builtin!(call_builtin2, rows),
             CALL_BUILTIN3 => arm_call_builtin!(call_builtin3, rows),
@@ -365,6 +375,12 @@ impl<'c> Iterator for RowIter<'c> {
                 self.ip += 8;
                 r
             }
+            ADD_TO_ENV1 => arm_add_to_env!(add_to_env1, rows),
+            ADD_TO_ENV2 => arm_add_to_env!(add_to_env2, rows),
+            ADD_TO_ENV3 => arm_add_to_env!(add_to_env3, rows),
+            ADD_TO_ENV4 => arm_add_to_env!(add_to_env4, rows),
+            ADD_TO_ENV5 => arm_add_to_env!(add_to_env5, rows),
+            ADD_TO_ENV6 => arm_add_to_env!(add_to_env6, rows),
             PUSH1 => arm_push!(push1, rows),
             PUSH2 => arm_push!(push2, rows),
             PUSH3 => arm_push!(push3, rows),
