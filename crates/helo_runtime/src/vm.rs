@@ -678,10 +678,20 @@ where
                     self.ip_inc_8bytes();
                 }
                 PANIC => {
-                    let addr = reader.panic();
-                    let msg = self.exe.str_chunk.read(addr);
+                    let msg_addr = reader.panic();
+                    let reader = self.exe.chunk.reader(self.ip + 8);
+                    let (reader, span0) = reader.read::<u32, _>();
+                    let (reader, span1) = reader.read::<u32, _>();
+                    let (_, file_addr) = reader.read::<byte_code::StrAddr, _>();
 
-                    return Err(errors::RunTimeError::Panic(msg.to_string()));
+                    let msg = self.exe.str_chunk.read(msg_addr);
+                    let file = self.exe.str_chunk.read(file_addr);
+
+                    return Err(errors::RunTimeError::Panic {
+                        msg: msg.to_string(),
+                        file: file.to_string(),
+                        span: (span0 as usize, span1 as usize),
+                    });
                 }
                 RET => {
                     let reg = reader.ret();

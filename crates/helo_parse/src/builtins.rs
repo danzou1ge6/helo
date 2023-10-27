@@ -54,6 +54,8 @@ const BUILTIN_SIGS: &'static str = r#"
     fn str_eq       a,b   : [Str, Str] -> Bool = ..
     fn str_head     a     : [Str] -> Char      = ..
     fn str_tail     a     : [Str] -> Str       = ..
+
+    fn panic 'a     msg   : [Str] -> Char        = ..
 "#;
 
 const PRECEDENCE_DEF: &'static str = r#"

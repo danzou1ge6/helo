@@ -4,8 +4,12 @@ use thiserror::Error;
 pub enum RunTimeError {
     #[error("Out of Menory")]
     OutOfMemory,
-    #[error("Program Paniced: {}", .0)]
-    Panic(String),
+    #[error("Program Paniced at {}@{}-{}: {}", .file, .span.0, .span.1, .msg)]
+    Panic {
+        file: String,
+        span: (usize, usize),
+        msg: String,
+    },
     #[error("Bad Op Code in Program: {}", .0)]
     BadOpCode(u8),
     #[error("Zero Division")]

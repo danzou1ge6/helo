@@ -180,7 +180,7 @@ where
             .append(")"),
         Local(local) => allocator.text(local.to_string()),
         UserFunction(f) => allocator.text(f.clone()),
-        Builtin(builtin) => allocator.text(builtin.clone()),
+        Builtin(builtin) => allocator.text(builtin.to_string()),
         VariantField(local, field) | TupleField(local, field) => {
             allocator.text(format!("{}.{}", local, field))
         }
@@ -216,10 +216,21 @@ where
             )
             .append(")"),
         ThisClosure(_) => allocator.text("THIS_CLOSURE"),
-        Panic(msg) => allocator
+        Panic { file, span, msg } => allocator
             .text("(PANIC")
             .append(allocator.softline())
-            .append(allocator.text(str_list.get(*msg).to_string()).indent(2))
+            .append(
+                allocator
+                    .text(str_list.get(*msg).to_string())
+                    .append(allocator.softline())
+                    .append(allocator.text(str_list.get(*file).to_string()))
+                    .append(allocator.softline())
+                    .append(allocator.text(span.0.to_string()))
+                    .append(allocator.softline())
+                    .append(allocator.text(span.1.to_string()))
+                    .align()
+                    .indent(2),
+            )
             .append(allocator.text(")"))
             .align(),
     }
@@ -280,9 +291,11 @@ where
             allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, s))
         }
         Char(ret, value) => allocator.text(format!("x{:<3} <- '{}'", ret, value)),
-        AddToEnv(to, fid, args) => allocator.text(format!("x{:<3} <- ADD_TO_ENV f{} ", to, fid)).append(
-            allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
-        ),
+        AddToEnv(to, fid, args) => allocator
+            .text(format!("x{:<3} <- ADD_TO_ENV f{} ", to, fid))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
         Push(to, operand, args) => allocator
             .text(format!("x{:<3} <- PUSH x{} ", to, operand))
             .append(
@@ -384,9 +397,10 @@ where
                     .indent(4),
             ),
         Jump(to) => allocator.text(format!("JUMP b{}", to)),
-        Panic(value) => {
-            let s = str_list.get(*value);
-            allocator.text(format!("PANIC s{}'{}'", value, s))
+        Panic { file, span, msg } => {
+            let msg = str_list.get(*msg);
+            let file = str_list.get(*file);
+            allocator.text(format!("PANIC '{}'@{}:{}:{}", msg, file, span.0, span.1))
         }
         Ret(t) => allocator.text(format!("RET x{}", t)),
     }

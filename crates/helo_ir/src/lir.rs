@@ -125,7 +125,11 @@ pub enum Jump {
     /// Return from function
     Ret(TempId),
     /// Panic
-    Panic(StrId),
+    Panic {
+        file: ir::StrId,
+        span: (usize, usize),
+        msg: ir::StrId,
+    },
 }
 
 impl Jump {
@@ -152,7 +156,7 @@ impl Jump {
                     .chain([*default].into_iter()),
             ),
             Jump::Jump(to) => Box::new([*to].into_iter()),
-            Jump::Panic(_) | Jump::Ret(_) => Box::new([].into_iter()),
+            Jump::Panic { .. } | Jump::Ret(_) => Box::new([].into_iter()),
         }
     }
     pub fn successors_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut BlockId> + 'a> {
@@ -169,7 +173,7 @@ impl Jump {
                 Box::new(v.iter_mut().map(|(_, to)| to).chain([default].into_iter()))
             }
             Jump::Jump(to) => Box::new([to].into_iter()),
-            Jump::Panic(_) | Jump::Ret(_) => Box::new([].into_iter()),
+            Jump::Panic { .. } | Jump::Ret(_) => Box::new([].into_iter()),
         }
     }
     pub fn uses(&self) -> Option<TempId> {
@@ -181,7 +185,7 @@ impl Jump {
             | JumpSwitchChar(r, _, _)
             | Ret(r)
             | JumpTable(r, _) => Some(*r),
-            Jump(_) | Panic(_) => None,
+            Jump(_) | Panic { .. } => None,
         }
     }
     pub fn use_mut(&mut self) -> Option<&mut TempId> {
@@ -193,7 +197,7 @@ impl Jump {
             | JumpSwitchChar(r, _, _)
             | Ret(r)
             | JumpTable(r, _) => Some(r),
-            Jump(_) | Panic(_) => None,
+            Jump(_) | Panic { .. } => None,
         }
     }
 }
@@ -435,6 +439,9 @@ impl Block {
     }
     pub fn exit(&self) -> &Jump {
         self.exit.as_ref().expect("this block is not sealed yet")
+    }
+    pub fn sealed(&self) -> bool {
+        self.exit.is_some()
     }
 }
 

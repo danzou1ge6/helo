@@ -104,8 +104,28 @@ fn run(exe: &executable::Executable) {
             println!("Return value = {:?}", val);
             pool.clear(&mut lock);
         }
-        Err(e) => println!("{:?}", e),
+        Err(e) => match e {
+            helo_runtime::errors::RunTimeError::Panic { file, span, msg } => {
+                print_panic(file, span, msg);
+            }
+            _ => eprintln!("{:?}", e),
+        },
     }
+}
+
+fn print_panic(file: String, span: (usize, usize), msg: String) {
+    if let Ok(mut file) = fs::File::open(&file) {
+        let mut src = String::new();
+        if let Ok(_) = file.read_to_string(&mut src) {
+            let report = miette::miette!(
+                labels = vec![miette::LabeledSpan::at(span, msg)],
+                "Program Panicked"
+            )
+            .with_source_code(src);
+            println!("{:?}", report);
+        }
+    }
+    println!("");
 }
 
 pub fn main() -> miette::Result<()> {

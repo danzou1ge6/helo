@@ -462,7 +462,7 @@ mod lower_case {
 
         let default = default.unwrap_or_else(|| {
             let r = ir::Expr::new(
-                ir::ExprNode::Panic(str_table.add_str("all conditions failed")),
+                ir::ExprNode::panic(switch_meta, "all conditions failed", str_table),
                 switch_meta.into(),
             );
             ir_nodes.push(r)
@@ -516,7 +516,7 @@ mod lower_case {
         // no row: panic
         if rows.len() == 0 {
             let r = ir::Expr::new(
-                ir::ExprNode::Panic(str_table.add_str("all match failed")),
+                ir::ExprNode::panic(switch_meta, "all cases failed", str_table),
                 switch_meta.into(),
             );
             return ir_nodes.push(r);
@@ -747,6 +747,21 @@ fn lower_call<'s>(
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
+
+    if matches!(&typed_nodes[callee].node, typed::ExprNode::Builtin("panic")) {
+        match &typed_nodes[args[0]].node {
+            typed::ExprNode::Constant(c) => {
+                match c {
+                    ast::Constant::Str(msg) => {
+                        return lower_panic(*&msg, call_meta, ir_nodes, str_table);
+                    },
+                    _ => unreachable!()
+                }
+            },
+            _ => unreachable!()
+        };
+    } 
+
     let args: Vec<_> = args
         .iter()
         .map(|arg| lower_expr(*arg, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
@@ -766,13 +781,23 @@ fn lower_call<'s>(
     ir_nodes.push(expr)
 }
 
+fn lower_panic<'s>(
+    msg: &str,
+    panic_meta: &ast::Meta,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+) -> ir::ExprId {
+    let expr = ir::Expr::new(ir::ExprNode::panic_string(panic_meta, msg.to_string(), str_table), panic_meta.into());
+    ir_nodes.push(expr)
+}
+
 fn lower_builtin<'s>(
     name: &'s str,
     builtin_meta: &ast::Meta,
-    ir_nodes: &mut ir::ExprHeap,
+    ir_nodes: &mut ir::ExprHeap<'s>,
 ) -> ir::ExprId {
     ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::Builtin(name.to_string()),
+        ir::ExprNode::Builtin(name),
         builtin_meta.into(),
     ))
 }

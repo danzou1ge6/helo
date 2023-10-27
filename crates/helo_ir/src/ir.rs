@@ -201,12 +201,33 @@ pub enum ExprNode<'s> {
     /// Indiacates that at .0 lies the closure being called. Distinguishes from [`ExprNode::Local`] for tail call optimization
     ThisClosure(LocalId),
     UserFunction(FunctionId),
-    Builtin(FunctionId),
+    Builtin(&'s str),
     VariantField(LocalId, usize),
     TupleField(LocalId, usize),
     MakeTuple(Vec<ExprId>),
     MakeTagged(Tag<'s>, Vec<ExprId>),
-    Panic(StrId),
+    Panic {
+        file: StrId,
+        span: (usize, usize),
+        msg: StrId,
+    },
+}
+
+impl<'s> ExprNode<'s> {
+    pub fn panic(meta: &ast::Meta, msg: &'static str, str_table: &mut StrTable) -> Self {
+        Self::Panic {
+            file: str_table.add(meta.file_name.to_string()),
+            msg: str_table.add_str(msg),
+            span: meta.span,
+        }
+    }
+    pub fn panic_string(meta: &ast::Meta, msg: String, str_table: &mut StrTable) -> Self {
+        Self::Panic {
+            file: str_table.add(meta.file_name.to_string()),
+            msg: str_table.add(msg),
+            span: meta.span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

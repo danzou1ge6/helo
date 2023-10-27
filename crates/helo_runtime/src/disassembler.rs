@@ -1,4 +1,5 @@
 use crate::builtins;
+use crate::byte_code::StrAddr;
 use crate::{byte_code, executable};
 
 use tabled::{Table, Tabled};
@@ -419,9 +420,20 @@ impl<'c> Iterator for RowIter<'c> {
                 rows.push(mk_row1(r.to_string(), es()))
             }
             PANIC => {
-                let addr = reader.panic();
-                let s = trunc_str(self.exe.str_chunk.read(addr));
-                rows.push(mk_row1(addr.to_string(), s.to_string()))
+                let msg_addr = reader.panic();
+                let reader = self.exe.chunk.reader(self.ip + 8);
+                let (reader, span0) = reader.read::<u32, _>();
+                let (reader, span1) = reader.read::<u32, _>();
+                let (_, file_addr) = reader.read::<StrAddr, _>();
+
+                let msg = trunc_str(self.exe.str_chunk.read(msg_addr));
+                let file = trunc_str(self.exe.str_chunk.read(file_addr));
+                rows.push(mk_row1(
+                    format!("{}@{}:{}:{}", msg_addr, file_addr, span0, span1),
+                    format!("{}@{}:{}:{}", msg, file, span0, span1),
+                ));
+
+                self.ip += 2 * 8;
             }
             UNKNOWN(code) => rows.push(mk_row1(code.to_string(), es())),
         };

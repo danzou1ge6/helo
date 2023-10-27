@@ -201,7 +201,7 @@ fn lower_expr_untied<'s>(
             compiler,
         )
         .into(),
-        Panic(s) => lower_panic(*s, block, blocks).into(),
+        Panic { file, span, msg } => lower_panic(*msg, *file, *span, block, blocks).into(),
     }
 }
 
@@ -230,8 +230,11 @@ fn lower_expr<'s>(
     match end {
         BlockEnd::Many(ends) => {
             let next_block = blocks.new_block();
-            ends.into_iter()
-                .for_each(|b| blocks.seal(b, lir::Jump::Jump(next_block)));
+            ends.into_iter().for_each(|b| {
+                if !blocks[b].sealed() {
+                    blocks.seal(b, lir::Jump::Jump(next_block))
+                }
+            });
             next_block
         }
         BlockEnd::Single(end) => end,
@@ -262,10 +265,13 @@ fn lower_function_body<'s>(
     );
     match end {
         BlockEnd::Many(ends) => {
-            ends.into_iter()
-                .for_each(|b| blocks.seal(b, lir::Jump::Ret(to)));
+            ends.into_iter().for_each(|b| {
+                if !blocks[b].sealed() {
+                    blocks.seal(b, lir::Jump::Ret(to))
+                }
+            });
         }
-        BlockEnd::Single(end) => blocks.seal(end, lir::Jump::Ret(to)),
+        BlockEnd::Single(end) => if !blocks[end].sealed() {blocks.seal(end, lir::Jump::Ret(to))},
     }
 }
 
@@ -826,12 +832,12 @@ fn lower_user_function<'s>(
 
 fn lower_builtin<'s>(
     to: lir::TempId,
-    fid: &ir::FunctionId,
+    name: &str,
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
 ) -> lir::BlockId {
-    let builtin_id = builtins.id_by_name(fid);
+    let builtin_id = builtins.id_by_name(name);
     blocks[block].push(lir::Instruction::Buitltin(to, builtin_id));
     block
 }
@@ -888,10 +894,12 @@ fn lower_make_tagged<'s>(
 }
 
 fn lower_panic<'s>(
-    sid: ir::StrId,
+    msg: ir::StrId,
+    file: ir::StrId,
+    span: (usize, usize),
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
 ) -> lir::BlockId {
-    blocks.seal(block, lir::Jump::Panic(sid));
+    blocks.seal(block, lir::Jump::Panic { file, msg, span });
     block
 }

@@ -185,7 +185,7 @@ fn lower_block(
         }
         Jump(block) => lower_jump(*block, chunk_relocations, chunk),
         Ret(r) => lower_ret(*r, chunk),
-        Panic(s) => lower_panic(*s, str_index, chunk),
+        Panic { file, span, msg } => lower_panic(*file, *msg, *span, str_index, chunk),
     };
     addr
 }
@@ -651,8 +651,20 @@ fn lower_field(to: lir::TempId, from: lir::TempId, n: usize, chunk: &mut byte_co
     Instruction::Field(to.register(), from.register(), n as u8).emit(chunk);
 }
 
-fn lower_panic(str_id: ir::StrId, str_index: &lir::StrIndex, chunk: &mut byte_code::Chunk) {
-    Instruction::Panic(str_index[str_id]).emit(chunk)
+fn lower_panic(
+    file: ir::StrId,
+    msg: ir::StrId,
+    (span0, span1): (usize, usize),
+    str_index: &lir::StrIndex,
+    chunk: &mut byte_code::Chunk,
+) {
+    Instruction::Panic(str_index[msg]).emit(chunk);
+    chunk
+        .writer()
+        .push(span0 as u32)
+        .push(span1 as u32)
+        .push(str_index[file])
+        .finish();
 }
 
 fn lower_tagged(to: lir::TempId, tag: u8, args: &[lir::TempId], chunk: &mut byte_code::Chunk) {

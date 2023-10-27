@@ -8,6 +8,12 @@
 [x] Use more efficient method when backing-up union-find array
 [x] Check constructor name is uppercase
 [x] Curried function
-[ ] More accurate parse-error position
+[x] More accurate parse-error position
 [x] Check number of variants of a type is at most 256
 [x] Check number of parameters of a function is at most 256
+[x] Runtime error reporting with source code
+[ ] Constant propagation optimization
+[ ] Tuple construction-and-then-deconstruction optimization for pattern matching
+[ ] Inline-block optimization
+[ ] Tail recursive optimization based on type
+[ ] Impurity and IO
