@@ -325,8 +325,6 @@ pub enum TypeNode<'s> {
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
     Var(TypeVarId),
-    /// This says that the underlying type is unknown, but we know it is upper-bounded by some typejkjkjkjkjkjkjk
-    UpperBounded(Box<Type<'s>>),
     Unit,
     Never,
     /// This is only used for parsing. During inference, any wildcard is replaced with a new variable
@@ -356,7 +354,6 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
             }
             Primitive(p) => write!(f, "{}", p),
             Var(v) => write!(f, "'{}", v.0),
-            UpperBounded(v) => write!(f, "^{}", v),
             Unit => write!(f, "()"),
             Never => write!(f, "!"),
             WildCard => write!(f, "*"),
@@ -375,6 +372,23 @@ pub struct FunctionType<'s> {
     pub params: Vec<Type<'s>>,
     pub ret: Box<Type<'s>>,
     pub captures: Vec<Type<'s>>,
+}
+
+impl<'s> FunctionType<'s> {
+    pub fn collect_vars(&self, vars: &mut HashMap<TypeVarId, Meta>) {
+        self.params.iter().for_each(|p| p.collect_vars(vars));
+        self.captures.iter().for_each(|c| c.collect_vars(vars));
+        self.ret.collect_vars(vars);
+    }
+    pub fn substitute_vars(&mut self, values: &impl Fn(TypeVarId) -> Type<'s>) {
+        self.params.iter_mut().for_each(|p| {
+            *p = p.substitute_vars(values);
+        });
+        self.captures.iter_mut().for_each(|p| {
+            *p = p.substitute_vars(values);
+        });
+        self.ret = Box::new(self.ret.substitute_vars(values));
+    }
 }
 
 impl<'s> From<FunctionType<'s>> for CallableType<'s> {
@@ -541,7 +555,6 @@ impl<'s> TypeApply<'s> for Type<'s> {
                 ret: Box::new(v.ret.apply(selector, f)),
             }),
             Tuple(v) => Tuple(apply_many(v.iter(), selector, f)),
-            UpperBounded(v) => UpperBounded(Box::new(v.apply(selector, f))),
             Var(v) => Var(*v),
             Never => Never,
             WildCard => WildCard,
@@ -564,16 +577,6 @@ impl<'s> Type<'s> {
     pub fn new_never(meta: Meta) -> Self {
         Self {
             node: TypeNode::Never,
-            meta,
-        }
-    }
-
-    pub fn new_bounded_var(id: TypeVarId, meta: Meta) -> Self {
-        Self {
-            node: TypeNode::UpperBounded(Box::new(Self {
-                node: TypeNode::Var(id),
-                meta: meta.clone(),
-            })),
             meta,
         }
     }
@@ -610,7 +613,6 @@ impl<'s> Type<'s> {
                 ret: Box::new(v.ret.apply_result(selector, f)?),
             }),
             Tuple(v) => Tuple(apply_many(v.iter(), selector, f)?),
-            UpperBounded(v) => UpperBounded(Box::new(v.apply_result(selector, f)?)),
             Var(v) => Var(*v),
             Never => Never,
             WildCard => WildCard,
@@ -622,6 +624,7 @@ impl<'s> Type<'s> {
     }
 
     pub fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {
+        f(self);
         use TypeNode::*;
         match &self.node {
             Generic(_, args) => {
@@ -644,13 +647,21 @@ impl<'s> Type<'s> {
         }
     }
 
-    /// Replace variable_i in the tree with `values[i]`
-    /// WARN panic if `values[i]` goes out of bound!
-    pub fn substitute_vars(&self, values: &[Type<'s>]) -> Type<'s> {
+    pub fn collect_vars(&self, vars: &mut HashMap<TypeVarId, Meta>) {
+        self.walk(&mut |t| match &t.node {
+            TypeNode::Var(v) => {
+                vars.insert(*v, t.meta.clone());
+            }
+            _ => {}
+        });
+    }
+
+    /// Replace variable_i in the tree with `values(i)`
+    pub fn substitute_vars(&self, values: &impl Fn(TypeVarId) -> Type<'s>) -> Type<'s> {
         self.apply(
             &|t| matches!(t.node, TypeNode::Var(_)),
             &mut |t| match t.node {
-                TypeNode::Var(v) => values[v.0].clone(),
+                TypeNode::Var(v) => values(v),
                 _ => unreachable!(),
             },
         )
@@ -758,7 +769,7 @@ impl<'s, F> Symbols_<'s, F> {
                 }
                 Ok(())
             }
-            Primitive(_) | Var(_) | UpperBounded(_) | Unit | Never | WildCard => Ok(()),
+            Primitive(_) | Var(_) | Unit | Never | WildCard => Ok(()),
         }
     }
     pub fn validate_callable_type(&self, type_: &CallableType<'s>) -> Result<(), miette::Report> {

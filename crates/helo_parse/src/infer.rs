@@ -3,6 +3,7 @@ use crate::errors;
 use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
+use std::collections::HashMap;
 
 fn infer_expr<'s>(
     expr_id: ast::ExprId,
@@ -679,7 +680,6 @@ fn infer_case<'s>(
     let typed_arms = arms
         .iter()
         .map(|arm| {
-
             let result = infer_expr(
                 arm.result,
                 symbols,
@@ -815,29 +815,52 @@ fn infer_function_type_renamed<'s>(
     // to represent the relationship. The same is for return value.
     // And we will never infer closure recursively, so no closure-inference will reach here
     if typed_functions.currently_infering().unwrap() == name {
-        let r = Some(ast::FunctionType {
+        let mut currently_infered = ast::FunctionType {
             params: (0..f.arity)
                 .map(|i| {
-                    ast::Type::new_bounded_var(
-                        type_var_id_for_local(i.into()),
-                        f.param_metas[i].clone(),
-                    )
+                    inferer
+                        .resolve_var(type_var_id_for_local(i.into()), &f.param_metas[i])
+                        .unwrap_or_else(|err| {
+                            e.push(err);
+                            ast::Type::new_never(f.param_metas[i].clone())
+                        })
                 })
                 .collect(),
             captures: (0..f.captures.len())
                 .map(|i| {
-                    ast::Type::new_var(
-                        type_var_id_for_captured(f.local_cnt, i.into()),
-                        f.captures_meta[i].clone(),
-                    )
+                    inferer
+                        .resolve_var(
+                            type_var_id_for_captured(f.local_cnt, i.into()),
+                            &f.param_metas[i],
+                        )
+                        .unwrap_or_else(|err| {
+                            e.push(err);
+                            ast::Type::new_never(f.param_metas[i].clone())
+                        })
                 })
                 .collect(),
-            ret: Box::new(ast::Type::new_bounded_var(
-                type_var_id_for_local(f.local_cnt.into()),
-                f.meta.clone(),
-            )),
-        });
-        return r;
+            ret: Box::new(
+                inferer
+                    .resolve_var(type_var_id_for_ret(f.local_cnt), &f.meta)
+                    .unwrap_or_else(|err| {
+                        e.push(err);
+                        ast::Type::new_never(f.meta.clone())
+                    }),
+            ),
+        };
+
+        let mut vars = HashMap::new();
+        currently_infered.collect_vars(&mut vars);
+        let new_vars = inferer.alloc_vars(vars.len());
+        let var_subs: HashMap<_, _> = vars
+            .into_iter()
+            .zip(new_vars)
+            .map(|((from, meta), to)| (from, ast::Type::new_var(to, meta)))
+            .collect();
+
+        currently_infered.substitute_vars(&|id| var_subs[&id].clone());
+
+        return Some(currently_infered);
     }
 
     e.push(errors::CircularInference::new(name, name_meta));

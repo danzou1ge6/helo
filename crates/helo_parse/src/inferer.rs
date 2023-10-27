@@ -62,7 +62,9 @@ impl<'s> UnionFind<'s> {
     /// Allocate a continuous series of empty type variables on heap, returning the index of the first one
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
         let addr = self.heap.len();
-        (0..addr + cnt).for_each(|_| self.heap.push_back(Slot::Empty));
+        (0..addr + cnt).for_each(|_| {
+            self.heap.push_back(Slot::Empty);
+        });
         addr.into()
     }
 }
@@ -121,7 +123,7 @@ impl<'s> Inferer<'s> {
         }
     }
 
-    /// Unify type variable `id` with `type_`
+    /// Unify type variable `id` wit `type_`
     fn update_var_no_rollback(
         &mut self,
         id: ast::TypeVarId,
@@ -132,56 +134,6 @@ impl<'s> Inferer<'s> {
         match self.uf.get(root).clone() {
             Slot::Empty => self.fill_empty_slot(root, type_),
             Slot::Value(old_value) => self.unify_no_rollback(&old_value, &type_, meta)?,
-        };
-        Ok(())
-    }
-
-    /// Unify a variable upper-bounded by `id_bounded` with `type_`.
-    /// If the variable is empty, we do nothing unless `type_` is also a empty varianle,
-    /// because an empty variable is upper bound of any non-variable type.
-    /// If the variable is not empty, then unfication is continued on two type expressions.
-    fn update_bounded_var_no_rollback(
-        &mut self,
-        bound_id: ast::TypeVarId,
-        type_: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
-        let root = self.uf.find(bound_id);
-        match self.uf.get(root).clone() {
-            Slot::Empty => match type_ {
-                ast::Type {
-                    node: ast::TypeNode::Var(var_id),
-                    meta,
-                } => {
-                    let root1 = self.uf.find(*var_id);
-                    if root != root1 {
-                        *self.uf.get_mut(root) = Slot::Value(ast::Type {
-                            node: ast::TypeNode::Var(root1),
-                            meta: meta.clone(),
-                        })
-                    }
-                }
-                _ => return Ok(()),
-            },
-            Slot::Value(old_value) => self.unify_bounded_no_rollback(&type_, &old_value, meta)?,
-        };
-        Ok(())
-    }
-
-    /// Unify a type variable `id` with a type upper-bounded by `type_bound`
-    /// If `id` is an empty variable, then it unifies with `type_bound`, so that it can be upper-bounded by `type_`.
-    fn update_var_with_bounded_no_rollback(
-        &mut self,
-        id: ast::TypeVarId,
-        type_bound: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
-        let root = self.uf.find(id);
-        match self.uf.get(root).clone() {
-            Slot::Empty => self.fill_empty_slot(root, type_bound),
-            Slot::Value(old_value) => {
-                self.unify_bounded_no_rollback(&old_value, &type_bound, meta)?
-            }
         };
         Ok(())
     }
@@ -260,68 +212,6 @@ impl<'s> Inferer<'s> {
             e
         })
     }
-
-    fn unify_bounded_list_no_rollback<'a, 'b, TA, TB>(
-        &mut self,
-        a: TA,
-        bounded: TB,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure>
-    where
-        TA: Iterator<Item = &'a ast::Type<'s>>,
-        's: 'a,
-        TB: Iterator<Item = &'b ast::Type<'s>>,
-        's: 'b,
-    {
-        for (a, b) in a.zip(bounded) {
-            self.unify_bounded_no_rollback(a, b, meta)?;
-        }
-        Ok(())
-    }
-
-    /// Unify `a` with a type upper-bounded by `bound`
-    fn unify_bounded_no_rollback(
-        &mut self,
-        a: &ast::Type<'s>,
-        bound: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
-        use ast::TypeNode::*;
-        match (&a.node, &bound.node) {
-            (_, Var(id_bounded)) => {
-                Ok(self.update_bounded_var_no_rollback(*id_bounded, a, meta)?)
-            }
-            (Var(a_id), _) => Ok(self.update_var_with_bounded_no_rollback(*a_id, bound, meta)?),
-            (Unit, Unit) => Ok(()),
-            (Never, _) => Ok(()),
-            (_, Never) => Ok(()),
-            (Tuple(a_list, ..), Tuple(b_list, ..)) => {
-                Ok(self.unify_bounded_list_no_rollback(a_list.iter(), b_list.iter(), meta)?)
-            }
-            (Generic(a_template, a_args), Generic(b_template, b_args))
-                if a_template == b_template =>
-            {
-                Ok(self.unify_bounded_list_no_rollback(a_args.iter(), b_args.iter(), meta)?)
-            }
-            (
-                Callable(ast::CallableType {
-                    params: a_params,
-                    ret: a_ret,
-                }),
-                Callable(ast::CallableType {
-                    params: b_params,
-                    ret: b_ret,
-                }),
-            ) => {
-                self.unify_bounded_list_no_rollback(a_params.iter(), b_params.iter(), meta)?;
-                self.unify_bounded_no_rollback(a_ret, b_ret, meta)?;
-                Ok(())
-            }
-            (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
-            _ => Err(errors::UnificationFailure::new(a, bound, meta, true)),
-        }
-    }
-
     /// Unify type expressions `a` with `b`
     fn unify_no_rollback(
         &mut self,
@@ -332,8 +222,6 @@ impl<'s> Inferer<'s> {
         use ast::TypeNode::*;
         let r = match (&a.node, &b.node) {
             (Unit, Unit) => Ok(()),
-            (UpperBounded(bounded), _) => Ok(self.unify_bounded_no_rollback(b, bounded, meta)?),
-            (_, UpperBounded(bounded)) => Ok(self.unify_bounded_no_rollback(a, bounded, meta)?),
             (Var(a_id), _) => Ok(self.update_var_no_rollback(*a_id, b, meta)?),
             (_, Var(b_id)) => Ok(self.update_var_no_rollback(*b_id, a, meta)?),
             (Never, _) => Ok(()),

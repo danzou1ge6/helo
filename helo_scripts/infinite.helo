@@ -1,1 +1,1 @@
-let fn f x = x x
+fn f x = x x
