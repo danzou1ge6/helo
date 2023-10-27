@@ -12,8 +12,9 @@
 [x] Check number of variants of a type is at most 256
 [x] Check number of parameters of a function is at most 256
 [x] Runtime error reporting with source code
-[ ] Constant propagation optimization
+[x] Constant propagation optimization
 [ ] Tuple construction-and-then-deconstruction optimization for pattern matching
 [ ] Inline-block optimization
 [ ] Tail recursive optimization based on type
 [ ] Impurity and IO
+[ ] Module

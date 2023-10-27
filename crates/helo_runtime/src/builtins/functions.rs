@@ -179,6 +179,16 @@ pub fn round_float<'p>(
     Ok(ValueSafe::Int(arg0.unwrap_float().round() as i64))
 }
 
+pub fn float_neg<'p>(
+    [arg0]: [ValueSafe<'p>; 1],
+    _pool: &mut mem::GcPool,
+    _registers: &mut mem::ValueVec,
+    _call_stack: &mut vm::CallStack,
+    _lock: &mem::Lock,
+) -> BuiltinRet<'p> {
+    Ok(ValueSafe::Float(-arg0.unwrap_float()))
+}
+
 pub fn float_add<'p>(
     [arg0, arg1]: [ValueSafe<'p>; 2],
     _pool: &mut mem::GcPool,
@@ -411,7 +421,6 @@ pub fn bool_or<'p>(
 ) -> BuiltinRet<'p> {
     Ok(ValueSafe::Bool(arg0.unwrap_bool() || arg1.unwrap_bool()))
 }
-
 
 pub fn char_eq<'p>(
     [arg0, arg1]: [ValueSafe<'p>; 2],

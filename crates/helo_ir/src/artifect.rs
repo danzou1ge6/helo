@@ -149,6 +149,11 @@ pub fn common_expression_elimination(
     f
 }
 
+pub fn constant_propagation(mut f: ssa::Function) -> ssa::Function {
+    lir::optimizations::constant_propagation(&mut f.blocks, f.body, f.temp_cnt);
+    f
+}
+
 pub fn deconstruct_ssa(f: ssa::Function) -> lir::Function {
     let ssa::Function {
         body,

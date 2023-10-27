@@ -87,6 +87,10 @@ pub fn get(id: BuiltinId) -> Builtin {
     BUILTINS[id.0 as usize].1
 }
 
+pub fn name(id: BuiltinId) -> &'static str {
+    BUILTINS[id.0 as usize].0
+}
+
 pub fn get_arity(id: BuiltinId) -> usize {
     get(id).arity()
 }
@@ -138,7 +142,7 @@ impl BuiltinTable {
 }
 
 use functions::*;
-const BUILTINS: [(&'static str, Builtin); 42] = [
+const BUILTINS: [(&'static str, Builtin); 43] = [
     // Int arithmatics
     ("+", B2(int_add)),
     ("-", B2(int_subtract)),
@@ -154,6 +158,7 @@ const BUILTINS: [(&'static str, Builtin); 42] = [
     (">", B2(int_gt)),
     ("<", B2(int_lt)),
     // Float arithmatics
+    ("neg", B1(float_neg)),
     ("+.", B2(float_add)),
     ("-.", B2(float_subtract)),
     ("*.", B2(float_mul)),

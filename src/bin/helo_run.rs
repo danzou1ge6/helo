@@ -78,6 +78,11 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
             let f = artifect::common_expression_elimination(f, &dom_tree);
             println!("\nAfter common expression elimination");
             print_ssa_blocks(fid, &f, &str_list, &function_names);
+            (fid, f)
+        })
+        .map(|(fid, f)| {
+            let f = artifect::constant_propagation(f);
+            print_ssa_blocks(fid, &f, &str_list, &function_names);
             f
         })
         .map(|f| artifect::deconstruct_ssa(f))

@@ -18,6 +18,7 @@ const BUILTIN_SIGS: &'static str = r#"
     fn >  a,b : [Int, Int] -> Bool = ..
     fn <  a,b : [Int, Int] -> Bool = ..
 
+    fn neg  a   : [Float] -> Float        = ..
     fn +.   a,b : [Float, Float] -> Float = ..
     fn -.   a,b : [Float, Float] -> Float = ..
     fn *.   a,b : [Float, Float] -> Float = ..
@@ -60,7 +61,7 @@ const BUILTIN_SIGS: &'static str = r#"
 
 const PRECEDENCE_DEF: &'static str = r#"
     infix `and` 41 40
-    infix `or` 41 40
+    infix `or`  41 40
 
     infix +   41 40
     infix -   41 40
