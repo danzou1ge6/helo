@@ -54,14 +54,18 @@ impl ObjDebug for ObjString {
         f: &mut std::fmt::Formatter<'_>,
         _visited: &mut std::collections::HashSet<*const u8>,
     ) -> std::fmt::Result {
-        write!(f, "\"")?;
+        write!(f, "\"[")?;
         f.write_str(&self.v)?;
-        if let Some(next) = self.next {
-            unsafe { next.as_ref().debug_fmt(f, _visited) }?;
-        } else {
-            Ok(())?;
+
+        let mut p = self.next;
+        while let Some(next) = p {
+            unsafe {
+                write!(f, ", {:?} ", next.addr())?;
+                f.write_str(&next.as_ref().v)?;
+                p = next.as_ref().next;
+            }
         }
-        write!(f, "\"")
+        write!(f, "]\"")
     }
 }
 
@@ -72,7 +76,7 @@ impl Obj for ObjString {
 }
 
 impl ObjString {
-    const CHUNK_SIZE: usize = 1024;
+    const CHUNK_SIZE: usize = 64;
 
     pub(super) fn allocate() -> Result<Pointer<ObjString>, ()> {
         unsafe {
@@ -138,27 +142,33 @@ impl Pointer<ObjString> {
         unsafe fn concat(
             lhs: Option<Pointer<ObjString>>,
             rhs: Pointer<ObjString>,
+            pool: &mut GcPool,
+            lock: &Lock,
         ) -> Result<Pointer<ObjString>, ()> {
             if let Some(lhs) = lhs {
-                let mut new_rhs = concat(lhs.as_ref().next, rhs)?;
+                let mut new_rhs = concat(lhs.as_ref().next, rhs, pool, lock)?;
 
                 let rhs_head_sapce_left = ObjString::CHUNK_SIZE - new_rhs.chunk_len();
                 if lhs.as_ref().v.len() != 0 {
                     let lhs_chunk_str = &lhs.as_ref().v;
                     // Copy to new_rhs until the chunk is filled
-                    let rhs_head_inserted_cnt =
-                        lhs_chunk_str.ceil_char_boundary(rhs_head_sapce_left);
+                    let lhs_left_cnt = lhs_chunk_str.len().saturating_sub(rhs_head_sapce_left);
+                    let lhs_left_cnt = lhs_chunk_str.ceil_char_boundary(lhs_left_cnt);
+
                     new_rhs
                         .as_mut()
                         .v
-                        .insert_str(0, &lhs_chunk_str[rhs_head_inserted_cnt..]);
+                        .insert_str(0, &lhs_chunk_str[lhs_left_cnt..]);
 
                     // Rest are copied to a new chunk
-                    let mut new_chunk = ObjString::allocate()?;
-                    new_chunk.as_mut().v = lhs_chunk_str[..rhs_head_inserted_cnt].to_string();
-                    new_chunk.as_mut().next = Some(new_rhs);
-
-                    Ok(new_chunk)
+                    if lhs_left_cnt != 0 {
+                        let mut new_chunk = Pointer::from_ref(pool.allocate_string_empty(lock)?);
+                        new_chunk.as_mut().v = lhs_chunk_str[..lhs_left_cnt].to_string();
+                        new_chunk.as_mut().next = Some(new_rhs);
+                        Ok(new_chunk)
+                    } else {
+                        Ok(new_rhs)
+                    }
                 } else {
                     Ok(new_rhs)
                 }
@@ -166,7 +176,8 @@ impl Pointer<ObjString> {
                 Ok(rhs)
             }
         }
-        concat(Some(self), rhs.clone_chunk(pool, lock)?)
+
+        concat(Some(self), rhs.clone_chunk(pool, lock)?, pool, lock)
     }
     pub unsafe fn head(self) -> Option<char> {
         self.as_ref().v.chars().next()

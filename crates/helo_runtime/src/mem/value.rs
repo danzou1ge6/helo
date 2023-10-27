@@ -92,7 +92,7 @@ impl<'p> ObjDebug for ValueSafe<'p> {
             Int(i) => write!(f, "{i}"),
             Float(i) => write!(f, "{i}",),
             Bool(b) => write!(f, "{b}"),
-            Char(c) => write!(f, "{c}"),
+            Char(c) => write!(f, "'{c}'"),
             Obj(obj) => {
                 if !visited.contains(&obj.addr()) {
                     visited.insert(obj.addr());
