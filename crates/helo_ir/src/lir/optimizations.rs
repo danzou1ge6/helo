@@ -43,6 +43,8 @@ fn collect_uses_defs(
 }
 
 mod dead_code_elimination {
+    use std::collections::HashSet;
+
     use super::collect_uses_defs;
     use crate::lir::ssa;
     use crate::lir::TempId;
@@ -51,22 +53,28 @@ mod dead_code_elimination {
     pub fn run(blocks: &mut ssa::SsaBlockHeap, temp_cnt: usize) {
         let (mut uses, mut defs) = collect_uses_defs(blocks, temp_cnt);
 
+        let mut to_delete = HashSet::new();
+
         let mut work_list: Vec<_> = (0..temp_cnt).map(|i| TempId(i)).collect();
         while let Some(t) = work_list.pop() {
             if uses[t].len() == 0 {
                 let def_site = defs[t];
 
                 match def_site {
-                    Some(Site::Phi(block, i)) => {
-                        let ssa::Phi(ret, args) = blocks[block].phis.remove(i);
-                        defs[ret] = None;
+                    Some(site @ Site::Phi(block, i)) => {
+                        to_delete.insert(site);
+
+                        let ssa::Phi(ret, args) = &blocks[block].phis[i];
+                        defs[*ret] = None;
                         args.into_iter().for_each(|arg| {
-                            uses[arg].remove(&Site::Phi(block, i));
-                            work_list.push(arg);
+                            uses[*arg].remove(&Site::Phi(block, i));
+                            work_list.push(*arg);
                         });
                     }
-                    Some(Site::Inst(block, i)) => {
-                        let inst = blocks[block].body.remove(i);
+                    Some(site @ Site::Inst(block, i)) => {
+                        to_delete.insert(site);
+
+                        let inst = &blocks[block].body[i];
                         defs[inst.def()] = None;
                         inst.uses().for_each(|u| {
                             uses[u].remove(&Site::Inst(block, i));
@@ -77,6 +85,22 @@ mod dead_code_elimination {
                     None => {}
                 }
             }
+        }
+
+        for block_id in blocks.iter_id() {
+            blocks[block_id].phis = std::mem::take(&mut blocks[block_id].phis)
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| !to_delete.contains(&Site::Phi(block_id, *i)))
+                .map(|(_, p)| p)
+                .collect();
+
+            blocks[block_id].body = std::mem::take(&mut blocks[block_id].body)
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| !to_delete.contains(&Site::Inst(block_id, *i)))
+                .map(|(_, inst)| inst)
+                .collect();
         }
     }
 }
@@ -262,6 +286,7 @@ pub use common_expression_elimination::run as common_expression_elimination;
 mod constant_propagation {
     use std::collections::HashSet;
 
+    use crate::lir::BlockTopology;
     use crate::lir::{self, ssa, BlockId};
     use lir::Instruction;
     use lir::TempId;
@@ -474,7 +499,7 @@ mod constant_propagation {
         let mut lift_to_run = |block_id, blocks: &ssa::SsaBlockHeap| {
             block_run[block_id] = true;
             blocks_worklist.insert(block_id);
-            for susc in blocks[block_id].exit.successors() {
+            for susc in blocks[block_id].successors() {
                 blocks_worklist.insert(susc);
             }
         };
@@ -576,9 +601,14 @@ mod constant_propagation {
         }
     }
 
-    pub fn run(blocks: &mut ssa::SsaBlockHeap, entry: BlockId, temp_cnt: usize) {
+    pub fn run(
+        blocks: &mut ssa::SsaBlockHeap,
+        block_run: &mut lir::BlockIdVec<bool>,
+        entry: BlockId,
+        temp_cnt: usize,
+    ) {
         let mut values = lir::TempIdVec::repeat(Value::Bottom, temp_cnt);
-        let mut block_run = lir::BlockIdVec::repeat(false, blocks.len());
+        block_run.iter_mut().for_each(|r| *r = false);
         block_run[entry] = true;
 
         let mut temps_worklist = HashSet::new();
@@ -632,13 +662,7 @@ mod constant_propagation {
                     );
                 }
 
-                process_jump(
-                    blocks,
-                    block_id,
-                    &values,
-                    &mut block_run,
-                    &mut blocks_worklist,
-                );
+                process_jump(blocks, block_id, &values, block_run, &mut blocks_worklist);
             }
 
             while let Some(temp) = temps_worklist.iter().next().copied() {
@@ -671,7 +695,7 @@ mod constant_propagation {
                                 blocks,
                                 *block_id,
                                 &values,
-                                &mut block_run,
+                                block_run,
                                 &mut blocks_worklist,
                             );
                         }
@@ -692,3 +716,102 @@ mod constant_propagation {
     }
 }
 pub use constant_propagation::run as constant_propagation;
+
+mod control_flow_simplification {
+    use crate::lir::{self, BlockTopology};
+    use crate::lir::{BlockId, BlockIdVec, Jump};
+    use lir::ssa;
+
+    fn simplify_block(
+        blocks: &mut lir::BlockHeap,
+        block_id: BlockId,
+        block_run: &mut BlockIdVec<bool>,
+    ) -> bool {
+        let mut changed = false;
+
+        let option_first_susc = blocks[block_id].successors().next();
+        if let Some(first_susc) = option_first_susc {
+            if !matches!(blocks[block_id].exit, Some(Jump::Jump(_)))
+                && blocks[block_id].successors().all(|b| b == first_susc)
+            {
+                blocks[block_id].exit = Some(Jump::Jump(first_susc));
+                changed = true;
+            }
+        }
+
+        if let Some(Jump::Jump(only_susc)) = blocks[block_id].exit {
+            if blocks[block_id].body.is_empty() {
+                for pred in blocks[block_id]
+                    .pred
+                    .clone()
+                    .into_iter()
+                    .filter(|b| block_run[*b])
+                {
+                    blocks[pred]
+                        .successors_mut()
+                        .filter(|s| **s == block_id)
+                        .for_each(|s| {
+                            *s = only_susc;
+                        });
+                    blocks[only_susc].pred.insert(pred);
+                }
+                blocks[only_susc].pred.remove(&block_id);
+                block_run[block_id] = false;
+                
+                return true;
+            }
+
+            if blocks[only_susc]
+                .pred
+                .iter()
+                .filter(|b| block_run[**b])
+                .count()
+                == 1
+            {
+                blocks[only_susc].successors().collect::<Vec<_>>().into_iter().for_each(|susc_susc| {
+                    blocks[susc_susc].pred.remove(&only_susc);
+                    blocks[susc_susc].pred.insert(block_id);
+                });
+
+                let only_susc_block = std::mem::take(&mut blocks[only_susc]);
+                blocks[block_id]
+                    .body
+                    .extend(only_susc_block.body.into_iter());
+                blocks[block_id].exit = only_susc_block.exit;
+
+                block_run[only_susc] = false;
+                return true;
+            }
+
+            if blocks[only_susc].body.is_empty() {
+                blocks[block_id].exit = blocks[only_susc].exit.clone();
+
+                blocks[only_susc].successors().collect::<Vec<_>>().into_iter().for_each(|susc_susc| {
+                    blocks[susc_susc].pred.insert(block_id);
+                });
+                
+                changed = true;
+            }
+        }
+
+        changed
+    }
+
+    pub fn run(blocks: &mut lir::BlockHeap, entry: BlockId, block_run: &mut BlockIdVec<bool>) {
+        loop {
+            let post_order = ssa::BlocksOrder::post_order_of(blocks, entry);
+
+            let mut changed = false;
+            for block_id in post_order.iter() {
+                if block_run[block_id] {
+                    changed |= simplify_block(blocks, block_id, block_run);
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+    }
+}
+pub use control_flow_simplification::run as control_flow_simplification;

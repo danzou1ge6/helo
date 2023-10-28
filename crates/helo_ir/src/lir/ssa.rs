@@ -6,10 +6,6 @@ use std::{
 use crate::lir::{self, TempIdVec};
 use lir::BlockId;
 
-use bitvec::prelude as bv;
-
-type BitVec = bv::BitVec<u32, bv::Msb0>;
-
 #[derive(Debug)]
 pub struct ImmediateDominators(BlockIdVec<Option<BlockId>>);
 
@@ -56,7 +52,7 @@ impl ImmediateDominators {
                     continue;
                 }
 
-                let mut pred_processed = blocks[b].predessorss().filter(|p| dom.get(*p).is_some());
+                let mut pred_processed = blocks[b].predecessors().filter(|p| dom.get(*p).is_some());
 
                 // Postorder ensures that at least one predecessor comes after it in postorder sequence, so
                 // here at least one predecessor has been processed and assigned a immediate dominator in `dom`
@@ -120,7 +116,7 @@ impl DominanceFrontier {
         let mut frontiers = BlockIdVec::repeat(HashSet::new(), blocks.len());
 
         for block_id in blocks.iter_id() {
-            let predecessors = blocks[block_id].predessorss().collect::<Vec<_>>();
+            let predecessors = blocks[block_id].predecessors().collect::<Vec<_>>();
             if predecessors.len() < 2 {
                 continue;
             }
@@ -166,16 +162,21 @@ impl<F> BlocksOrder<F> {
 }
 
 impl BlocksOrder<PostOrder> {
-    pub fn post_order_of(blocks: &lir::BlockHeap, entry: BlockId) -> Self {
-        fn post_order_sequence(
+    pub fn post_order_of<B>(blocks: &lir::BlockHeap_<B>, entry: BlockId) -> Self
+    where
+        B: lir::BlockTopology,
+    {
+        fn post_order_sequence<B>(
             begin: BlockId,
-            blocks: &lir::BlockHeap,
+            blocks: &lir::BlockHeap_<B>,
             seq: &mut Vec<BlockId>,
-            visited: &mut BitVec,
-        ) {
-            visited.set(begin.0, true);
+            visited: &mut BlockIdVec<bool>,
+        ) where
+            B: super::BlockTopology,
+        {
+            visited[begin] = true;
             for susc in blocks[begin].successors() {
-                if !visited[susc.0] {
+                if !visited[susc] {
                     post_order_sequence(susc, blocks, seq, visited);
                 }
             }
@@ -184,7 +185,7 @@ impl BlocksOrder<PostOrder> {
 
         // This is the order each block appear
         let mut seq = Vec::new();
-        let mut visited = BitVec::repeat(false, blocks.len());
+        let mut visited = BlockIdVec::repeat(false, blocks.len());
         post_order_sequence(entry, &blocks, &mut seq, &mut visited);
 
         let mut orders = BlockIdVec::repeat(0, blocks.len());
@@ -203,7 +204,7 @@ impl BlocksOrder<PostOrder> {
 
 use lir::{BlockHeap_, Instruction, Jump, TempId};
 
-use super::BlockIdVec;
+use super::{BlockIdVec, BlockTopology};
 
 #[derive(Clone, Default, Debug)]
 pub struct Phi(pub TempId, pub Vec<TempId>);
@@ -217,6 +218,24 @@ pub struct SsaBlock {
     pub(crate) tail_copies: Vec<(TempId, TempId)>,
 }
 
+impl super::BlockTopology for SsaBlock {
+    fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
+        self.exit.successors()
+    }
+    fn predecessors<'a>(&'a self) -> impl Iterator<Item = BlockId> + 'a {
+        self.pred.iter().copied()
+    }
+    fn successors_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut BlockId> + 'a> {
+        self.exit.successors_mut()
+    }
+}
+
+impl Default for SsaBlock {
+    fn default() -> Self {
+        Self::new(Jump::Ret(TempId::default()))
+    }
+}
+
 impl SsaBlock {
     fn defs(&self) -> HashSet<TempId> {
         self.body
@@ -227,9 +246,6 @@ impl SsaBlock {
                 defs.insert(def);
                 defs
             })
-    }
-    fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
-        self.exit.successors()
     }
     fn last_inst_idx(&self) -> usize {
         self.body.len() - 1
@@ -481,7 +497,7 @@ fn edge_splitting(blocks: &mut SsaBlockHeap) {
                 let inserted = SsaBlock::new(Jump::Jump(block));
                 let inserted = blocks.push(inserted);
 
-                blocks[pred].exit.successors_mut().for_each(|b| {
+                blocks[pred].successors_mut().for_each(|b| {
                     if *b == block {
                         *b = inserted;
                     }
@@ -782,4 +798,5 @@ pub struct Function {
     pub meta: helo_parse::ast::Meta,
     pub name: crate::ir::StrId,
     pub temp_cnt: usize,
+    pub block_run: lir::BlockIdVec<bool>
 }

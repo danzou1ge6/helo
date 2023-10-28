@@ -1,4 +1,4 @@
-use crate::ir;
+use crate::{ir, lir::BlockTopology};
 use pretty::{self};
 
 pub fn pretty_ir_function<'s, 'b, D, A>(
@@ -409,6 +409,7 @@ where
 pub fn pretty_lir_block<'s, 'b, D, A>(
     block_id: lir::BlockId,
     blocks: &lir::BlockHeap,
+    run: bool,
     str_list: &ir::StrList,
     functions: &lir::FunctionNameList,
     allocator: &'b D,
@@ -419,13 +420,21 @@ where
     A: Clone,
 {
     allocator
-        .text(format!("Block {} [Predecessors ", block_id))
+        .text(if run {
+            format!("Block {} [Predecessors ", block_id)
+        } else {
+            format!("[x] Block {} [Predecessors ", block_id)
+        })
         .append(allocator.intersperse(
-            blocks[block_id].predessorss().map(|b| format!("b{}", b)),
+            blocks[block_id].predecessors().map(|b| format!("b{}", b)),
             allocator.text(","),
         ))
         .append(allocator.text("]:"))
-        .append(allocator.hardline())
+        .append(if blocks[block_id].len() != 0 {
+            allocator.hardline()
+        } else {
+            allocator.nil()
+        })
         .append(
             allocator
                 .intersperse(
@@ -444,6 +453,7 @@ where
 pub fn pretty_ssa_block<'s, 'b, D, A>(
     block_id: lir::BlockId,
     blocks: &lir::ssa::SsaBlockHeap,
+    run: bool,
     str_list: &ir::StrList,
     functions: &lir::FunctionNameList,
     allocator: &'b D,
@@ -454,7 +464,11 @@ where
     A: Clone,
 {
     allocator
-        .text(format!("Block {} [Predecessors ", block_id))
+        .text(if run {
+            format!("Block {} [Predecessors ", block_id)
+        } else {
+            format!("[x] Block {} [Predecessors ", block_id)
+        })
         .append(allocator.intersperse(
             blocks[block_id].pred.iter().map(|b| format!("b{}", b)),
             allocator.text(","),
@@ -545,9 +559,16 @@ where
         .append(
             allocator
                 .intersperse(
-                    f.blocks
-                        .iter_id()
-                        .map(|b| pretty_ssa_block(b, &f.blocks, str_list, functions, allocator)),
+                    f.blocks.iter_id().map(|b| {
+                        pretty_ssa_block(
+                            b,
+                            &f.blocks,
+                            f.block_run[b],
+                            str_list,
+                            functions,
+                            allocator,
+                        )
+                    }),
                     allocator.hardline(),
                 )
                 .align()
@@ -580,7 +601,48 @@ where
             allocator
                 .intersperse(
                     f.blocks.iter_id().map(|b| {
-                        pretty_lir_block(b, &f.blocks, str_list, functions_names, allocator)
+                        pretty_lir_block(b, &f.blocks, true, str_list, functions_names, allocator)
+                    }),
+                    allocator.hardline(),
+                )
+                .align()
+                .indent(4),
+        )
+}
+
+pub fn pretty_lir_function_optimized<'s, 'b, D, A>(
+    f_id: lir::FunctionId,
+    f: &lir::FunctionOptimized,
+    str_list: &ir::StrList,
+    functions_names: &lir::FunctionNameList,
+    allocator: &'b D,
+) -> pretty::DocBuilder<'b, D, A>
+where
+    D: pretty::DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    allocator
+        .text(format!(
+            "Function {}'{}' [Entry at Block {}, Arity {}]:",
+            f_id,
+            str_list.get(f.name),
+            f.body,
+            f.arity
+        ))
+        .append(allocator.hardline())
+        .append(
+            allocator
+                .intersperse(
+                    f.blocks.iter_id().filter(|b| f.block_run[*b]).map(|b| {
+                        pretty_lir_block(
+                            b,
+                            &f.blocks,
+                            f.block_run[b],
+                            str_list,
+                            functions_names,
+                            allocator,
+                        )
                     }),
                     allocator.hardline(),
                 )

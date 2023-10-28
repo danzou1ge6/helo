@@ -91,7 +91,7 @@ pub fn compiler_ir<'s>(
 pub fn compile_lir<'s>(
     ir_functions: ir::FunctionTable,
     ir_nodes: ir::ExprHeap<'s>,
-) -> lir::FunctionTable {
+) -> lir::FunctionTable<lir::Function> {
     let mut lir_functions = lir::FunctionTable::new();
     let rt_builtins = rt_builtins::BuiltinTable::new();
     for fid in ir_functions.function_names() {
@@ -121,6 +121,8 @@ pub fn compile_ssa(f: lir::Function) -> (ssa::Function, ssa::DominanceTree) {
     let dom_tree = ssa::DominanceTree::from_idoms(&idom);
     let dom_frontier = ssa::DominanceFrontier::build(&blocks, &idom);
 
+    let blocks_len = blocks.len();
+
     let (ssa_blocks, temp_cnt) =
         ssa::construct_ssa(blocks, body, &dom_frontier, &dom_tree, temp_cnt);
 
@@ -131,6 +133,7 @@ pub fn compile_ssa(f: lir::Function) -> (ssa::Function, ssa::DominanceTree) {
         meta,
         name,
         temp_cnt,
+        block_run: lir::BlockIdVec::repeat(true, blocks_len),
     };
 
     (f, dom_tree)
@@ -150,11 +153,16 @@ pub fn common_expression_elimination(
 }
 
 pub fn constant_propagation(mut f: ssa::Function) -> ssa::Function {
-    lir::optimizations::constant_propagation(&mut f.blocks, f.body, f.temp_cnt);
+    lir::optimizations::constant_propagation(&mut f.blocks, &mut f.block_run, f.body, f.temp_cnt);
     f
 }
 
-pub fn deconstruct_ssa(f: ssa::Function) -> lir::Function {
+pub fn control_flow_simplification(mut f: lir::FunctionOptimized) -> lir::FunctionOptimized {
+    lir::optimizations::control_flow_simplification(&mut f.blocks, f.body, &mut f.block_run);
+    f
+}
+
+pub fn deconstruct_ssa(f: ssa::Function) -> lir::FunctionOptimized {
     let ssa::Function {
         body,
         blocks,
@@ -162,33 +170,39 @@ pub fn deconstruct_ssa(f: ssa::Function) -> lir::Function {
         meta,
         name,
         temp_cnt,
+        block_run,
     } = f;
 
     let (blocks, temp_cnt) = ssa::deconstruct_ssa(blocks, temp_cnt, arity);
 
-    let f = lir::Function {
+    let f = lir::FunctionOptimized {
         body,
         blocks,
         arity,
         meta,
         name,
         temp_cnt,
+        block_run,
     };
     f
 }
 
-pub fn optimize_lir<'s>(lir_functions: lir::FunctionList) -> lir::FunctionList {
+pub fn optimize_lir<'s>(
+    lir_functions: lir::FunctionList<lir::Function>,
+) -> lir::FunctionList<lir::FunctionOptimized> {
     lir_functions
         .into_iter()
         .map(|f| compile_ssa(f))
+        .map(|(f, dom_tree)| (constant_propagation(f), dom_tree))
         .map(|(f, dom_tree)| (dead_code_elimination(f), dom_tree))
         .map(|(f, dom_tree)| common_expression_elimination(f, &dom_tree))
         .map(|f| deconstruct_ssa(f))
+        .map(|f| control_flow_simplification(f))
         .collect()
 }
 
 pub fn compile_byte_code(
-    lir_functions: lir::FunctionList,
+    lir_functions: lir::FunctionList<lir::FunctionOptimized>,
     str_list: ir::StrList,
     main_function_id: lir::FunctionId,
 ) -> miette::Result<executable::Executable> {

@@ -14,7 +14,7 @@
 [x] Runtime error reporting with source code
 [x] Constant propagation optimization
 [ ] Tuple construction-and-then-deconstruction optimization for pattern matching
-[ ] Inline-block optimization
+[x] Control flow optimization
 [ ] Tail recursive optimization based on type
 [ ] Impurity and IO
 [ ] Module

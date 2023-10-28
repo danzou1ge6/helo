@@ -1,17 +1,10 @@
-fn count_a s =
-    let fn cnt s,n =
-        if str_some s
-        then if (str_head s) `char_eq` 'a'
-             then cnt (str_tail s),(n + 1)
-             else cnt (str_tail s),n
-        else n
-    in cnt s,0
 
-fn filter_out s,c =
-    if str_some s then
-        if (str_head s) `char_eq` c then
-            filter_out (str_tail s),c
-        else (char_to_str (str_head s)) `str_cat` (filter_out (str_tail s),c)
-    else ""
-
-fn main = filter_out "abcabc",'a'
+fn main =
+    let a = 1 in
+    let b = 1 in
+    if 1.0 >. 2.0 then
+        a
+    else
+        if a == b then
+            a
+        else a

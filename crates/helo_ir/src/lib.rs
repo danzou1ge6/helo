@@ -1,4 +1,5 @@
 #![feature(generic_arg_infer)]
+#![feature(return_position_impl_trait_in_trait)]
 pub mod artifect;
 pub mod errors;
 pub mod ir;

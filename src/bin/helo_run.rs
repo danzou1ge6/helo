@@ -10,7 +10,7 @@ use std::io::Read;
 use std::sync::Arc;
 
 fn pretty_lir_functions(
-    lir_functions: &helo_ir::lir::FunctionList,
+    lir_functions: &helo_ir::lir::FunctionList<lir::Function>,
     function_names: &lir::FunctionNameList,
     str_list: &helo_ir::ir::StrList,
 ) {
@@ -26,6 +26,40 @@ fn pretty_lir_functions(
         );
         let doc = doc_builder.pretty(term_width);
         println!("{doc}");
+    }
+}
+
+fn print_lir_function_optimized(
+    f: &lir::FunctionOptimized,
+    lir_fid: lir::FunctionId,
+    function_names: &helo_ir::lir::FunctionNameList,
+    str_list: &helo_ir::ir::StrList,
+) {
+    let term_width = 80;
+    let allocator = pretty::RcAllocator;
+    let doc_builder = pretty_print::pretty_lir_function_optimized::<_, ()>(
+        lir_fid,
+        f,
+        &str_list,
+        function_names,
+        &allocator,
+    );
+    let doc = doc_builder.pretty(term_width);
+    println!("{doc}");
+}
+
+fn pretty_lir_functions_optimized(
+    lir_functions: &helo_ir::lir::FunctionList<lir::FunctionOptimized>,
+    function_names: &lir::FunctionNameList,
+    str_list: &helo_ir::ir::StrList,
+) {
+    for lir_fid in lir_functions.iter_id() {
+        print_lir_function_optimized(
+            &lir_functions.get(lir_fid).unwrap(),
+            lir_fid,
+            function_names,
+            str_list,
+        )
     }
 }
 
@@ -69,6 +103,12 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
             (fid, f, dom_tree)
         })
         .map(|(fid, f, dom_tree)| {
+            let f = artifect::constant_propagation(f);
+            println!("\nAfter constant propagation");
+            print_ssa_blocks(fid, &f, &str_list, &function_names);
+            (fid, f, dom_tree)
+        })
+        .map(|(fid, f, dom_tree)| {
             let f = artifect::dead_code_elimination(f);
             println!("\nAfter dead code elimination");
             print_ssa_blocks(fid, &f, &str_list, &function_names);
@@ -81,15 +121,19 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
             (fid, f)
         })
         .map(|(fid, f)| {
-            let f = artifect::constant_propagation(f);
-            print_ssa_blocks(fid, &f, &str_list, &function_names);
+            let f = artifect::deconstruct_ssa(f);
+            println!("\nBack to LIR");
+            print_lir_function_optimized(&f, fid, &function_names, &str_list);
+            (fid, f)
+        })
+        .map(|(fid, f)| {
+            let f = artifect::control_flow_simplification(f);
             f
         })
-        .map(|f| artifect::deconstruct_ssa(f))
-        .collect::<lir::FunctionList>();
+        .collect::<lir::FunctionList<lir::FunctionOptimized>>();
 
-    println!("\nAfter optimization:");
-    pretty_lir_functions(&lir_functions, &function_names, &str_list);
+    println!("\nAfter contro flow simplification");
+    pretty_lir_functions_optimized(&lir_functions, &function_names, &str_list);
 
     let executable = artifect::compile_byte_code(lir_functions, str_list, main_fid?)?;
 

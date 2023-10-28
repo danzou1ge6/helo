@@ -378,7 +378,7 @@ impl<T, I> FromIterator<T> for AltIdxVec<T, I> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Block {
     body: imbl::Vector<Instruction>,
     pred: HashSet<BlockId>,
@@ -394,6 +394,30 @@ impl std::ops::Index<usize> for Block {
 impl std::ops::IndexMut<usize> for Block {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.body[index]
+    }
+}
+
+pub trait BlockTopology {
+    fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a>;
+    fn predecessors<'a>(&'a self) -> impl Iterator<Item = BlockId> + 'a;
+    fn successors_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut BlockId> + 'a>;
+}
+
+impl BlockTopology for Block {
+    fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
+        match &self.exit {
+            None => panic!("block not sealed, thus has no successors"),
+            Some(jump) => jump.successors(),
+        }
+    }
+    fn predecessors<'a>(&'a self) -> impl Iterator<Item = BlockId> + 'a {
+        self.pred.iter().copied()
+    }
+    fn successors_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut BlockId> + 'a> {
+        match &mut self.exit {
+            None => panic!("block not sealed, thus has no successors"),
+            Some(jump) => jump.successors_mut(),
+        }
     }
 }
 
@@ -427,15 +451,6 @@ impl Block {
             panic!("block already sealed")
         }
         self.exit = Some(jump);
-    }
-    pub fn successors<'a>(&'a self) -> Box<dyn Iterator<Item = BlockId> + 'a> {
-        match &self.exit {
-            None => panic!("block not sealed, thus has no successors"),
-            Some(jump) => jump.successors(),
-        }
-    }
-    pub fn predessorss<'a>(&'a self) -> impl Iterator<Item = BlockId> + 'a {
-        self.pred.iter().copied()
     }
     pub fn exit(&self) -> &Jump {
         self.exit.as_ref().expect("this block is not sealed yet")
@@ -480,13 +495,6 @@ impl<B> BlockHeap_<B> {
 }
 
 impl BlockHeap {
-    pub fn suscessive<'a>(&'a self, block_id: BlockId, idx: usize) -> Option<(BlockId, usize)> {
-        if idx + 1 < self[block_id].len() {
-            Some((block_id, idx + 1))
-        } else {
-            None
-        }
-    }
     pub fn new_block(&mut self) -> BlockId {
         self.push(Block::new())
     }
@@ -520,12 +528,24 @@ pub struct Function {
     pub temp_cnt: usize,
 }
 
-pub struct FunctionTable {
-    tab: HashMap<ir::FunctionId, FunctionId>,
-    store: Vec<Option<Function>>,
+#[derive(Debug)]
+pub struct FunctionOptimized {
+    pub body: BlockId,
+    pub blocks: BlockHeap,
+    pub arity: usize,
+    pub meta: helo_parse::ast::Meta,
+    pub name: ir::StrId,
+    pub temp_cnt: usize,
+    pub block_run: BlockIdVec<bool>,
 }
 
-impl FunctionTable {
+
+pub struct FunctionTable<F> {
+    tab: HashMap<ir::FunctionId, FunctionId>,
+    store: Vec<Option<F>>,
+}
+
+impl<F> FunctionTable<F> {
     pub fn new() -> Self {
         Self {
             tab: HashMap::new(),
@@ -538,7 +558,7 @@ impl FunctionTable {
     pub fn insert(
         &mut self,
         fid: ir::FunctionId,
-        gen: impl FnOnce(FunctionId, &mut FunctionTable) -> Function,
+        gen: impl FnOnce(FunctionId, &mut FunctionTable<F>) -> F,
     ) -> FunctionId {
         let id = FunctionId(self.store.len());
         self.store.push(None);
@@ -554,7 +574,7 @@ impl FunctionTable {
             .get("main")
             .map_or_else(|| Err(errors::MainNotFound {}), |x| Ok(*x))
     }
-    pub fn to_list(self) -> FunctionList {
+    pub fn to_list(self) -> FunctionList<F> {
         FunctionList {
             v: self.store.into_iter().map(|x| x.unwrap()).collect(),
         }
@@ -562,40 +582,49 @@ impl FunctionTable {
 }
 
 #[derive(Debug)]
-pub struct FunctionList {
-    v: Vec<Function>,
+pub struct FunctionList<F> {
+    v: Vec<F>,
 }
 
-impl FunctionList {
-    pub fn get(&self, id: FunctionId) -> Option<&Function> {
+impl<F> FunctionList<F> {
+    pub fn get(&self, id: FunctionId) -> Option<&F> {
         self.v.get(id.0)
     }
-    pub fn get_mut(&mut self, id: FunctionId) -> Option<&mut Function> {
+    pub fn get_mut(&mut self, id: FunctionId) -> Option<&mut F> {
         self.v.get_mut(id.0)
     }
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Function> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut F> {
         self.v.iter_mut()
     }
     pub fn iter_id(&self) -> impl Iterator<Item = FunctionId> {
         (0..self.v.len()).map(|i| FunctionId(i))
     }
-    pub fn into_iter(self) -> impl Iterator<Item = Function> {
+    pub fn into_iter(self) -> impl Iterator<Item = F> {
         self.v.into_iter()
     }
-    pub fn into_iter_id(self) -> impl Iterator<Item = (FunctionId, Function)> {
+    pub fn into_iter_id(self) -> impl Iterator<Item = (FunctionId, F)> {
         self.v
             .into_iter()
             .enumerate()
             .map(|(i, f)| (FunctionId(i), f))
     }
+}
+
+impl FunctionList<Function> {
+    pub fn function_name_list(&self) -> FunctionNameList {
+        let v = self.v.iter().map(|f| f.name).collect();
+        FunctionNameList { v }
+    }
+}
+impl FunctionList<FunctionOptimized> {
     pub fn function_name_list(&self) -> FunctionNameList {
         let v = self.v.iter().map(|f| f.name).collect();
         FunctionNameList { v }
     }
 }
 
-impl FromIterator<Function> for FunctionList {
-    fn from_iter<T: IntoIterator<Item = Function>>(iter: T) -> Self {
+impl<F> FromIterator<F> for FunctionList<F> {
+    fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
         let v = iter.into_iter().collect();
         Self { v }
     }

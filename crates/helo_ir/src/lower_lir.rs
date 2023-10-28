@@ -79,10 +79,10 @@ impl ChunkRelocations {
     pub fn relocate(
         &self,
         chunk: &mut byte_code::Chunk,
-        block_addrs: &[usize],
+        block_addrs: &HashMap<lir::BlockId, usize>,
     ) -> Result<(), usize> {
         for (addr, origin, block_id) in self.relocations.iter() {
-            let block_addr = block_addrs[block_id.0];
+            let block_addr = block_addrs[block_id];
             let delta = if block_addr > *origin {
                 block_addr - *origin
             } else {
@@ -100,7 +100,7 @@ impl ChunkRelocations {
 
 pub fn lower_function(
     fid: lir::FunctionId,
-    lir_functions: &lir::FunctionList,
+    lir_functions: &lir::FunctionList<lir::FunctionOptimized>,
     str_index: &lir::StrIndex,
     chunk: &mut byte_code::Chunk,
     f_relocations: &mut FunctionRelocations,
@@ -120,8 +120,9 @@ pub fn lower_function(
     let block_addrs = f
         .blocks
         .iter_id()
+        .filter(|b| f.block_run[*b])
         .map(|block_id| {
-            lower_block(
+            let addr = lower_block(
                 block_id,
                 &f.blocks,
                 str_index,
@@ -129,9 +130,10 @@ pub fn lower_function(
                 &mut chunk_relocations,
                 chunk,
                 f_relocations,
-            )
+            );
+            (block_id, addr)
         })
-        .collect::<Vec<_>>();
+        .collect::<HashMap<_, _>>();
 
     if let Err(distance) = chunk_relocations.relocate(chunk, &block_addrs) {
         e.push(errors::TooLongJump::new(&f.meta, distance))
