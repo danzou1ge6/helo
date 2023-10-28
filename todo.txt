@@ -15,6 +15,6 @@
 [x] Constant propagation optimization
 [ ] Tuple construction-and-then-deconstruction optimization for pattern matching
 [x] Control flow optimization
-[ ] Tail recursive optimization based on type
+[ ] Call-instead-of-apply optimization based on type
 [ ] Impurity and IO
 [ ] Module

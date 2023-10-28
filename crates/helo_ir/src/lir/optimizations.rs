@@ -757,7 +757,7 @@ mod control_flow_simplification {
                 }
                 blocks[only_susc].pred.remove(&block_id);
                 block_run[block_id] = false;
-                
+
                 return true;
             }
 
@@ -768,10 +768,14 @@ mod control_flow_simplification {
                 .count()
                 == 1
             {
-                blocks[only_susc].successors().collect::<Vec<_>>().into_iter().for_each(|susc_susc| {
-                    blocks[susc_susc].pred.remove(&only_susc);
-                    blocks[susc_susc].pred.insert(block_id);
-                });
+                blocks[only_susc]
+                    .successors()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .for_each(|susc_susc| {
+                        blocks[susc_susc].pred.remove(&only_susc);
+                        blocks[susc_susc].pred.insert(block_id);
+                    });
 
                 let only_susc_block = std::mem::take(&mut blocks[only_susc]);
                 blocks[block_id]
@@ -786,10 +790,14 @@ mod control_flow_simplification {
             if blocks[only_susc].body.is_empty() {
                 blocks[block_id].exit = blocks[only_susc].exit.clone();
 
-                blocks[only_susc].successors().collect::<Vec<_>>().into_iter().for_each(|susc_susc| {
-                    blocks[susc_susc].pred.insert(block_id);
-                });
-                
+                blocks[only_susc]
+                    .successors()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .for_each(|susc_susc| {
+                        blocks[susc_susc].pred.insert(block_id);
+                    });
+
                 changed = true;
             }
         }
@@ -810,6 +818,24 @@ mod control_flow_simplification {
 
             if !changed {
                 break;
+            }
+        }
+
+        for block_id in blocks.iter_id() {
+            if let Some(Jump::Ret(ret_temp)) = blocks[block_id].exit {
+                if let Some(lir::Instruction::Mov(to, from)) = blocks[block_id].body.last().cloned()
+                {
+                    if to == ret_temp {
+                        blocks[block_id].body.pop_back().unwrap();
+
+                        for inst in blocks[block_id].body.iter_mut().rev() {
+                            if inst.def() == from {
+                                *inst.def_mut() = ret_temp;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     }

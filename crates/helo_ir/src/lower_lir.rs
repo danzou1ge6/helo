@@ -242,7 +242,7 @@ fn is_return_addr(
     blocks: &lir::BlockHeap,
 ) -> bool {
     inst_index + 1 == blocks[block].len()
-        && blocks[block].exit().uses().is_some_and(|u| u == inst.def())
+        && matches!(blocks[block].exit(), lir::Jump::Ret(u) if *u == inst.def())
 }
 
 fn lower_jump_table(
