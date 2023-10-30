@@ -38,7 +38,8 @@ impl<'s> PrecedenceTable<'s> {
     }
 }
 
-type ResolutionEntry<'s> = (&'s str, ast::LocalId);
+/// .2 indicates mutable
+type ResolutionEntry<'s> = (&'s str, ast::LocalId, bool);
 
 #[derive(Default)]
 pub struct FunctionResolutionEnv<'s> {
@@ -98,8 +99,10 @@ impl<'s> Resolver<'s> {
             Self(ResolutionEnv::Normal(f_res), ..) => f_res
                 .locals
                 .iter()
-                .rfind(|(n, _)| *n == name)
-                .map(|(_, id)| ast::Expr::new_untyped(ast::ExprNode::Local(*id), meta.clone())),
+                .rfind(|(n, _, _)| *n == name)
+                .map(|(_, id, mutable)| {
+                    ast::Expr::new_untyped(ast::ExprNode::Local(*id, *mutable), meta.clone())
+                }),
 
             // See documentation on [`ast::Closure_`] for how locals are laid out
             Self(
@@ -115,27 +118,32 @@ impl<'s> Resolver<'s> {
                 current
                     .locals
                     .iter()
-                    .rfind(|(n, _)| *n == name)
+                    .rfind(|(n, _, _)| *n == name)
                     .map_or_else(
                         // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
                         || {
-                            parent.locals.iter().rfind(|(n, _)| *n == name).map_or(
+                            parent.locals.iter().rfind(|(n, _, _)| *n == name).map_or(
                                 None,
-                                |(_, id)| {
+                                |(_, id, mutable)| {
                                     // Found in parent namespace
                                     if let Some(i) = captures.iter().position(|i| *i == *id) {
                                         Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured(i.into(), *this_name == name),
+                                            ast::ExprNode::Captured {
+                                                id: i.into(),
+                                                is_self: *this_name == name,
+                                                mutable: *mutable,
+                                            },
                                             meta.clone(),
                                         ))
                                     } else {
                                         captures.push(*id);
                                         caputures_meta.push(meta.clone());
                                         Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured(
-                                                (captures.len() - 1).into(),
-                                                *this_name == name,
-                                            ),
+                                            ast::ExprNode::Captured {
+                                                id: (captures.len() - 1).into(),
+                                                is_self: *this_name == name,
+                                                mutable: *mutable,
+                                            },
                                             meta.clone(),
                                         ))
                                     }
@@ -143,9 +151,9 @@ impl<'s> Resolver<'s> {
                             )
                         },
                         // Local
-                        |(_, id)| {
+                        |(_, id, mutable)| {
                             Some(ast::Expr::new_untyped(
-                                ast::ExprNode::Local(*id),
+                                ast::ExprNode::Local(*id, *mutable),
                                 meta.clone(),
                             ))
                         },
@@ -153,9 +161,9 @@ impl<'s> Resolver<'s> {
             }
         }
     }
-    pub fn define_local(&mut self, name: &'s str) -> ast::LocalId {
+    pub fn define_local(&mut self, name: &'s str, mutable: bool) -> ast::LocalId {
         let id = self.0.current().id_cnt;
-        self.0.current().locals.push((name, id));
+        self.0.current().locals.push((name, id, mutable));
         *self.0.current().scope_cnt.last_mut().unwrap() += 1;
         self.0.current().id_cnt = id + 1;
         id

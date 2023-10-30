@@ -6,7 +6,7 @@ use ast::{CapturedId, Constant, FunctionId, LocalId, Pattern};
 
 #[derive(Debug, Clone)]
 pub enum ExprNode<'s> {
-    Call {
+    Apply {
         callee: ExprId,
         args: Vec<ExprId>,
     },
@@ -34,9 +34,35 @@ pub enum ExprNode<'s> {
     UserFunction(&'s str),
     Builtin(&'s str),
     Tuple(Vec<ExprId>),
-    Captured(CapturedId, bool),
+    Captured {
+        id: CapturedId,
+        is_self: bool,
+    },
     Constant(Constant<'s>),
     Local(LocalId),
+    Seq(Vec<Stmt>, Option<ExprId>),
+    AssignLocal(LocalId, ExprId),
+    AssignCaptured(CapturedId, ExprId),
+    Never,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtNode {
+    If { test: ExprId, then: ExprId },
+    While { test: ExprId, then: ExprId },
+    Expr(ExprId),
+}
+
+#[derive(Debug, Clone)]
+pub struct Stmt {
+    pub node: StmtNode,
+    pub meta: ast::Meta,
+}
+
+impl Stmt {
+    pub fn new(node: StmtNode, meta: ast::Meta) -> Self {
+        Self { node, meta }
+    }
 }
 
 pub type CaseArm<'s> = ast::CaseArm_<'s, ExprId>;
@@ -100,7 +126,7 @@ impl<'s> ExprHeap<'s> {
         use ExprNode::*;
         let node = self.get(root).unwrap().node.clone();
         match node {
-            Call { callee, args } => {
+            Apply { callee, args } => {
                 self.walk(callee, f);
                 args.iter().for_each(|id| self.walk(*id, f));
             }

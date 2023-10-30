@@ -309,6 +309,7 @@ pub enum Instruction {
 
     /// Return value at .0
     Ret(RegisterId),
+    RetNone,
 
     /// Panic with static string at .0
     ///
@@ -380,6 +381,7 @@ pub enum OpCode {
     TAGGED,
     MOV,
     RET,
+    RET_NONE,
     PANIC,
     #[num_enum(catch_all)]
     UNKNOWN(u8),

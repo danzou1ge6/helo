@@ -48,6 +48,21 @@ impl std::fmt::Debug for ObjString {
     }
 }
 
+impl std::fmt::Display for ObjString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.v)?;
+
+        let mut p = self.next;
+        while let Some(next) = p {
+            unsafe {
+                f.write_str(&next.as_ref().v)?;
+                p = next.as_ref().next;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl ObjDebug for ObjString {
     fn debug_fmt(
         &self,

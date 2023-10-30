@@ -24,11 +24,20 @@ pub fn derive_emit(input: TokenStream) -> TokenStream {
                 let op_code_name =
                     format_ident!("{}", camel_to_upper_snake(&variant_ident.to_string()));
 
-                quote! {
-                    #variant_ident( #(#fields_bind),* ) => writer
-                        .push(#op_code_name)
-                        #( .push(#fields_bind) )*
-                        .finish()
+                if fields_bind.len() == 0 {
+                    quote! {
+                        #variant_ident =>  writer
+                            .push(#op_code_name)
+                            #( .push(#fields_bind) )*
+                            .finish()
+                    }
+                } else {
+                    quote! {
+                        #variant_ident( #(#fields_bind),* ) => writer
+                            .push(#op_code_name)
+                            #( .push(#fields_bind) )*
+                            .finish()
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -144,8 +153,8 @@ pub fn derive_to_op_code(input: TokenStream) -> TokenStream {
     if let syn::Data::Enum(data_enum) = ast.data {
         let variants_name = data_enum
             .variants
-            .into_iter()
-            .map(|variant| variant.ident)
+            .iter()
+            .map(|variant| variant.ident.clone())
             .collect::<Vec<_>>();
 
         let op_codes_name = variants_name
@@ -155,6 +164,18 @@ pub fn derive_to_op_code(input: TokenStream) -> TokenStream {
             })
             .collect::<Vec<_>>();
 
+        let variants_arm = variants_name
+            .into_iter()
+            .enumerate()
+            .zip(op_codes_name)
+            .map(|((i, name), op_code_name)| {
+                if data_enum.variants[i].fields.len() == 0 {
+                    quote! { #name => #op_code_name }
+                } else {
+                    quote! { #name(..) => #op_code_name }
+                }
+            });
+
         quote! {
             impl #data_ident {
                 pub fn to_op_code(&self) -> OpCode {
@@ -163,7 +184,7 @@ pub fn derive_to_op_code(input: TokenStream) -> TokenStream {
 
                     match self {
                         #(
-                            #variants_name(..) => #op_codes_name
+                            #variants_arm
                         ),*
                     }
                 }

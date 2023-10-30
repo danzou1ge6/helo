@@ -4,6 +4,77 @@ use thiserror::Error;
 use crate::ast;
 
 #[derive(Diagnostic, Debug, Error)]
+#[error("Can only assign to local mutable variable")]
+pub struct OnlyLocalAssign {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Assign Here")]
+    pub span: SourceSpan,
+}
+
+impl OnlyLocalAssign {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unit not allowed here")]
+pub struct NoUnitHere {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Here")]
+    pub span: SourceSpan,
+}
+
+impl NoUnitHere {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Can not create impure closure in pure function")]
+pub struct InpureClosureInPureFunction {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Closure Here")]
+    pub span: SourceSpan,
+}
+
+impl InpureClosureInPureFunction {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Can not apply impure function (routine) in pure function")]
+pub struct InpureFunctionInPureFunction {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Closure Here")]
+    pub span: SourceSpan,
+}
+
+impl InpureFunctionInPureFunction {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
 #[error("Parse error")]
 pub struct ParseError {
     #[source_code]

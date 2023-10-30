@@ -79,14 +79,18 @@ use ir::StrId;
 pub enum Instruction {
     /// Apply .2 to .1 and store result to .0
     Apply(TempId, TempId, Vec<TempId>),
+    ApplyImpure(TempId, TempId, Vec<TempId>),
     /// Call builtin
     CallBuiltin(TempId, BuiltinId, Vec<TempId>),
+    CallBuiltinImpure(TempId, BuiltinId, Vec<TempId>),
     /// Call user defined function
     Call(TempId, FunctionId, Vec<TempId>),
+    CallImpure(TempId, FunctionId, Vec<TempId>),
     /// Call .1 with arguments .2, and store result to.0.
-    /// Different from `Apply`, this instruction also implies that .1 is actually he executing closure.
+    /// Different from `Apply`, this instruction also implies that .1 is actually the executing closure.
     /// This information is useful for tail recursion optimization
     CallThisClosure(TempId, TempId, Vec<TempId>),
+    CallThisClosureImpure(TempId, TempId, Vec<TempId>),
     /// Push values at .2 to .1. Unlike [`Apply`], this instruction loads a function and then mutates its environment.
     /// This makes recursive closure possible.
     AddToEnv(TempId, TempId, Vec<TempId>),
@@ -123,7 +127,7 @@ pub enum Jump {
     /// Unconditional jump
     Jump(BlockId),
     /// Return from function
-    Ret(TempId),
+    Ret(Option<TempId>),
     /// Panic
     Panic {
         file: ir::StrId,
@@ -183,9 +187,9 @@ impl Jump {
             | JumpSwitchInt(r, _, _)
             | JumpSwitchStr(r, _, _)
             | JumpSwitchChar(r, _, _)
-            | Ret(r)
             | JumpTable(r, _) => Some(*r),
             Jump(_) | Panic { .. } => None,
+            Ret(r) => *r,
         }
     }
     pub fn use_mut(&mut self) -> Option<&mut TempId> {
@@ -195,9 +199,9 @@ impl Jump {
             | JumpSwitchInt(r, _, _)
             | JumpSwitchStr(r, _, _)
             | JumpSwitchChar(r, _, _)
-            | Ret(r)
             | JumpTable(r, _) => Some(r),
             Jump(_) | Panic { .. } => None,
+            Ret(r) => r.as_mut(),
         }
     }
 }
@@ -222,6 +226,10 @@ impl Instruction {
             | AddToEnv(_, _, _)
             | Tagged(_, _, _)
             | Mov(_, _) => true,
+            CallImpure(..)
+            | ApplyImpure(..)
+            | CallBuiltinImpure(..)
+            | CallThisClosureImpure(..) => false,
         }
     }
     pub fn def(&self) -> TempId {
@@ -231,6 +239,10 @@ impl Instruction {
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _)
+            | CallImpure(out, _, _)
+            | ApplyImpure(out, _, _)
+            | CallThisClosureImpure(out, _, _)
+            | CallBuiltinImpure(out, _, _)
             | Int(out, _)
             | Float(out, _)
             | Bool(out, _)
@@ -252,6 +264,10 @@ impl Instruction {
             | Apply(out, _, _)
             | CallThisClosure(out, _, _)
             | CallBuiltin(out, _, _)
+            | CallImpure(out, _, _)
+            | ApplyImpure(out, _, _)
+            | CallThisClosureImpure(out, _, _)
+            | CallBuiltinImpure(out, _, _)
             | Int(out, _)
             | Float(out, _)
             | Bool(out, _)
@@ -277,14 +293,18 @@ impl Instruction {
             | Buitltin(_, _)
             | Char(_, _) => Box::new([].into_iter()),
             Apply(_, a, args)
+            | ApplyImpure(_, a, args)
             | Push(_, a, args)
             | CallThisClosure(_, a, args)
+            | CallThisClosureImpure(_, a, args)
             | AddToEnv(_, a, args) => {
                 Box::new([a].into_iter().copied().chain(args.iter().copied()))
             }
-            Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
-                Box::new(args.iter().copied())
-            }
+            Call(_, _, args)
+            | CallBuiltin(_, _, args)
+            | CallImpure(_, _, args)
+            | CallBuiltinImpure(_, _, args)
+            | Tagged(_, _, args) => Box::new(args.iter().copied()),
             Field(_, input, _) | Mov(_, input) => Box::new([*input].into_iter()),
         }
     }
@@ -299,12 +319,16 @@ impl Instruction {
             | Buitltin(_, _)
             | Char(_, _) => Box::new([].into_iter()),
             Apply(_, a, args)
+            | ApplyImpure(_, a, args)
             | Push(_, a, args)
             | CallThisClosure(_, a, args)
+            | CallThisClosureImpure(_, a, args)
             | AddToEnv(_, a, args) => Box::new([a].into_iter().chain(args.iter_mut())),
-            Call(_, _, args) | CallBuiltin(_, _, args) | Tagged(_, _, args) => {
-                Box::new(args.iter_mut())
-            }
+            Call(_, _, args)
+            | CallBuiltin(_, _, args)
+            | CallImpure(_, _, args)
+            | CallBuiltinImpure(_, _, args)
+            | Tagged(_, _, args) => Box::new(args.iter_mut()),
             Field(_, input, _) | Mov(_, input) => Box::new([input].into_iter()),
         }
     }
@@ -538,7 +562,6 @@ pub struct FunctionOptimized {
     pub temp_cnt: usize,
     pub block_run: BlockIdVec<bool>,
 }
-
 
 pub struct FunctionTable<F> {
     tab: HashMap<ir::FunctionId, FunctionId>,

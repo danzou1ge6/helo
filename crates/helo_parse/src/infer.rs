@@ -75,9 +75,18 @@ fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::Captured(id, is_self) => {
-            infer_captured(*id, *is_self, &expr.meta, symbols, typed_functions)
-        }
+        ExprNode::Captured {
+            id,
+            is_self,
+            mutable,
+        } => infer_captured(
+            *id,
+            *is_self,
+            *mutable,
+            &expr.meta,
+            symbols,
+            typed_functions,
+        ),
         ExprNode::MakeClosure(closure) => infer_make_closure(
             closure,
             &expr.meta,
@@ -109,7 +118,37 @@ fn infer_expr<'s>(
             e,
         ),
         ExprNode::Constant(constant) => infer_constant(constant, &expr.meta),
-        ExprNode::Local(id) => infer_local(*id, &expr.meta),
+        ExprNode::Local(id, mutable) => infer_local(*id, *mutable, &expr.meta),
+        ExprNode::Seq(stmts, result) => infer_seq(
+            stmts.iter(),
+            *result,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            e,
+        ),
+        ExprNode::Assign(to, from) => infer_assign(
+            *to,
+            *from,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            e,
+        ),
+        ExprNode::Unit => {
+            e.push(errors::NoUnitHere::new(&expr.meta));
+            typed::Expr {
+                node: typed::ExprNode::Never,
+                type_: ast::Type::new_never(expr.meta.clone()),
+                meta: expr.meta.clone(),
+            }
+        }
     };
     if let Some(provided_type) = &expr.type_ {
         let provided_type = inferer.instantiate_wildcard(provided_type);
@@ -119,6 +158,176 @@ fn infer_expr<'s>(
     }
 
     typed_expr
+}
+
+fn infer_stmt<'s>(
+    stmt: &ast::Stmt,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Stmt {
+    match &stmt.node {
+        ast::StmtNode::If { test, then } => {
+            let test = infer_expr(
+                *test,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+            let then = infer_expr(
+                *then,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+            let test = typed_nodes.push(test);
+            let then = typed_nodes.push(then);
+            typed::Stmt::new(typed::StmtNode::If { test, then }, stmt.meta.clone())
+        }
+        ast::StmtNode::While { test, then } => {
+            let test = infer_expr(
+                *test,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+            let then = infer_expr(
+                *then,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+            let test = typed_nodes.push(test);
+            let then = typed_nodes.push(then);
+            typed::Stmt::new(typed::StmtNode::While { test, then }, stmt.meta.clone())
+        }
+        ast::StmtNode::Expr(expr) => {
+            let expr = infer_expr(
+                *expr,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            );
+            let expr = typed_nodes.push(expr);
+            typed::Stmt::new(typed::StmtNode::Expr(expr), stmt.meta.clone())
+        }
+    }
+}
+
+fn infer_seq<'s, 'a>(
+    stmts: impl Iterator<Item = &'a ast::Stmt>,
+    result: Option<ast::ExprId>,
+    stmts_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    let stmts = stmts
+        .map(|stmt| {
+            infer_stmt(
+                stmt,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                e,
+            )
+        })
+        .collect();
+
+    let result = result.map(|id| {
+        infer_expr(
+            id,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            e,
+        )
+    });
+
+    let type_ = result.as_ref().map_or(
+        ast::Type {
+            node: ast::TypeNode::Unit,
+            meta: stmts_meta.clone(),
+        },
+        |expr| expr.type_.clone(),
+    );
+
+    let result = result.map(|r| typed_nodes.push(r));
+
+    typed::Expr {
+        node: typed::ExprNode::Seq(stmts, result),
+        type_,
+        meta: stmts_meta.clone(),
+    }
+}
+
+fn infer_assign<'s>(
+    to: ast::ExprId,
+    from: ast::ExprId,
+    assign_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    let from = infer_expr(
+        from,
+        symbols,
+        ast_nodes,
+        typed_nodes,
+        typed_functions,
+        inferer,
+        e,
+    );
+    match &ast_nodes[to].node {
+        ast::ExprNode::Local(local, true) => typed::Expr {
+            node: typed::ExprNode::AssignLocal(*local, typed_nodes.push(from)),
+            type_: ast::Type::new_unit(assign_meta.clone()),
+            meta: assign_meta.clone(),
+        },
+        ast::ExprNode::Captured {
+            id, mutable: true, ..
+        } => typed::Expr {
+            node: typed::ExprNode::AssignCaptured(*id, typed_nodes.push(from)),
+            type_: ast::Type::new_unit(assign_meta.clone()),
+            meta: assign_meta.clone(),
+        },
+        _ => {
+            e.push(errors::OnlyLocalAssign::new(assign_meta));
+            typed::Expr {
+                node: typed::ExprNode::Never,
+                type_: ast::Type::new_never(assign_meta.clone()),
+                meta: assign_meta.clone(),
+            }
+        }
+    }
 }
 
 fn infer_expr_many<'s, 'a>(
@@ -206,16 +415,17 @@ fn infer_call<'s>(
         e,
     );
 
-    let ret_type = match inferer
+    let callee_type_node = inferer
         .resolve(&callee.type_)
         .unwrap_or_else(|err| {
             e.push(err);
             ast::Type::new_never(call_meta.clone())
         })
-        .node
-    {
+        .node;
+    let ret_type = match &callee_type_node {
         // NOTE that we assume that type-vars have already been renamed
-        ast::TypeNode::Callable(ast::CallableType { params, ret, .. }) => {
+        ast::TypeNode::Callable(ast::CallableType { params, ret, .. })
+        | ast::TypeNode::ImpureCallable(ast::CallableType { params, ret }) => {
             if args.len() > params.len() {
                 e.push(errors::TooManyArguments::new(call_meta, params.len()));
             }
@@ -223,15 +433,30 @@ fn infer_call<'s>(
                 .unify_list(args.iter().map(|a| &a.type_), params.iter(), call_meta)
                 .commit(e);
 
+            if callee_type_node.impure()
+                && symbols
+                    .function(typed_functions.currently_infering().unwrap())
+                    .pure
+            {
+                e.push(errors::InpureClosureInPureFunction::new(call_meta));
+            }
+
+            let type_constructor = if callee_type_node.impure() {
+                ast::TypeNode::ImpureCallable
+            } else {
+                ast::TypeNode::Callable
+            };
+
             if args.len() == params.len() {
                 ret.as_ref().clone()
             } else {
+                // Curried
                 let ret_callable_type = ast::CallableType {
                     params: params[args.len()..params.len()].to_vec(),
                     ret: ret.clone(),
                 };
                 let ret_type = ast::Type {
-                    node: ast::TypeNode::Callable(ret_callable_type),
+                    node: type_constructor(ret_callable_type),
                     meta: call_meta.clone(),
                 };
                 ret_type
@@ -242,11 +467,21 @@ fn infer_call<'s>(
                 node: ast::TypeNode::Var(inferer.alloc_var()),
                 meta: call_meta.clone(),
             };
+
+            let type_constructor = if symbols
+                .function(typed_functions.currently_infering().unwrap())
+                .pure
+            {
+                ast::TypeNode::Callable
+            } else {
+                ast::TypeNode::ImpureCallable
+            };
+
             inferer
                 .update_var(
-                    v_id,
+                    *v_id,
                     &ast::Type {
-                        node: ast::TypeNode::Callable(ast::CallableType {
+                        node: type_constructor(ast::CallableType {
                             params: args.iter().map(|a| a.type_.clone()).collect(),
                             ret: Box::new(ret_type.clone()),
                         }),
@@ -266,7 +501,7 @@ fn infer_call<'s>(
     };
 
     typed::Expr {
-        node: typed::ExprNode::Call {
+        node: typed::ExprNode::Apply {
             callee: typed_nodes.push(callee),
             args: typed_nodes.push_many(args.into_iter()),
         },
@@ -400,10 +635,16 @@ fn infer_global<'s>(
             inferer,
             e,
         ) {
+            let type_constructor = if f.pure {
+                ast::TypeNode::Callable
+            } else {
+                ast::TypeNode::ImpureCallable
+            };
+
             return typed::Expr {
                 node: typed::ExprNode::UserFunction(name),
                 type_: ast::Type {
-                    node: ast::TypeNode::Callable(renamed_f_type.into()),
+                    node: type_constructor(renamed_f_type.into()),
                     meta: f.meta.clone(),
                 },
                 meta: global_meta.clone(),
@@ -413,12 +654,19 @@ fn infer_global<'s>(
         // So we fail with never type silently
 
         // Global is builtin
-    } else if let Some(f) = symbols.get_builtin_type(name) {
+    } else if let Some(f) = symbols.get_builtin(name) {
         let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
+
+        let type_constructor = if f.pure {
+            ast::TypeNode::Callable
+        } else {
+            ast::TypeNode::ImpureCallable
+        };
+
         let r = typed::Expr {
             node: typed::ExprNode::Builtin(name),
             type_: ast::Type {
-                node: ast::TypeNode::Callable(renamed_type),
+                node: type_constructor(renamed_type),
                 meta: f.meta.clone(),
             },
             meta: global_meta.clone(),
@@ -464,7 +712,7 @@ fn infer_global<'s>(
 
     // Fail: fallthrough
     typed::Expr {
-        node: typed::ExprNode::UserFunction(name),
+        node: typed::ExprNode::Never,
         type_: ast::Type::new_never(global_meta.clone()),
         meta: global_meta.clone(),
     }
@@ -565,6 +813,14 @@ fn infer_make_closure<'s>(
     inferer: &mut inferer::Inferer<'s>,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
+    if !symbols.function(&closure_id).pure
+        && symbols
+            .function(typed_functions.currently_infering().unwrap())
+            .pure
+    {
+        e.push(errors::InpureClosureInPureFunction::new(closure_meta));
+    }
+
     let closure_type = infer_function_type_renamed(
         closure_id,
         closure_meta,
@@ -579,6 +835,11 @@ fn infer_make_closure<'s>(
         || ast::Type::new_never(closure_meta.clone()),
         |c| {
             let f = symbols.function(&closure_id);
+            let type_constructor = if f.pure {
+                ast::TypeNode::Callable
+            } else {
+                ast::TypeNode::ImpureCallable
+            };
             c.captures
                 .iter()
                 .zip(f.captures.iter())
@@ -589,7 +850,7 @@ fn infer_make_closure<'s>(
                         .commit(e);
                 });
             ast::Type {
-                node: ast::TypeNode::Callable(c.into()),
+                node: type_constructor(c.into()),
                 meta: closure_meta.clone(),
             }
         },
@@ -751,7 +1012,7 @@ fn infer_case<'s>(
     }
 }
 
-fn infer_local(id: ast::LocalId, id_meta: &ast::Meta) -> typed::Expr<'static> {
+fn infer_local(id: ast::LocalId, _mutable: bool, id_meta: &ast::Meta) -> typed::Expr<'static> {
     typed::Expr {
         node: typed::ExprNode::Local(id),
         type_: ast::Type::new_var(type_var_id_for_local(id), id_meta.clone()),
@@ -762,6 +1023,7 @@ fn infer_local(id: ast::LocalId, id_meta: &ast::Meta) -> typed::Expr<'static> {
 fn infer_captured<'s>(
     id: ast::CapturedId,
     is_self: bool,
+    _mutable: bool,
     id_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
@@ -770,7 +1032,7 @@ fn infer_captured<'s>(
         .function(typed_functions.currently_infering().unwrap())
         .local_cnt;
     typed::Expr {
-        node: typed::ExprNode::Captured(id, is_self),
+        node: typed::ExprNode::Captured { id, is_self },
         type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id), id_meta.clone()),
         meta: id_meta.clone(),
     }

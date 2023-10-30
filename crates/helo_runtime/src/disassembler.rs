@@ -419,6 +419,7 @@ impl<'c> Iterator for RowIter<'c> {
                 let r = reader.ret();
                 rows.push(mk_row1(r.to_string(), es()))
             }
+            RET_NONE => rows.push(mk_row1(es(), es())),
             PANIC => {
                 let msg_addr = reader.panic();
                 let reader = self.exe.chunk.reader(self.ip + 8);

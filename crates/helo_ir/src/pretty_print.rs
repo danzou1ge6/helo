@@ -147,8 +147,12 @@ where
                     .append(pretty_ir(*else_, nodes, str_list, allocator))
                     .indent(2),
             ),
-        Call { callee, args } => allocator
-            .text("(")
+        Apply {
+            callee,
+            args,
+            callee_impure,
+        } => allocator
+            .text(if *callee_impure { "('" } else { "(" })
             .append(pretty_ir(*callee, nodes, str_list, allocator))
             .append(allocator.softline())
             .append(
@@ -233,6 +237,42 @@ where
             )
             .append(allocator.text(")"))
             .align(),
+        Assign(to, from) => allocator
+            .text("(SET")
+            .append(allocator.softline())
+            .append(to.to_string())
+            .append(allocator.softline())
+            .append(pretty_ir(*from, nodes, str_list, allocator))
+            .append(")"),
+        Seq(exprs, result) => allocator
+            .text("(BEGIN")
+            .append(
+                allocator
+                    .intersperse(
+                        exprs
+                            .iter()
+                            .map(|expr| pretty_ir(*expr, nodes, str_list, allocator)),
+                        allocator.hardline(),
+                    )
+                    .align()
+                    .indent(2),
+            )
+            .append(result.map(|r| pretty_ir(r, nodes, str_list, allocator).indent(2)))
+            .append(")"),
+        If { test, then } => allocator
+            .text("(IF")
+            .append(allocator.softline())
+            .append(pretty_ir(*test, nodes, str_list, allocator))
+            .append(allocator.softline())
+            .append(pretty_ir(*then, nodes, str_list, allocator))
+            .append(")"),
+        While { test, then } => allocator
+            .text("(WHILE")
+            .append(allocator.softline())
+            .append(pretty_ir(*test, nodes, str_list, allocator))
+            .append(allocator.softline())
+            .append(pretty_ir(*then, nodes, str_list, allocator))
+            .append(")"),
     }
 }
 
@@ -276,6 +316,44 @@ where
             allocator
                 .text(format!(
                     "x{:<3} <- CALL_BUILTIN B{}'{}' ",
+                    ret, callee, callee_name
+                ))
+                .append(
+                    allocator
+                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+                )
+        }
+        ApplyImpure(ret, callee, args) => allocator
+            .text(format!("x{:<3} <- APPLY_IMPURE x{} ", ret, callee))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        CallThisClosureImpure(ret, callee, args) => allocator
+            .text(format!(
+                "x{:<3} <- CALL_THIS_CLOSURE_IMPURE x{} ",
+                ret, callee
+            ))
+            .append(
+                allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+            ),
+        CallImpure(ret, callee, args) => {
+            let callee_name = functions.get(*callee);
+            let callee_name = str_list.get(callee_name);
+            allocator
+                .text(format!(
+                    "x{:<3} <- CALL_IMPURE f{}'{}' ",
+                    ret, callee, callee_name
+                ))
+                .append(
+                    allocator
+                        .intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
+                )
+        }
+        CallBuiltinImpure(ret, callee, args) => {
+            let callee_name = helo_runtime::builtins::name_by_id(*callee);
+            allocator
+                .text(format!(
+                    "x{:<3} <- CALL_BUILTIN_IMPURE B{}'{}' ",
                     ret, callee, callee_name
                 ))
                 .append(
@@ -402,7 +480,8 @@ where
             let file = str_list.get(*file);
             allocator.text(format!("PANIC '{}'@{}:{}:{}", msg, file, span.0, span.1))
         }
-        Ret(t) => allocator.text(format!("RET x{}", t)),
+        Ret(Some(t)) => allocator.text(format!("RET x{}", t)),
+        Ret(None) => allocator.text("RET"),
     }
 }
 

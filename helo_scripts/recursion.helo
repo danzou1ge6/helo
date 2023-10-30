@@ -31,3 +31,9 @@ data CrazyList['a] = End
 fn crazyListSize xs = case xs of
      End              -> 0
     |CrazyCon _,rest -> 1 + crazyListSize rest
+fn filter_out s,c =
+    if str_some s then
+        if (str_head s) `char_eq` c then
+            filter_out (str_tail s),c
+        else (char_to_str (str_head s)) `str_cat` (filter_out (str_tail s),c)
+    else ""

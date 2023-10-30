@@ -51,8 +51,62 @@ pub fn lower_function<'s>(
             body,
             meta: f.meta.clone(),
             name: f_name_id,
+            has_return: !f.type_.ret.node.is_unit(),
         }
     })
+}
+
+fn lower_stmt<'s>(
+    stmt: &typed::Stmt,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+    lower_ctx: &mut Context,
+) -> ir::ExprId {
+    match &stmt.node {
+        typed::StmtNode::If { test, then } => {
+            let test = lower_expr(*test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let then = lower_expr(*then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            ir_nodes.push(ir::Expr::new(
+                ir::ExprNode::While { test, then },
+                (&stmt.meta).into(),
+            ))
+        }
+
+        typed::StmtNode::While { test, then } => {
+            let test = lower_expr(*test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let then = lower_expr(*then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            ir_nodes.push(ir::Expr::new(
+                ir::ExprNode::While { test, then },
+                (&stmt.meta).into(),
+            ))
+        }
+        typed::StmtNode::Expr(expr) => {
+            let expr = lower_expr(*expr, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            expr
+        }
+    }
+}
+
+fn lower_seq<'s>(
+    stmts: &[typed::Stmt],
+    result: &Option<typed::ExprId>,
+    meta: &ast::Meta,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+    lower_ctx: &mut Context,
+) -> ir::ExprId {
+    let stmts = stmts
+        .iter()
+        .map(|stmt| lower_stmt(stmt, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
+        .collect();
+    let result = result
+        .as_ref()
+        .map(|r| lower_expr(*r, symbols, typed_nodes, ir_nodes, str_table, lower_ctx));
+    ir_nodes.push(ir::Expr::new(ir::ExprNode::Seq(stmts, result), meta.into()))
 }
 
 fn lower_expr<'s>(
@@ -66,7 +120,7 @@ fn lower_expr<'s>(
     let expr = &typed_nodes[id];
     use typed::ExprNode::*;
     match &expr.node {
-        Call { callee, args } => lower_call(
+        Apply { callee, args } => lower_apply(
             *callee,
             &args[..],
             &expr.meta,
@@ -136,9 +190,37 @@ fn lower_expr<'s>(
             str_table,
             lower_ctx,
         ),
-        Captured(id, is_self) => lower_captured(*id, *is_self, &expr.meta, ir_nodes),
+        Captured { id, is_self } => lower_captured(*id, *is_self, &expr.meta, ir_nodes),
         Constant(c) => lower_constant(c.clone(), &expr.meta, ir_nodes, str_table),
         Local(id) => lower_local(*id, &expr.meta, ir_nodes, lower_ctx),
+        AssignLocal(local, value) => {
+            let value = lower_expr(*value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let r = ir::Expr::new(
+                ir::ExprNode::Assign(map_local(*local, &lower_ctx), value),
+                (&expr.meta).into(),
+            );
+            ir_nodes.push(r)
+        }
+        AssignCaptured(captured, value) => {
+            let local = ir::LocalId::from(captured.0);
+            let value = lower_expr(*value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let r = ir::Expr::new(
+                ir::ExprNode::Assign(map_local(local, &lower_ctx), value),
+                (&expr.meta).into(),
+            );
+            ir_nodes.push(r)
+        }
+        Seq(stmts, result) => lower_seq(
+            &stmts,
+            result,
+            &expr.meta,
+            symbols,
+            typed_nodes,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+        ),
+        Never => panic!("Typed AST with Never nodes can not be lowered to IR"),
     }
 }
 
@@ -737,7 +819,7 @@ fn lower_tuple<'s>(
     ))
 }
 
-fn lower_call<'s>(
+fn lower_apply<'s>(
     callee: typed::ExprId,
     args: &[typed::ExprId],
     call_meta: &ast::Meta,
@@ -747,20 +829,17 @@ fn lower_call<'s>(
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
-
     if matches!(&typed_nodes[callee].node, typed::ExprNode::Builtin("panic")) {
         match &typed_nodes[args[0]].node {
-            typed::ExprNode::Constant(c) => {
-                match c {
-                    ast::Constant::Str(msg) => {
-                        return lower_panic(*&msg, call_meta, ir_nodes, str_table);
-                    },
-                    _ => unreachable!()
+            typed::ExprNode::Constant(c) => match c {
+                ast::Constant::Str(msg) => {
+                    return lower_panic(*&msg, call_meta, ir_nodes, str_table);
                 }
+                _ => unreachable!(),
             },
-            _ => unreachable!()
+            _ => unreachable!(),
         };
-    } 
+    }
 
     let args: Vec<_> = args
         .iter()
@@ -773,8 +852,16 @@ fn lower_call<'s>(
             ir::Expr::new(ir::ExprNode::MakeTagged(tag, args), call_meta.into())
         }
         _ => {
+            let callee_impure = typed_nodes[callee].type_.node.impure();
             let callee = lower_expr(callee, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-            ir::Expr::new(ir::ExprNode::Call { callee, args }, call_meta.into())
+            ir::Expr::new(
+                ir::ExprNode::Apply {
+                    callee,
+                    args,
+                    callee_impure,
+                },
+                call_meta.into(),
+            )
         }
     };
 
@@ -787,7 +874,10 @@ fn lower_panic<'s>(
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
 ) -> ir::ExprId {
-    let expr = ir::Expr::new(ir::ExprNode::panic_string(panic_meta, msg.to_string(), str_table), panic_meta.into());
+    let expr = ir::Expr::new(
+        ir::ExprNode::panic_string(panic_meta, msg.to_string(), str_table),
+        panic_meta.into(),
+    );
     ir_nodes.push(expr)
 }
 
@@ -843,6 +933,10 @@ fn lower_captured<'s>(
     ir_nodes.push(ir::Expr::new(node, captured_meta.into()))
 }
 
+fn map_local(id: ast::LocalId, lower_ctx: &Context) -> ir::LocalId {
+    ir::LocalId::from(id.0 + lower_ctx.captured_cnt)
+}
+
 fn lower_local<'s>(
     id: ast::LocalId,
     local_meta: &ast::Meta,
@@ -850,7 +944,7 @@ fn lower_local<'s>(
     lower_ctx: &mut Context,
 ) -> ir::ExprId {
     ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::Local(ast::LocalId::from(id.0 + lower_ctx.captured_cnt)),
+        ir::ExprNode::Local(map_local(id, &lower_ctx)),
         local_meta.into(),
     ))
 }

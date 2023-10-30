@@ -232,7 +232,7 @@ impl super::BlockTopology for SsaBlock {
 
 impl Default for SsaBlock {
     fn default() -> Self {
-        Self::new(Jump::Ret(TempId::default()))
+        Self::new(Jump::Ret(None))
     }
 }
 
@@ -798,5 +798,5 @@ pub struct Function {
     pub meta: helo_parse::ast::Meta,
     pub name: crate::ir::StrId,
     pub temp_cnt: usize,
-    pub block_run: lir::BlockIdVec<bool>
+    pub block_run: lir::BlockIdVec<bool>,
 }

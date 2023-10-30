@@ -50,7 +50,7 @@ impl From<Vec<lir::BlockId>> for BlockEnd {
 }
 
 fn lower_expr_untied<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -131,9 +131,14 @@ fn lower_expr_untied<'s>(
             compiler,
         )
         .into(),
-        Call { callee, args } => lower_call(
-            to,
+        Apply {
+            callee,
+            args,
+            callee_impure,
+        } => lower_apply(
+            to.unwrap_or_else(|| compiler.new_temp()),
             *callee,
+            *callee_impure,
             args,
             ir_nodes,
             ir_functions,
@@ -144,9 +149,15 @@ fn lower_expr_untied<'s>(
             compiler,
         )
         .into(),
-        Immediate(im) => lower_immediate(to, im.clone(), block, blocks).into(),
+        Immediate(im) => lower_immediate(
+            to.unwrap_or_else(|| compiler.new_temp()),
+            im.clone(),
+            block,
+            blocks,
+        )
+        .into(),
         MakeClosure(fid, captures) => lower_make_closure(
-            to,
+            to.unwrap_or_else(|| compiler.new_temp()),
             fid,
             captures,
             ir_nodes,
@@ -158,10 +169,24 @@ fn lower_expr_untied<'s>(
             compiler,
         )
         .into(),
-        Local(local) => lower_local(to, *local, block, blocks, compiler).into(),
-        ThisClosure(local) => lower_local(to, *local, block, blocks, compiler).into(),
+        Local(local) => lower_local(
+            to.unwrap_or_else(|| compiler.new_temp()),
+            *local,
+            block,
+            blocks,
+            compiler,
+        )
+        .into(),
+        ThisClosure(local) => lower_local(
+            to.unwrap_or_else(|| compiler.new_temp()),
+            *local,
+            block,
+            blocks,
+            compiler,
+        )
+        .into(),
         UserFunction(fid) => lower_user_function(
-            to,
+            to.unwrap_or_else(|| compiler.new_temp()),
             fid,
             ir_nodes,
             ir_functions,
@@ -171,12 +196,25 @@ fn lower_expr_untied<'s>(
             functions,
         )
         .into(),
-        Builtin(fid) => lower_builtin(to, fid, builtins, block, blocks).into(),
-        VariantField(local, pos) | TupleField(local, pos) => {
-            lower_field(to, *local, *pos, block, blocks, compiler).into()
-        }
+        Builtin(fid) => lower_builtin(
+            to.unwrap_or_else(|| compiler.new_temp()),
+            fid,
+            builtins,
+            block,
+            blocks,
+        )
+        .into(),
+        VariantField(local, pos) | TupleField(local, pos) => lower_field(
+            to.unwrap_or_else(|| compiler.new_temp()),
+            *local,
+            *pos,
+            block,
+            blocks,
+            compiler,
+        )
+        .into(),
         MakeTagged(tag, v) => lower_make_tagged(
-            to,
+            to.unwrap_or_else(|| compiler.new_temp()),
             tag.code(),
             v,
             ir_nodes,
@@ -189,7 +227,7 @@ fn lower_expr_untied<'s>(
         )
         .into(),
         MakeTuple(v) => lower_make_tagged(
-            to,
+            to.unwrap_or_else(|| compiler.new_temp()),
             0,
             v,
             ir_nodes,
@@ -202,11 +240,60 @@ fn lower_expr_untied<'s>(
         )
         .into(),
         Panic { file, span, msg } => lower_panic(*msg, *file, *span, block, blocks).into(),
+        Assign(target, value) => lower_assign(
+            *target,
+            *value,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        Seq(exprs, result) => lower_seq(
+            to,
+            exprs,
+            *result,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        If { test, then } => lower_if(
+            *test,
+            *then,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
+        While { test, then } => lower_while(
+            *test,
+            *then,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        )
+        .into(),
     }
 }
 
 fn lower_expr<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -242,7 +329,7 @@ fn lower_expr<'s>(
 }
 
 fn lower_function_body<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -298,7 +385,11 @@ pub fn lower_function<'s>(
         let body = blocks.new_block();
 
         lower_function_body(
-            compiler.ret_temp(),
+            if f.has_return {
+                Some(compiler.ret_temp())
+            } else {
+                None
+            },
             f.body,
             ir_nodes,
             ir_functions,
@@ -321,7 +412,7 @@ pub fn lower_function<'s>(
 }
 
 fn lower_expr_new_block<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -345,8 +436,174 @@ fn lower_expr_new_block<'s>(
     (begin, end)
 }
 
+fn lower_assign<'s>(
+    to: ir::LocalId,
+    value: ir::ExprId,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable<lir::Function>,
+    compiler: &mut Compiler,
+) -> lir::BlockId {
+    let value_temp = compiler.new_temp();
+    let block = lower_expr(
+        Some(value_temp),
+        value,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        block,
+        blocks,
+        functions,
+        compiler,
+    );
+    blocks[block].push(lir::Instruction::Mov(
+        compiler.local_id_to_temp(to),
+        value_temp,
+    ));
+    block
+}
+
+fn lower_seq<'s>(
+    to: Option<lir::TempId>,
+    exprs: &[ir::ExprId],
+    result: Option<ir::ExprId>,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable<lir::Function>,
+    compiler: &mut Compiler,
+) -> lir::BlockId {
+    let mut block = exprs.iter().copied().fold(block, |block, expr| {
+        let block = lower_expr(
+            None,
+            expr,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        );
+        block
+    });
+
+    if let Some(result) = result {
+        block = lower_expr(
+            to,
+            result,
+            ir_nodes,
+            ir_functions,
+            builtins,
+            block,
+            blocks,
+            functions,
+            compiler,
+        );
+    }
+
+    block
+}
+
+fn lower_if<'s>(
+    test: ir::ExprId,
+    then: ir::ExprId,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable<lir::Function>,
+    compiler: &mut Compiler,
+) -> Vec<lir::BlockId> {
+    let test_temp = compiler.new_temp();
+    let block = lower_expr(
+        Some(test_temp),
+        test,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        block,
+        blocks,
+        functions,
+        compiler,
+    );
+
+    let else_branch = blocks.new_block();
+    let (then_branch, then_branch_end) = lower_expr_new_block(
+        None,
+        then,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        blocks,
+        functions,
+        compiler,
+    );
+
+    blocks.seal(
+        block,
+        lir::Jump::JumpIfElse(test_temp, then_branch, else_branch),
+    );
+    vec![then_branch_end, else_branch]
+}
+
+fn lower_while<'s>(
+    test: ir::ExprId,
+    then: ir::ExprId,
+    ir_nodes: &ir::ExprHeap<'s>,
+    ir_functions: &ir::FunctionTable,
+    builtins: &lir::BuiltinTable,
+    block: lir::BlockId,
+    blocks: &mut lir::BlockHeap,
+    functions: &mut lir::FunctionTable<lir::Function>,
+    compiler: &mut Compiler,
+) -> lir::BlockId {
+    let test_temp = compiler.new_temp();
+    let test_block = blocks.new_block();
+
+    blocks.seal(block, lir::Jump::Jump(test_block));
+
+    let test_block = lower_expr(
+        Some(test_temp),
+        test,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        test_block,
+        blocks,
+        functions,
+        compiler,
+    );
+
+    let else_branch = blocks.new_block();
+    let (then_branch, then_branch_end) = lower_expr_new_block(
+        None,
+        then,
+        ir_nodes,
+        ir_functions,
+        builtins,
+        blocks,
+        functions,
+        compiler,
+    );
+
+    blocks.seal(
+        block,
+        lir::Jump::JumpIfElse(test_temp, then_branch, else_branch),
+    );
+
+    blocks.seal(then_branch_end, lir::Jump::Jump(test_block));
+
+    else_branch
+}
 fn lower_let_bind<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     local: ir::LocalId,
     value: ir::ExprId,
     in_: ir::ExprId,
@@ -360,7 +617,7 @@ fn lower_let_bind<'s>(
 ) -> lir::BlockId {
     let temp_id = compiler.local_id_to_temp(local);
     let block = lower_expr(
-        temp_id,
+        Some(temp_id),
         value,
         ir_nodes,
         ir_functions,
@@ -385,7 +642,7 @@ fn lower_let_bind<'s>(
 }
 
 fn lower_switch_tag<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     operand: ir::ExprId,
     arms: &Vec<(ir::Tag<'s>, ir::ExprId)>,
     default: ir::ExprId,
@@ -420,7 +677,7 @@ fn lower_switch_tag<'s>(
 
     let operand_temp = compiler.new_temp();
     let block = lower_expr(
-        operand_temp,
+        Some(operand_temp),
         operand,
         ir_nodes,
         ir_functions,
@@ -455,7 +712,7 @@ fn lower_switch_tag<'s>(
 }
 
 fn lower_switch<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     operand: ir::ExprId,
     arms: &[(ir::Immediate, ir::ExprId)],
     default: ir::ExprId,
@@ -565,7 +822,7 @@ fn lower_switch<'s>(
 }
 
 fn lower_cond<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     arms: &[(ir::ExprId, ir::ExprId)],
     default: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
@@ -582,7 +839,7 @@ fn lower_cond<'s>(
     let block = arms.iter().fold(block, |block, (cond, e)| {
         let test = compiler.new_temp();
         let block = lower_expr(
-            test,
+            Some(test),
             *cond,
             ir_nodes,
             ir_functions,
@@ -630,7 +887,7 @@ fn lower_cond<'s>(
 }
 
 fn lower_if_else<'s>(
-    to: lir::TempId,
+    to: Option<lir::TempId>,
     test: ir::ExprId,
     then: ir::ExprId,
     else_: ir::ExprId,
@@ -644,7 +901,7 @@ fn lower_if_else<'s>(
 ) -> Vec<lir::BlockId> {
     let test_temp = compiler.new_temp();
     let block = lower_expr(
-        test_temp,
+        Some(test_temp),
         test,
         ir_nodes,
         ir_functions,
@@ -684,9 +941,10 @@ fn lower_if_else<'s>(
     vec![then_branch_end, else_branch_end]
 }
 
-fn lower_call<'s>(
+fn lower_apply<'s>(
     to: lir::TempId,
     callee: ir::ExprId,
+    callee_impure: bool,
     args: &[ir::ExprId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
@@ -706,7 +964,7 @@ fn lower_call<'s>(
                 .zip(args_temp.iter())
                 .fold($block, |block, (arg, temp)| {
                     lower_expr(
-                        *temp,
+                        Some(*temp),
                         *arg,
                         ir_nodes,
                         ir_functions,
@@ -725,7 +983,14 @@ fn lower_call<'s>(
         // Instead, we call the builtin directly.
         ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name) => {
             let block = emit_arguments!(block);
-            blocks[block].push(CallBuiltin(to, builtins.id_by_name(name), args_temp));
+
+            let inst = if callee_impure {
+                CallBuiltinImpure
+            } else {
+                CallBuiltin
+            };
+
+            blocks[block].push(inst(to, builtins.id_by_name(name), args_temp));
             block
         }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
@@ -733,20 +998,30 @@ fn lower_call<'s>(
         ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
             let block = emit_arguments!(block);
             let lir_fid = lower_function(name, ir_nodes, ir_functions, builtins, functions);
-            blocks[block].push(Call(to, lir_fid, args_temp));
+
+            let inst = if callee_impure { CallImpure } else { Call };
+
+            blocks[block].push(inst(to, lir_fid, args_temp));
             block
         }
         // Optimization: Call of the executing closure
         ir::ExprNode::ThisClosure(local) if args.len() == compiler.arity => {
             let callee_temp = compiler.local_id_to_temp(*local);
             let block = emit_arguments!(block);
-            blocks[block].push(CallThisClosure(to, callee_temp, args_temp));
+
+            let inst = if callee_impure {
+                CallThisClosureImpure
+            } else {
+                CallThisClosure
+            };
+
+            blocks[block].push(inst(to, callee_temp, args_temp));
             block
         }
         _ => {
             let callee_temp = compiler.new_temp();
             let block = lower_expr(
-                callee_temp,
+                Some(callee_temp),
                 callee,
                 ir_nodes,
                 ir_functions,
@@ -757,7 +1032,10 @@ fn lower_call<'s>(
                 compiler,
             );
             let block = emit_arguments!(block);
-            blocks[block].push(Apply(to, callee_temp, args_temp));
+
+            let inst = if callee_impure { ApplyImpure } else { Apply };
+
+            blocks[block].push(inst(to, callee_temp, args_temp));
             block
         }
     }
@@ -881,7 +1159,7 @@ fn lower_make_tagged<'s>(
         .zip(fields_temp.iter().copied())
         .fold(block, |b, (f, t)| {
             lower_expr(
-                t,
+                Some(t),
                 f,
                 ir_nodes,
                 ir_functions,

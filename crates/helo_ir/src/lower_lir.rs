@@ -204,16 +204,20 @@ fn lower_instruction(
 ) {
     use lir::Instruction::*;
     match inst {
-        Apply(ret, callee, args) => lower_apply(*ret, *callee, &args, chunk),
-        CallBuiltin(ret, callee, args) => lower_call_builtin(*ret, *callee, &args, chunk),
-        Call(ret, callee, args) => {
+        ApplyImpure(ret, callee, args) | Apply(ret, callee, args) => {
+            lower_apply(*ret, *callee, &args, chunk)
+        }
+        CallBuiltin(ret, callee, args) | CallBuiltinImpure(ret, callee, args) => {
+            lower_call_builtin(*ret, *callee, &args, chunk)
+        }
+        Call(ret, callee, args) | CallImpure(ret, callee, args) => {
             if is_return_addr(inst_index, inst, block, blocks) && *callee == current_fid {
                 lower_tail_call(*callee, args, chunk, functions)
             } else {
                 lower_call(*ret, *callee, &args, chunk, functions)
             }
         }
-        CallThisClosure(ret, callee, args) => {
+        CallThisClosure(ret, callee, args) | CallThisClosureImpure(ret, callee, args) => {
             if is_return_addr(inst_index, inst, block, blocks) {
                 lower_tail_call_local(*callee, args, chunk)
             } else {
@@ -242,7 +246,8 @@ fn is_return_addr(
     blocks: &lir::BlockHeap,
 ) -> bool {
     inst_index + 1 == blocks[block].len()
-        && matches!(blocks[block].exit(), lir::Jump::Ret(u) if *u == inst.def())
+        && (matches!(blocks[block].exit(), lir::Jump::Ret(Some(u)) if *u == inst.def())
+            || matches!(blocks[block].exit(), lir::Jump::Ret(None)))
 }
 
 fn lower_jump_table(
@@ -696,6 +701,10 @@ fn lower_mov(to: lir::TempId, from: lir::TempId, chunk: &mut byte_code::Chunk) {
     Instruction::Mov(to.register(), from.register()).emit(chunk);
 }
 
-fn lower_ret(from: lir::TempId, chunk: &mut byte_code::Chunk) {
-    Instruction::Ret(from.register()).emit(chunk)
+fn lower_ret(from: Option<lir::TempId>, chunk: &mut byte_code::Chunk) {
+    if let Some(from) = from {
+        Instruction::Ret(from.register()).emit(chunk)
+    } else {
+        Instruction::RetNone.emit(chunk)
+    }
 }

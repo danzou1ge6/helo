@@ -15,6 +15,10 @@
 [x] Constant propagation optimization
 [ ] Tuple construction-and-then-deconstruction optimization for pattern matching
 [x] Control flow optimization
-[ ] Call-instead-of-apply optimization based on type
-[ ] Impurity and IO
+[ ] Detect multiple definitions
+[ ] Constructor as function
+[-] Call-instead-of-apply optimization based on type
+    Not possible
+[ ] Curry notion for callable type
+[x] Impurity and IO
 [ ] Module

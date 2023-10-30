@@ -248,6 +248,20 @@ impl<'s> Inferer<'s> {
                 self.unify_no_rollback(a_ret, b_ret, meta)?;
                 Ok(())
             }
+            (
+                ImpureCallable(ast::CallableType {
+                    params: a_params,
+                    ret: a_ret,
+                }),
+                ImpureCallable(ast::CallableType {
+                    params: b_params,
+                    ret: b_ret,
+                }),
+            ) => {
+                self.unify_list_no_rollback(a_params.iter(), b_params.iter(), meta)?;
+                self.unify_no_rollback(a_ret, b_ret, meta)?;
+                Ok(())
+            }
             (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
             _ => Err(errors::UnificationFailure::new(a, b, meta, false)),
         };

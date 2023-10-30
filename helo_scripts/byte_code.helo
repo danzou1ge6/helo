@@ -1,8 +1,6 @@
-fn filter_out s,c =
-    if str_some s then
-        if (str_head s) `char_eq` c then
-            filter_out (str_tail s),c
-        else (char_to_str (str_head s)) `str_cat` (filter_out (str_tail s),c)
-    else ""
 
-fn main = filter_out "abcabc",'a'
+fn main =
+    let filtered = "abcabcd" in
+    begin
+        println filtered
+    end

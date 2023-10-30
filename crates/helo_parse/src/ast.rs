@@ -80,10 +80,36 @@ pub enum ExprNode<'s> {
     MakeClosure(FunctionId),
     Global(&'s str),
     Tuple(Vec<ExprId>),
-    /// .1 indicates whether this is the closure itself
-    Captured(CapturedId, bool),
+    Captured {
+        id: CapturedId,
+        is_self: bool,
+        mutable: bool,
+    },
     Constant(Constant<'s>),
-    Local(LocalId),
+    /// .1 indicates mutablility
+    Local(LocalId, bool),
+    Seq(VecDeque<Stmt>, Option<ExprId>),
+    Assign(ExprId, ExprId),
+    Unit,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtNode {
+    If { test: ExprId, then: ExprId },
+    While { test: ExprId, then: ExprId },
+    Expr(ExprId),
+}
+
+#[derive(Debug, Clone)]
+pub struct Stmt {
+    pub(crate) node: StmtNode,
+    pub(crate) meta: Meta,
+}
+
+impl Stmt {
+    pub fn new(node: StmtNode, meta: Meta) -> Self {
+        Self { node, meta }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +165,7 @@ pub struct Function<'s> {
     pub param_metas: Vec<Meta>,
     pub captures: Vec<LocalId>,
     pub captures_meta: Vec<Meta>,
+    pub pure: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -269,7 +296,7 @@ pub struct Data<'s> {
 }
 
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Meta {
@@ -321,6 +348,7 @@ impl From<usize> for TypeVarId {
 #[derive(Debug, Clone)]
 pub enum TypeNode<'s> {
     Callable(CallableType<'s>),
+    ImpureCallable(CallableType<'s>),
     Generic(&'s str, Vec<Type<'s>>),
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
@@ -337,6 +365,9 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
         match self {
             Callable(c) => {
                 write!(f, "{c}")
+            }
+            ImpureCallable(c) => {
+                write!(f, "^{c}")
             }
             Generic(template, args) => {
                 if args.len() == 0 {
@@ -554,6 +585,10 @@ impl<'s> TypeApply<'s> for Type<'s> {
                 params: apply_many(v.params.iter(), selector, f),
                 ret: Box::new(v.ret.apply(selector, f)),
             }),
+            ImpureCallable(v) => Callable(CallableType {
+                params: apply_many(v.params.iter(), selector, f),
+                ret: Box::new(v.ret.apply(selector, f)),
+            }),
             Tuple(v) => Tuple(apply_many(v.iter(), selector, f)),
             Var(v) => Var(*v),
             Never => Never,
@@ -563,6 +598,19 @@ impl<'s> TypeApply<'s> for Type<'s> {
             node,
             meta: self.meta.clone(),
         }
+    }
+}
+
+impl<'s> TypeNode<'s> {
+    pub fn impure(&self) -> bool {
+        match self {
+            TypeNode::Callable(..) => false,
+            TypeNode::ImpureCallable(..) => true,
+            _ => panic!("Only callable types have the notion of purity"),
+        }
+    }
+    pub fn is_unit(&self) -> bool {
+        matches!(self, TypeNode::Unit)
     }
 }
 
@@ -577,6 +625,13 @@ impl<'s> Type<'s> {
     pub fn new_never(meta: Meta) -> Self {
         Self {
             node: TypeNode::Never,
+            meta,
+        }
+    }
+
+    pub fn new_unit(meta: Meta) -> Self {
+        Self {
+            node: TypeNode::Unit,
             meta,
         }
     }
@@ -609,6 +664,10 @@ impl<'s> Type<'s> {
             Unit => Unit,
             Generic(template, args) => Generic(template, apply_many(args.iter(), selector, f)?),
             Callable(v) => Callable(CallableType {
+                params: apply_many(v.params.iter(), selector, f)?,
+                ret: Box::new(v.ret.apply_result(selector, f)?),
+            }),
+            ImpureCallable(v) => Callable(CallableType {
                 params: apply_many(v.params.iter(), selector, f)?,
                 ret: Box::new(v.ret.apply_result(selector, f)?),
             }),
@@ -703,6 +762,7 @@ pub struct BuiltinFunction<'s> {
     pub var_cnt: usize,
     pub type_: CallableType<'s>,
     pub meta: Meta,
+    pub pure: bool,
 }
 
 pub struct Symbols_<'s, F> {
@@ -763,6 +823,13 @@ impl<'s, F> Symbols_<'s, F> {
                 self.validate_type(&callable.ret)?;
                 Ok(())
             }
+            ImpureCallable(callable) => {
+                for p in &callable.params {
+                    self.validate_type(p)?;
+                }
+                self.validate_type(&callable.ret)?;
+                Ok(())
+            }
             Tuple(v) => {
                 for elem in v {
                     self.validate_type(elem)?;
@@ -779,7 +846,7 @@ impl<'s, F> Symbols_<'s, F> {
         self.validate_type(&type_.ret)
     }
 
-    pub fn get_builtin_type(&self, name: &str) -> Option<&BuiltinFunction<'s>> {
+    pub fn get_builtin(&self, name: &str) -> Option<&BuiltinFunction<'s>> {
         self.builtins.get(name)
     }
 }
@@ -813,6 +880,12 @@ impl<'s> std::ops::Index<ExprId> for ExprHeap<'s> {
     type Output = Expr<'s>;
     fn index(&self, index: ExprId) -> &Self::Output {
         &self.0[index.0]
+    }
+}
+
+impl<'s> std::ops::IndexMut<ExprId> for ExprHeap<'s> {
+    fn index_mut(&mut self, index: ExprId) -> &mut Self::Output {
+        &mut self.0[index.0]
     }
 }
 

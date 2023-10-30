@@ -79,11 +79,7 @@ impl CallStack {
         vv.allocate(reg_cnt);
         self.current_reg_cnt = reg_cnt;
     }
-    pub fn pop_frame<'p>(
-        &mut self,
-        vv: &mut mem::ValueVec,
-        return_value: ValueSafe<'p>,
-    ) -> Option<Addr> {
+    pub fn pop_frame<'p>(&mut self, vv: &mut mem::ValueVec) -> Option<CallFrame> {
         vv.shrink(self.current_reg_cnt);
         let popped_frame = self.stack.pop().unwrap();
 
@@ -95,7 +91,19 @@ impl CallStack {
         let new_offset = self.stack.last().unwrap().register_offset;
         self.current_reg_cnt = old_offset - new_offset;
 
+        Some(popped_frame)
+    }
+    pub fn return_frame<'p>(
+        &mut self,
+        vv: &mut mem::ValueVec,
+        return_value: ValueSafe<'p>,
+    ) -> Option<Addr> {
+        let popped_frame = self.pop_frame(vv)?;
         self.write_register(vv, popped_frame.return_register, return_value);
+        Some(popped_frame.return_addr)
+    }
+    pub fn return_frame_no_return_value<'p>(&mut self, vv: &mut mem::ValueVec) -> Option<Addr> {
+        let popped_frame = self.pop_frame(vv)?;
         Some(popped_frame.return_addr)
     }
 }
@@ -696,11 +704,21 @@ where
                 RET => {
                     let reg = reader.ret();
                     let return_value = call_stack.read_register(&registers, reg, &lock);
-                    if let Some(return_address) = call_stack.pop_frame(&mut registers, return_value)
+                    if let Some(return_address) =
+                        call_stack.return_frame(&mut registers, return_value)
                     {
                         self.ip = return_address;
                     } else {
                         return Ok((pool.pack(return_value), lock));
+                    }
+                }
+                RET_NONE => {
+                    if let Some(return_address) =
+                        call_stack.return_frame_no_return_value(&mut registers)
+                    {
+                        self.ip = return_address;
+                    } else {
+                        return Ok((pool.pack(ValueSafe::Int(0)), lock));
                     }
                 }
                 CALL_BUILTIN1 => {

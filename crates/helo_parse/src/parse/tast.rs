@@ -12,7 +12,7 @@ pub use ast::Meta;
 #[derive(Clone, Debug)]
 pub enum Pattern<'s> {
     Construct(&'s str, Vec<Pattern<'s>>, Meta),
-    Bind(&'s str, Meta),
+    Bind(&'s str, bool, Meta),
     Literal(Constant<'s>, Meta),
     Tuple(Vec<Pattern<'s>>, Meta),
 }
@@ -72,6 +72,29 @@ pub enum ExprNode<'s> {
     Tuple(Vec<Expr<'s>>),
     Constant(Constant<'s>),
     Identifier(&'s str),
+    Assign(Box<Expr<'s>>, Box<Expr<'s>>),
+    Seq(Vec<Stmt<'s>>, Option<Box<Expr<'s>>>),
+    Unit,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtNode<'s> {
+    LetDecl(Pattern<'s>, Expr<'s>),
+    If { test: Expr<'s>, then: Expr<'s> },
+    While { test: Expr<'s>, then: Expr<'s> },
+    Expr(Expr<'s>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Stmt<'s> {
+    pub(crate) node: StmtNode<'s>,
+    pub(crate) meta: Meta,
+}
+
+impl<'s> Stmt<'s> {
+    pub fn new(node: StmtNode<'s>, meta: Meta) -> Self {
+        Self { node, meta }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +105,7 @@ pub struct Function<'s> {
     pub param_metas: Vec<ast::Meta>,
     pub body: Box<Expr<'s>>,
     pub meta: ast::Meta,
+    pub pure: bool,
 }
 
 use ast::Symbols_;

@@ -35,6 +35,7 @@ pub struct Function {
     pub body: ExprId,
     pub meta: helo_parse::ast::Meta,
     pub name: StrId,
+    pub has_return: bool,
 }
 
 use helo_parse::ast;
@@ -191,9 +192,10 @@ pub enum ExprNode<'s> {
         then: ExprId,
         else_: ExprId,
     },
-    Call {
+    Apply {
         callee: ExprId,
         args: Vec<ExprId>,
+        callee_impure: bool,
     },
     Immediate(Immediate),
     MakeClosure(FunctionId, Vec<LocalId>),
@@ -210,6 +212,16 @@ pub enum ExprNode<'s> {
         file: StrId,
         span: (usize, usize),
         msg: StrId,
+    },
+    Assign(LocalId, ExprId),
+    Seq(Vec<ExprId>, Option<ExprId>),
+    If {
+        test: ExprId,
+        then: ExprId,
+    },
+    While {
+        test: ExprId,
+        then: ExprId,
     },
 }
 

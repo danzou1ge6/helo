@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::tast;
 use crate::ast;
 use crate::errors;
@@ -47,7 +49,7 @@ fn lower_function<'s>(
     let (local_cnt, body) = resolver.with_function_scope(|resolver| {
         resolver.with_scope(|resolver| {
             f.params.into_iter().for_each(|p| {
-                resolver.define_local(p);
+                resolver.define_local(p, !f.pure);
             });
             let body = lower_expr(*f.body, resolver, symbols, ast_heap, e);
             body
@@ -64,6 +66,7 @@ fn lower_function<'s>(
         param_metas: f.param_metas,
         captures: Vec::new(),
         captures_meta: Vec::new(),
+        pure: f.pure,
     };
     ast_f
 }
@@ -126,12 +129,117 @@ fn lower_expr<'s>(
         Identifier(id) => {
             lower_identifier(id, expr.meta, expr.type_, resolver, symbols, ast_heap, e)
         }
+        Seq(stmts, result) => lower_seq(
+            stmts.into(),
+            result,
+            expr.meta,
+            resolver,
+            symbols,
+            ast_heap,
+            e,
+        ),
+        Assign(to, from) => lower_assign(*to, *from, expr.meta, resolver, symbols, ast_heap, e),
+        Unit => ast_heap.push(ast::Expr::new_untyped(ast::ExprNode::Unit, expr.meta)),
+    }
+}
+
+fn lower_assign<'s>(
+    to: tast::Expr<'s>,
+    from: tast::Expr<'s>,
+    meta: Meta,
+    resolver: &mut Resolver<'s>,
+    symbols: &mut ast::Symbols,
+    ast_heap: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+) -> ast::ExprId {
+    let to = lower_expr(to, resolver, symbols, ast_heap, e);
+    let from = lower_expr(from, resolver, symbols, ast_heap, e);
+    let expr = ast::Expr::new_untyped(ast::ExprNode::Assign(from, to), meta);
+    ast_heap.push(expr)
+}
+
+fn lower_stmt<'s>(
+    stmt: tast::Stmt<'s>,
+    resolver: &mut Resolver<'s>,
+    symbols: &mut ast::Symbols,
+    ast_heap: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+) -> ast::Stmt {
+    use tast::StmtNode::*;
+    match stmt.node {
+        LetDecl(..) => unreachable!(),
+        If { test, then } => {
+            let test = lower_expr(test, resolver, symbols, ast_heap, e);
+            let then = lower_expr(then, resolver, symbols, ast_heap, e);
+            ast::Stmt::new(ast::StmtNode::If { test, then }, stmt.meta)
+        }
+        While { test, then } => {
+            let test = lower_expr(test, resolver, symbols, ast_heap, e);
+            let then = lower_expr(then, resolver, symbols, ast_heap, e);
+            ast::Stmt::new(ast::StmtNode::While { test, then }, stmt.meta)
+        }
+        Expr(expr) => {
+            let expr = lower_expr(expr, resolver, symbols, ast_heap, e);
+            ast::Stmt::new(ast::StmtNode::Expr(expr), stmt.meta)
+        }
+    }
+}
+
+fn lower_seq<'s>(
+    mut stmts: VecDeque<tast::Stmt<'s>>,
+    result: Option<Box<tast::Expr<'s>>>,
+    result_meta: ast::Meta,
+    resolver: &mut Resolver<'s>,
+    symbols: &mut ast::Symbols,
+    ast_heap: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+) -> ast::ExprId {
+    match stmts.pop_front() {
+        Some(tast::Stmt {
+            node: tast::StmtNode::LetDecl(pat, value),
+            meta,
+        }) => {
+            let rest = lower_seq(stmts, result, result_meta, resolver, symbols, ast_heap, e);
+            let pat = lower_pattern(pat, resolver, e);
+            let value = lower_expr(value, resolver, symbols, ast_heap, e);
+            let expr = ast::Expr::new_untyped(
+                ast::ExprNode::LetPatIn {
+                    bind: pat,
+                    value,
+                    in_: rest,
+                },
+                meta,
+            );
+            ast_heap.push(expr)
+        }
+        Some(stmt) => {
+            let rest = lower_seq(stmts, result, result_meta, resolver, symbols, ast_heap, e);
+            let stmt = lower_stmt(stmt, resolver, symbols, ast_heap, e);
+            match &mut ast_heap[rest] {
+                ast::Expr {
+                    node: ast::ExprNode::Seq(stmts, ..),
+                    ..
+                } => stmts.push_front(stmt),
+                _ => unreachable!(),
+            };
+            rest
+        }
+        None => {
+            let expr = ast::Expr::new_untyped(
+                ast::ExprNode::Seq(
+                    VecDeque::new(),
+                    result.map(|expr| lower_expr(*expr, resolver, symbols, ast_heap, e)),
+                ),
+                result_meta,
+            );
+            ast_heap.push(expr)
+        }
     }
 }
 
 fn lower_apply<'s>(
     callee: tast::Expr<'s>,
-    args: Vec<tast::Expr<'s>>,
+    mut args: Vec<tast::Expr<'s>>,
     apply_meta: Meta,
     type_: Option<ast::Type<'s>>,
     resolver: &mut Resolver<'s>,
@@ -139,6 +247,10 @@ fn lower_apply<'s>(
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
+    if args.len() == 1 && matches!(&args[0].node, tast::ExprNode::Unit) {
+        args.pop().unwrap();
+    }
+
     let callee = lower_expr(callee, resolver, symbols, ast_heap, e);
     let args = args
         .into_iter()
@@ -186,7 +298,7 @@ fn lower_pattern<'s>(
                 .collect(),
             meta,
         ),
-        Bind(id, meta) => ast::Pattern::Bind(resolver.define_local(id), meta),
+        Bind(id, mutable, meta) => ast::Pattern::Bind(resolver.define_local(id, mutable), meta),
         Literal(constant, meta) => ast::Pattern::Literal(lower_constant(&constant, &meta, e), meta),
         Tuple(args, meta) => ast::Pattern::Tuple(
             args.into_iter()
@@ -271,12 +383,12 @@ fn lower_let_fn<'s>(
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
     let r = resolver.with_scope(|resolver| {
-        let local_id = resolver.define_local(id);
+        let local_id = resolver.define_local(id, false);
 
         let (captures, captures_meta, local_cnt, body) =
             resolver.with_closure_scope(id, |resolver| {
                 f.params.iter().for_each(|p| {
-                    resolver.define_local(p);
+                    resolver.define_local(p, !f.pure);
                 });
                 lower_expr(*f.body, resolver, symbols, ast_heap, e)
             });
@@ -291,6 +403,7 @@ fn lower_let_fn<'s>(
             param_metas: f.param_metas,
             captures,
             captures_meta,
+            pure: f.pure,
         };
         let closure_fid = f.meta.closure_id();
         symbols.add_function(closure_fid.clone(), ast_f);

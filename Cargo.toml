@@ -7,7 +7,7 @@ edition = "2021"
 
 [[bin]]
 name = "helo_run"
-required-features = ["helo_ir/pretty_print", "helo_runtime/debug_gc"]
+required-features = ["helo_ir/pretty_print"]
 
 
 [dependencies]

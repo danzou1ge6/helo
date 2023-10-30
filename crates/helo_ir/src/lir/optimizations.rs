@@ -72,14 +72,17 @@ mod dead_code_elimination {
                         });
                     }
                     Some(site @ Site::Inst(block, i)) => {
-                        to_delete.insert(site);
-
                         let inst = &blocks[block].body[i];
-                        defs[inst.def()] = None;
-                        inst.uses().for_each(|u| {
-                            uses[u].remove(&Site::Inst(block, i));
-                            work_list.push(u);
-                        });
+
+                        if inst.functional() {
+                            to_delete.insert(site);
+
+                            defs[inst.def()] = None;
+                            inst.uses().for_each(|u| {
+                                uses[u].remove(&Site::Inst(block, i));
+                                work_list.push(u);
+                            });
+                        }
                     }
                     Some(Site::Exit(..)) => unreachable!(),
                     None => {}
@@ -214,13 +217,14 @@ mod common_expression_elimination {
             while inst_idx < blocks[block].body.len() {
                 let inst = &mut blocks[block].body[inst_idx];
                 let inst_def = inst.def();
+                
+                inst.uses_mut().for_each(|u| *u = ctx.lookup_copy_root(*u));
 
                 if !inst.functional() {
                     inst_idx += 1;
                     continue;
                 }
 
-                inst.uses_mut().for_each(|u| *u = ctx.lookup_copy_root(*u));
                 let norm_inst = ctx.normalize(inst);
 
                 if let Some(existent_temp) = ctx.lookup_binding(&norm_inst) {
@@ -822,7 +826,7 @@ mod control_flow_simplification {
         }
 
         for block_id in blocks.iter_id() {
-            if let Some(Jump::Ret(ret_temp)) = blocks[block_id].exit {
+            if let Some(Jump::Ret(Some(ret_temp))) = blocks[block_id].exit {
                 if let Some(lir::Instruction::Mov(to, from)) = blocks[block_id].body.last().cloned()
                 {
                     if to == ret_temp {

@@ -57,6 +57,8 @@ const BUILTIN_SIGS: &'static str = r#"
     fn str_tail     a     : [Str] -> Str       = ..
 
     fn panic 'a     msg   : [Str] -> Char        = ..
+
+    routine  println msg   : [Str] -> ()         = ..
 "#;
 
 const PRECEDENCE_DEF: &'static str = r#"

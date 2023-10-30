@@ -499,3 +499,16 @@ pub fn string_tail<'p>(
             .map_or(Err(RunTimeError::EmptyString), |x| Ok(x.cast_obj_ref()))?,
     ))
 }
+
+pub fn string_println<'p>(
+    [arg0]: [ValueSafe<'p>; 1],
+    _pool: &mut mem::GcPool,
+    _registers: &mut mem::ValueVec,
+    _call_stack: &mut vm::CallStack,
+    _lock: &'p mem::Lock,
+) -> BuiltinRet<'p> {
+    let s = arg0.unwrap_obj().cast::<mem::ObjString>();
+    println!("{}", s.as_ref());
+    Ok(ValueSafe::Int(0))
+}
+
