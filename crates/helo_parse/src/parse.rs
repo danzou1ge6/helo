@@ -783,7 +783,7 @@ fn expression_parenthesed<'s>(
     let (s2, _) = nbyte::tag(")")(s1)?;
     let (s3, _) = empty(s2)?;
 
-    if exprs.len() == 1 {
+    if exprs.len() == 0 {
         Ok((
             s3,
             tast::Expr::new_untyped(tast::ExprNode::Unit, ctx.meta(s, s2)),

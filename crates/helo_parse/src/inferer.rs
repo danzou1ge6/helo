@@ -212,6 +212,7 @@ impl<'s> Inferer<'s> {
             e
         })
     }
+
     /// Unify type expressions `a` with `b`
     fn unify_no_rollback(
         &mut self,
@@ -235,31 +236,23 @@ impl<'s> Inferer<'s> {
                 Ok(self.unify_list_no_rollback(a_args.iter(), b_args.iter(), meta)?)
             }
             (
-                Callable(ast::CallableType {
-                    params: a_params,
-                    ret: a_ret,
-                }),
-                Callable(ast::CallableType {
-                    params: b_params,
-                    ret: b_ret,
-                }),
+                Callable(a),
+                Callable(b),
             ) => {
-                self.unify_list_no_rollback(a_params.iter(), b_params.iter(), meta)?;
-                self.unify_no_rollback(a_ret, b_ret, meta)?;
+                let a_normalized = a.clone().normalize(true);
+                let b_normalized = b.clone().normalize(true);
+                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter(), meta)?;
+                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref(), meta)?;
                 Ok(())
             }
             (
-                ImpureCallable(ast::CallableType {
-                    params: a_params,
-                    ret: a_ret,
-                }),
-                ImpureCallable(ast::CallableType {
-                    params: b_params,
-                    ret: b_ret,
-                }),
+                ImpureCallable(a),
+                ImpureCallable(b),
             ) => {
-                self.unify_list_no_rollback(a_params.iter(), b_params.iter(), meta)?;
-                self.unify_no_rollback(a_ret, b_ret, meta)?;
+                let a_normalized = a.clone().normalize(false);
+                let b_normalized = b.clone().normalize(false);
+                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter(), meta)?;
+                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref(), meta)?;
                 Ok(())
             }
             (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),

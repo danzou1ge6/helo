@@ -438,7 +438,7 @@ fn infer_call<'s>(
                     .function(typed_functions.currently_infering().unwrap())
                     .pure
             {
-                e.push(errors::InpureClosureInPureFunction::new(call_meta));
+                e.push(errors::InpureFunctionInPureFunction::new(call_meta));
             }
 
             let type_constructor = if callee_type_node.impure() {

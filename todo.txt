@@ -19,6 +19,6 @@
 [ ] Constructor as function
 [-] Call-instead-of-apply optimization based on type
     Not possible
-[ ] Curry notion for callable type
+[x] Curry notion for callable type
 [x] Impurity and IO
 [ ] Module

@@ -61,7 +61,7 @@ impl InpureClosureInPureFunction {
 pub struct InpureFunctionInPureFunction {
     #[source_code]
     pub src: NamedSource,
-    #[label("Closure Here")]
+    #[label("Application Here")]
     pub span: SourceSpan,
 }
 

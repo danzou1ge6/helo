@@ -398,6 +398,23 @@ pub struct CallableType<'s> {
     pub ret: Box<Type<'s>>,
 }
 
+impl<'s> CallableType<'s> {
+    pub fn normalize(mut self, pure: bool) -> Self {
+        match self.ret.node {
+            TypeNode::Callable(ret_callable) if pure => {
+                self.params.extend(ret_callable.params.into_iter());
+                self.ret = ret_callable.ret;
+            }
+            TypeNode::ImpureCallable(ret_callable) if pure => {
+                self.params.extend(ret_callable.params.into_iter());
+                self.ret = ret_callable.ret;
+            }
+            _ => return self,
+        }
+        self.normalize(pure)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FunctionType<'s> {
     pub params: Vec<Type<'s>>,
@@ -465,8 +482,10 @@ impl<'s> std::fmt::Display for FunctionType<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
         str_join_vec(f, ", ", &self.params)?;
-        write!(f, "][")?;
-        str_join_vec(f, ", ", &self.captures)?;
+        if !self.captures.is_empty() {
+            write!(f, "][")?;
+            str_join_vec(f, ", ", &self.captures)?;
+        }
         write!(f, "] -> {}", &self.ret)
     }
 }
@@ -585,7 +604,7 @@ impl<'s> TypeApply<'s> for Type<'s> {
                 params: apply_many(v.params.iter(), selector, f),
                 ret: Box::new(v.ret.apply(selector, f)),
             }),
-            ImpureCallable(v) => Callable(CallableType {
+            ImpureCallable(v) => ImpureCallable(CallableType {
                 params: apply_many(v.params.iter(), selector, f),
                 ret: Box::new(v.ret.apply(selector, f)),
             }),
@@ -667,7 +686,7 @@ impl<'s> Type<'s> {
                 params: apply_many(v.params.iter(), selector, f)?,
                 ret: Box::new(v.ret.apply_result(selector, f)?),
             }),
-            ImpureCallable(v) => Callable(CallableType {
+            ImpureCallable(v) => ImpureCallable(CallableType {
                 params: apply_many(v.params.iter(), selector, f)?,
                 ret: Box::new(v.ret.apply_result(selector, f)?),
             }),
@@ -696,7 +715,7 @@ impl<'s> Type<'s> {
                     elem.walk(f);
                 }
             }
-            Callable(c) => {
+            Callable(c) | ImpureCallable(c) => {
                 for p in &c.params {
                     p.walk(f);
                 }

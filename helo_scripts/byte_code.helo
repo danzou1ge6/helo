@@ -1,5 +1,4 @@
-
-fn main =
+routine main =
     let filtered = "abcabcd" in
     begin
         println filtered
