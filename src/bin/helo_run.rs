@@ -183,7 +183,7 @@ pub fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_compile_ir <file_name>"))
     //     .clone();
-    let file_name = "helo_scripts/calculator.helo".to_string();
+    let file_name = "helo_scripts/byte_code.helo".to_string();
     let mut file = fs::File::open(&file_name)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

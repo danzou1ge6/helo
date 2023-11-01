@@ -44,12 +44,12 @@ impl std::fmt::Display for RegisterArray {
 
 const STR_TRUNC_LEN: usize = 128;
 
-pub fn trunc_str(s: &str) -> &str {
+pub fn trunc_str(s: &str) -> String {
     if s.len() > STR_TRUNC_LEN {
         &s[0..STR_TRUNC_LEN]
     } else {
         s
-    }
+    }.replace('\n', "\\n")
 }
 
 impl<'c> Iterator for RowIter<'c> {

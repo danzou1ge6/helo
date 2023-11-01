@@ -86,7 +86,7 @@ where
                         v.iter().map(|(immediate, e)| {
                             allocator
                                 .text("| ")
-                                .append(allocator.text(immediate.to_string(str_list)))
+                                .append(allocator.text(trunc_str(&immediate.to_string(str_list))))
                                 .append(" -> ")
                                 .append(pretty_ir(*e, nodes, str_list, allocator))
                         }),
@@ -278,6 +278,8 @@ where
 
 use crate::lir;
 
+use helo_runtime::disassembler::trunc_str;
+
 pub fn pretty_lir_instruction<'s, 'b, D, A>(
     inst: &lir::Instruction,
     str_list: &ir::StrList,
@@ -366,7 +368,7 @@ where
         Float(ret, value) => allocator.text(format!("x{:<3} <- {}", ret, value)),
         Str(ret, value) => {
             let s = str_list.get(*value);
-            allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, s))
+            allocator.text(format!("x{:<3} <- s{}'{}'", ret, value, trunc_str(s)))
         }
         Char(ret, value) => allocator.text(format!("x{:<3} <- '{}'", ret, value)),
         AddToEnv(to, fid, args) => allocator
@@ -464,7 +466,7 @@ where
                                 allocator.text(format!(
                                     "{}'{}' => b{}",
                                     *value,
-                                    str_list.get(*value),
+                                    trunc_str(str_list.get(*value)),
                                     *b
                                 ))
                             })

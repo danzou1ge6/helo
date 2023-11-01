@@ -116,7 +116,7 @@ impl Stmt {
 pub enum Constant<'s> {
     Int(i64),
     Float(&'s str),
-    Str(&'s str),
+    Str(String),
     Bool(bool),
     Char(char),
 }

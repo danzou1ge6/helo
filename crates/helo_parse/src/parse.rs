@@ -202,8 +202,37 @@ fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
 
 fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
-        let (s1, _) = nbyte::tag("\"")(s)?;
-        let (s2, string) = nbyte::take_until("\"")(s1)?;
+        let (s1, _): (&str, _) = nbyte::tag("\"")(s)?;
+
+        let mut string = String::new();
+        let mut chars = s1.chars();
+        let mut cnt = 0;
+
+        while let Some(char) = chars.next() {
+            if char == '"' {
+                break;
+            }
+            cnt += char.len_utf8();
+            if char == '\\' {
+                match chars.next() {
+                    Some('n') => {
+                        string.push('\n');
+                    }
+                    Some('\\') => {
+                        string.push('\\');
+                    }
+                    Some('"') => {
+                        string.push('\"');
+                    }
+                    _ => {}
+                }
+                cnt += char.len_utf8();
+                continue;
+            }
+            string.push(char);
+        }
+
+        let s2 = &s1[cnt..];
         let (s3, _) = nbyte::tag("\"")(s2)?;
         Ok((s3, (tast::Constant::Str(string), ctx.meta(s, s3))))
     };

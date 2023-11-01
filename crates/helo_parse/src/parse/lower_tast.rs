@@ -89,7 +89,7 @@ fn lower_constant<'s>(
         },
         Constant::Float(f) => Float(*f),
         Constant::Int(i) => Int(*i),
-        Constant::Str(s) => Str(*s),
+        Constant::Str(s) => Str(s.clone()),
     }
 }
 

@@ -39,7 +39,7 @@ impl<'s> Expr<'s> {
 pub enum Constant<'s> {
     Int(i64),
     Float(&'s str),
-    Str(&'s str),
+    Str(String),
     Bool(bool),
     Char(&'s str),
 }
