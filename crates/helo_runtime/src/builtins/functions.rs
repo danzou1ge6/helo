@@ -512,3 +512,17 @@ pub fn string_println<'p>(
     Ok(ValueSafe::Int(0))
 }
 
+pub fn read_line<'p>(
+    []: [ValueSafe<'p>; 0],
+    pool: &mut mem::GcPool,
+    _registers: &mut mem::ValueVec,
+    _call_stack: &mut vm::CallStack,
+    lock: &'p mem::Lock,
+) -> BuiltinRet<'p> {
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf)?;
+    let s = pool.allocate_string(&buf.trim_end(), lock)
+        .map_err(|_| errors::RunTimeError::OutOfMemory)?;
+    Ok(ValueSafe::Obj(s.cast_obj_ref()))
+}
+

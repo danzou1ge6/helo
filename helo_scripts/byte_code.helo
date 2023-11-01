@@ -1,1 +1,2 @@
-routine main = println "\n\n\n"
+routine main =
+    let r = readline () in println r `str_cat` "+++"

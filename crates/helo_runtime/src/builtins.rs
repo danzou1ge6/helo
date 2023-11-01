@@ -19,12 +19,14 @@ type BuiltinFunc<const N: usize> = for<'p> fn(
     lock: &'p mem::Lock,
 ) -> BuiltinRet<'p>;
 
+
 type BuiltinRet<'p> = Result<ValueSafe<'p>, RunTimeError>;
 
 mod functions;
 
 #[derive(Clone, Copy)]
 pub enum Builtin {
+    B0(BuiltinFunc<0>),
     B1(BuiltinFunc<1>),
     B2(BuiltinFunc<2>),
     B3(BuiltinFunc<3>),
@@ -35,10 +37,20 @@ use Builtin::*;
 impl Builtin {
     pub fn arity(&self) -> usize {
         match self {
+            B0(..) => 0,
             B1(..) => 1,
             B2(..) => 2,
             B3(..) => 3,
             B4(..) => 4,
+        }
+    }
+    pub fn unwrap0(self) -> BuiltinFunc<0> {
+        match self {
+            B0(f) => f,
+            _ => panic!(
+                "Type Error: Expected a builtin with 1 arguments, got {}",
+                self.arity()
+            ),
         }
     }
     pub fn unwrap1(self) -> BuiltinFunc<1> {
@@ -105,6 +117,7 @@ pub fn call_adapted<'p>(
 ) -> BuiltinRet<'p> {
     let builtin = get(id);
     match builtin {
+        B0(f) => f([], pool, registers, call_stack, lock),
         B1(f) => f([args[0]], pool, registers, call_stack, lock),
         B2(f) => f([args[0], args[1]], pool, registers, call_stack, lock),
         B3(f) => f(
@@ -142,7 +155,7 @@ impl BuiltinTable {
 }
 
 use functions::*;
-const BUILTINS: [(&'static str, Builtin); 44] = [
+const BUILTINS: [(&'static str, Builtin); 45] = [
     // Int arithmatics
     ("+", B2(int_add)),
     ("-", B2(int_subtract)),
@@ -196,5 +209,6 @@ const BUILTINS: [(&'static str, Builtin); 44] = [
     ("str_head", B1(string_head)),
     ("str_tail", B1(string_tail)),
     // Routines
-    ("println", B1(string_println))
+    ("println", B1(string_println)),
+    ("readline", B0(read_line))
 ];

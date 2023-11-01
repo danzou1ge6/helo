@@ -731,6 +731,19 @@ where
                         return Ok((pool.pack(ValueSafe::Int(0)), lock));
                     }
                 }
+                CALL_BUILTIN0 => {
+                    let (ret, builtin_id, args) = reader.call_builtin0();
+                    do_call_builtin!(
+                        ret,
+                        builtin_id,
+                        args,
+                        &mut pool,
+                        &mut registers,
+                        &mut call_stack,
+                        &lock,
+                        unwrap0
+                    );
+                }
                 CALL_BUILTIN1 => {
                     let (ret, builtin_id, args) = reader.call_builtin1();
                     do_call_builtin!(

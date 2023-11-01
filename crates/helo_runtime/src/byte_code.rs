@@ -214,6 +214,8 @@ pub enum Instruction {
 
     /// call builtin .1 with .2 and store result to .0
     ///
+    /// 4 of 8 bytes
+    CallBuiltin0(RegisterId, BuiltinId, [RegisterId; 0]),
     /// 5 of 8 bytes
     CallBuiltin1(RegisterId, BuiltinId, [RegisterId; 1]),
     /// 6 of 8 bytes
@@ -348,6 +350,7 @@ pub enum OpCode {
     TAIL_CALL_LOCAL5,
     TAIL_CALL_LOCAL6,
     TAIL_CALL_LOCAL_MANY,
+    CALL_BUILTIN0,
     CALL_BUILTIN1,
     CALL_BUILTIN2,
     CALL_BUILTIN3,

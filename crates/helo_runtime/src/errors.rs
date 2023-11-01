@@ -20,4 +20,6 @@ pub enum RunTimeError {
     FloatExponentOutOfRange(i64),
     #[error("Called `string_head` or `string_tail` on an empty string")]
     EmptyString,
+    #[error("IO Error of {:?}", .0)]
+    Io(#[from] std::io::Error)
 }

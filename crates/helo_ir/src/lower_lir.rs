@@ -493,6 +493,7 @@ fn lower_call_builtin(
     let args = args.iter().map(|a| a.register());
 
     let inst = match args_len {
+        0 => Instruction::CallBuiltin0(ret, callee, collect_to_array(args)),
         1 => Instruction::CallBuiltin1(ret, callee, collect_to_array(args)),
         2 => Instruction::CallBuiltin2(ret, callee, collect_to_array(args)),
         3 => Instruction::CallBuiltin3(ret, callee, collect_to_array(args)),

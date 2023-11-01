@@ -341,6 +341,7 @@ impl<'c> Iterator for RowIter<'c> {
             TAIL_CALL_LOCAL5 => arm_tail_call_local!(tail_call_local5, rows),
             TAIL_CALL_LOCAL6 => arm_tail_call_local!(tail_call_local6, rows),
             TAIL_CALL_LOCAL_MANY => arm_tail_call_local_many!(tail_call_many, rows),
+            CALL_BUILTIN0 => arm_call_builtin!(call_builtin0, rows),
             CALL_BUILTIN1 => arm_call_builtin!(call_builtin1, rows),
             CALL_BUILTIN2 => arm_call_builtin!(call_builtin2, rows),
             CALL_BUILTIN3 => arm_call_builtin!(call_builtin3, rows),
