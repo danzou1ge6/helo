@@ -14,20 +14,31 @@ fn parse_digit s =
             | '8' -> ((str_tail s), Ok 8)
             | '9' -> ((str_tail s), Ok 9)
             | _   -> (s, Err ParseError s,"digit")
+        end
     else (s, Err ParseError s,"digit")
 
-data Op = OpAdd | OpSub | OpMul | OpDiv | OpLParen | OpRParen
+data Op = OpAdd | OpSub | OpMul | OpDiv
 
-fn parse_perator s =
+fn op_precedence op =
+    case op of
+          OpAdd -> (4, 3)
+        | OpSub -> (4, 3)
+        | OpMul -> (8, 7)
+        | OpDiv -> (8, 7)
+    end
+
+fn op_precedence_left op = let (left, _) = op_precedence op in left
+fn op_precedence_right op = let (_, right) = op_precedence op in right
+
+fn parse_operator s: [Str] -> (Str, Result[Op, ParseError]) =
     if str_some s then
         case str_head s of
             '+' -> ((str_tail s), Ok OpAdd)
             | '-' -> ((str_tail s), Ok OpSub)
             | '*' -> ((str_tail s), Ok OpMul)
             | '/' -> ((str_tail s), Ok OpDiv)
-            | '(' -> ((str_tail s), Ok OpLParen)
-            | ')' -> ((str_tail s), Ok OpRParen)
             | _   -> (s, Err ParseError s,"operator")
+        end
     else (s, Err ParseError s,"operator")
 
 fn parse_float s =
@@ -35,11 +46,13 @@ fn parse_float s =
         case parse_digit s of
               (s1, Ok digit) -> parse_int s1,(x *. 10.0 +. int_to_float digit)
             | (s1, Err e   ) -> (s1, x)
+        end
     in
     let fn parse_mantissa s,x,n =
         case parse_digit s of
               (s1, Ok digit) -> parse_mantissa s1,(x +. n *. int_to_float digit),(n *. 0.1)
             | (s1, Err e   ) -> (s1, x)
+        end
     in
     
     case parse_digit s of
@@ -51,7 +64,89 @@ fn parse_float s =
                         let (s2, x) = parse_mantissa (str_tail s1),x,0.1 in
                         (s2, Ok x)
                     | otherwise -> (s1, Ok x)
+                end
             else (s1, Ok x)
         | otherwise -> (s, Err ParseError s,"float")
+    end
 
-fn main = let (_, v) = parse_float "1.2" in v
+data Expr = Apply Op,Expr,Expr
+          | Lit Float
+
+fn build_infix_expr lhs,op,s =
+    let p_right = op_precedence_right op in
+    case parse_expr_precedenced s,p_right of
+        (s1, Ok rhs)  -> (s1, Ok Apply op,lhs,rhs)
+        | (s1, Err e) -> (s1, Err e)
+    end
+
+fn parse_tag tag,s: [Char, Str] -> (Str, Result[Char, ParseError]) =
+    if str_some s then
+        if (str_head s) `char_eq` tag then
+            ((str_tail s), Ok tag)
+        else
+            (s, Err ParseError s,(char_to_str tag))
+    else
+        (s, Err ParseError s,(char_to_str tag))
+
+fn parse_expr_lit s: [Str] -> (Str, Result[Expr, ParseError]) =
+    case parse_float s of
+        (s1, Ok float) -> (s1, Ok (Lit float))
+        | (s1, Err e)    -> (s1, Err e)
+    end
+
+fn parse_prefix_expr s: [Str] -> (Str, Result[Expr, ParseError]) =
+    case parse_tag '(',s of
+        (s1, Ok _) ->
+            case parse_expr (str_tail s1) of
+                (s2, Ok expr) ->
+                    case parse_tag ')',s2 of
+                        (s3, Ok _) -> (s3, Ok expr)
+                        | (s3, Err e) -> (s3, Err e)
+                    end
+                | (s2, Err e) -> (s2, Err e)
+            end
+        | _        -> parse_expr_lit s
+    end
+
+fn parse_expr_precedenced s,prec: [Str, Int] -> (Str, Result[Expr, ParseError]) =
+    let fn parse s,lhs,prec =
+        case parse_operator s of
+            (s1, Ok op) ->
+                if (op_precedence_left op) >= prec then
+                    case build_infix_expr lhs,op,s1 of
+                        (s2, Ok expr) -> parse s2,expr,prec
+                        | (s2, Err e)   -> (s2, Err e)
+                    end
+                else
+                    (s, Ok lhs)
+            | (s1, Err e)   -> (s, Ok lhs)
+        end
+    in
+    case parse_prefix_expr s of
+        (s1, Ok lhs)  -> parse s1,lhs,prec
+        | (s1, Err e) -> (s1, Err e)
+    end
+
+fn parse_expr s = parse_expr_precedenced s,0
+
+fn eval_expr expr =
+    case expr of
+        Lit x -> x
+        | Apply op,lhs,rhs ->
+            let lhs = eval_expr lhs in
+            let rhs = eval_expr rhs in
+            case op of
+                OpAdd   -> lhs +. rhs
+                | OpSub -> lhs -. rhs
+                | OpMul -> lhs *. rhs
+                | OpDiv -> lhs /. rhs
+            end
+    end
+
+fn parse_and_eval s =
+    case parse_expr s of
+        (_, Ok expr) -> Ok eval_expr expr
+        | (_, Err e) -> Err e
+    end
+
+fn main = parse_and_eval "1+2*2-0.1"

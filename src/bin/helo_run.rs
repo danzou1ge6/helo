@@ -126,7 +126,7 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
             print_lir_function_optimized(&f, fid, &function_names, &str_list);
             (fid, f)
         })
-        .map(|(fid, f)| {
+        .map(|(_fid, f)| {
             let f = artifect::control_flow_simplification(f);
             f
         })
@@ -144,7 +144,7 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
 
 fn run(exe: &executable::Executable) {
     let gc_policy = vm::StressedGcPolicy::new();
-    let mut vm = vm::Vm::new_debug(exe, gc_policy);
+    let mut vm = vm::Vm::new(exe, gc_policy);
     let r = vm.run();
 
     match r {

@@ -352,14 +352,17 @@ fn case_expr<'s>(
         let (s4, arms) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
             case_arm(s, ctx, precedence_table, generic_params)
         })(s3)?;
+
+        let (s5, _) = trailing_space_tag("end")(s4)?;
+
         Ok((
-            s4,
+            s5,
             tast::Expr::new_untyped(
                 tast::ExprNode::Case {
                     operand: Box::new(operand),
                     arms,
                 },
-                ctx.meta(s, s4),
+                ctx.meta(s, s5),
             ),
         ))
     };
