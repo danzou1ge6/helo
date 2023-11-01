@@ -180,21 +180,24 @@ fn string_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     Ok((s1, tast::Expr::new_untyped(tast::ExprNode::Constant(c), m)))
 }
 
-fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
+fn char_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
         let (s1, _) = nbyte::tag("'")(s)?;
         let (s2, string) = nbyte::take_until("'")(s1)?;
         let (s3, _) = nbyte::tag("'")(s2)?;
         let (s3, _) = empty(s3)?;
-        Ok((
-            s3,
-            tast::Expr::new_untyped(
-                tast::ExprNode::Constant(tast::Constant::Char(string)),
-                ctx.meta(s, s3),
-            ),
-        ))
+        Ok((s3, (tast::Constant::Char(string), ctx.meta(s, s3))))
     };
     nom_context("char literal", parse)(s)
+}
+
+fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
+    let (s1, (c, meta)) = char_literal_a(s, ctx)?;
+
+    Ok((
+        s1,
+        tast::Expr::new_untyped(tast::ExprNode::Constant(c), meta),
+    ))
 }
 
 fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
@@ -257,8 +260,11 @@ fn pattern_construct<'s>(
 /// A literal pattern
 fn pattern_literal<'s>(s: &'s str, ctx: &Source) -> PResult<'s, tast::Pattern<'s>> {
     let parse = |s| {
-        let (s1, (value, meta)) =
-            nbr::alt((|s| string_literal_a(s, ctx), |s| num_literal_a(s, ctx)))(s)?;
+        let (s1, (value, meta)) = nbr::alt((
+            |s| string_literal_a(s, ctx),
+            |s| char_literal_a(s, ctx),
+            |s| num_literal_a(s, ctx),
+        ))(s)?;
         let (s1, _) = empty(s1)?;
         Ok((s1, tast::Pattern::Literal(value, meta)))
     };
@@ -710,13 +716,18 @@ fn data<'s>(
     ctx: &Source,
 ) -> PResult<'s, (&'s str, ast::Data<'s>, Vec<tast::Constructor<'s>>)> {
     let parse = |s| {
-        let (s2, (data_name, _)) = alphabetic_identifier_str_with_meta(s, ctx)?;
-        let (s2, _) = trailing_space_tag("[")(s2)?;
+        let (s1, (data_name, _)) = alphabetic_identifier_str_with_meta(s, ctx)?;
 
-        let (s3, (generic_params, generic_metas)) = generic_params_decl(s2, ctx)?;
+        let (s3, generic_params, generic_metas) =
+            if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("["))(s1)? {
+                let (s3, (generic_params, generic_metas)) = generic_params_decl(s2, ctx)?;
+                let (s3, _) = trailing_space_tag("]")(s3)?;
+                (s3, generic_params, generic_metas)
+            } else {
+                (s1, Vec::new(), Vec::new())
+            };
+
         let kind_arity = generic_params.len();
-
-        let (s3, _) = trailing_space_tag("]")(s3)?;
 
         let (s4, _) = trailing_space_tag("=")(s3)?;
 

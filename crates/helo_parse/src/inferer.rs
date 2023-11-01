@@ -62,7 +62,7 @@ impl<'s> UnionFind<'s> {
     /// Allocate a continuous series of empty type variables on heap, returning the index of the first one
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
         let addr = self.heap.len();
-        (0..addr + cnt).for_each(|_| {
+        (addr..addr + cnt).for_each(|_| {
             self.heap.push_back(Slot::Empty);
         });
         addr.into()
@@ -306,7 +306,9 @@ impl<'s> Inferer<'s> {
                     return Err(errors::InfiniteType::new(id, meta, v));
                 }
                 var_stack.push(root_var_id);
-                self.resolve_descdent(&v, var_stack)
+                let r = self.resolve_descdent(&v, var_stack)?;
+                var_stack.pop().unwrap();
+                Ok(r)
             }
             Slot::Empty => Ok(ast::Type::new_var(root_var_id, meta.clone())),
         }

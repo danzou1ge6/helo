@@ -563,7 +563,7 @@ pub trait TypeApply<'s> {
         f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
     ) -> Self;
 
-    fn substitute_vars_with_nodes(&self, nodes: &impl Fn(TypeVarId) -> TypeNode<'s>) -> Self
+    fn substitute_vars_with_nodes(&self, mut nodes: impl FnMut(TypeVarId, &Meta) -> TypeNode<'s>) -> Self
     where
         Self: Sized,
     {
@@ -571,7 +571,7 @@ pub trait TypeApply<'s> {
             &|t| matches!(t.node, TypeNode::Var(_)),
             &mut |t| match t.node {
                 TypeNode::Var(v) => Type {
-                    node: nodes(v),
+                    node: nodes(v, &t.meta),
                     meta: t.meta.clone(),
                 },
                 _ => unreachable!(),

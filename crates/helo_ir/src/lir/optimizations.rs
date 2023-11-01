@@ -217,7 +217,7 @@ mod common_expression_elimination {
             while inst_idx < blocks[block].body.len() {
                 let inst = &mut blocks[block].body[inst_idx];
                 let inst_def = inst.def();
-                
+
                 inst.uses_mut().for_each(|u| *u = ctx.lookup_copy_root(*u));
 
                 if !inst.functional() {
@@ -829,7 +829,15 @@ mod control_flow_simplification {
             if let Some(Jump::Ret(Some(ret_temp))) = blocks[block_id].exit {
                 if let Some(lir::Instruction::Mov(to, from)) = blocks[block_id].body.last().cloned()
                 {
-                    if to == ret_temp {
+                    if blocks[block_id]
+                        .body
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .find(|inst| inst.def() == from)
+                        .is_some()
+                        && to == ret_temp
+                    {
                         blocks[block_id].body.pop_back().unwrap();
 
                         for inst in blocks[block_id].body.iter_mut().rev() {

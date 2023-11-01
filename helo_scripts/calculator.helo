@@ -1,0 +1,57 @@
+data ParseError = ParseError Str,Str
+
+fn parse_digit s =
+    if str_some s then
+        case str_head s of
+            '0' -> ((str_tail s), Ok 0)
+            | '1' -> ((str_tail s), Ok 1)
+            | '2' -> ((str_tail s), Ok 2)
+            | '3' -> ((str_tail s), Ok 3)
+            | '4' -> ((str_tail s), Ok 4)
+            | '5' -> ((str_tail s), Ok 5)
+            | '6' -> ((str_tail s), Ok 6)
+            | '7' -> ((str_tail s), Ok 7)
+            | '8' -> ((str_tail s), Ok 8)
+            | '9' -> ((str_tail s), Ok 9)
+            | _   -> (s, Err ParseError s,"digit")
+    else (s, Err ParseError s,"digit")
+
+data Op = OpAdd | OpSub | OpMul | OpDiv | OpLParen | OpRParen
+
+fn parse_perator s =
+    if str_some s then
+        case str_head s of
+            '+' -> ((str_tail s), Ok OpAdd)
+            | '-' -> ((str_tail s), Ok OpSub)
+            | '*' -> ((str_tail s), Ok OpMul)
+            | '/' -> ((str_tail s), Ok OpDiv)
+            | '(' -> ((str_tail s), Ok OpLParen)
+            | ')' -> ((str_tail s), Ok OpRParen)
+            | _   -> (s, Err ParseError s,"operator")
+    else (s, Err ParseError s,"operator")
+
+fn parse_float s =
+    let fn parse_int s,x =
+        case parse_digit s of
+              (s1, Ok digit) -> parse_int s1,(x *. 10.0 +. int_to_float digit)
+            | (s1, Err e   ) -> (s1, x)
+    in
+    let fn parse_mantissa s,x,n =
+        case parse_digit s of
+              (s1, Ok digit) -> parse_mantissa s1,(x +. n *. int_to_float digit),(n *. 0.1)
+            | (s1, Err e   ) -> (s1, x)
+    in
+    
+    case parse_digit s of
+        (_s, Ok _x) ->
+            let (s1, x) = parse_int s,0.0 in
+            if str_some s1 then
+                case str_head s1 of
+                    '.'       ->
+                        let (s2, x) = parse_mantissa (str_tail s1),x,0.1 in
+                        (s2, Ok x)
+                    | otherwise -> (s1, Ok x)
+            else (s1, Ok x)
+        | otherwise -> (s, Err ParseError s,"float")
+
+fn main = let (_, v) = parse_float "1.2" in v

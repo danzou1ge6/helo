@@ -65,12 +65,12 @@ const PRECEDENCE_DEF: &'static str = r#"
     infix `and` 41 40
     infix `or`  41 40
 
-    infix +   41 40
-    infix -   41 40
-    infix *   51 50
-    infix **  61 60
-    infix /   51 50
-    infix mod 51 50
+    infix +     41 40
+    infix -     41 40
+    infix *     51 50
+    infix **    61 60
+    infix /     51 50
+    infix `mod` 51 50
 
     infix == 31 30
     infix /= 31 30

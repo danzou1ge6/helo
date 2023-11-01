@@ -161,6 +161,7 @@ pub struct Vm<'e, G> {
     ip: Addr,
     exe: &'e Executable,
     gc_policy: G,
+    debug: bool,
 }
 
 impl<'e, G> Vm<'e, G>
@@ -172,6 +173,15 @@ where
             ip: exe.entry,
             exe,
             gc_policy,
+            debug: false,
+        }
+    }
+    pub fn new_debug(exe: &'e Executable, gc_policy: G) -> Self {
+        Self {
+            ip: exe.entry,
+            exe,
+            gc_policy,
+            debug: true,
         }
     }
     fn relative_jump(&mut self, offset: byte_code::JumpDistance) {
@@ -779,8 +789,7 @@ where
             }
 
             if self.gc_policy.if_do_gc(pool.memory_usage()) {
-                #[cfg(feature = "debug_gc")]
-                {
+                if self.debug {
                     println!("[ip = {}]", self.ip);
                     dbg!(&call_stack);
                     dbg!(&registers);

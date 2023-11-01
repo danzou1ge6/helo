@@ -20,6 +20,27 @@ impl OnlyLocalAssign {
         }
     }
 }
+
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Type variable ubound")]
+#[diagnostic(help("Consider annotating the type of the function containing this expression"))]
+pub struct UnboundTypeVariable {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Type for expression here")]
+    pub span: SourceSpan,
+}
+
+impl UnboundTypeVariable {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
 #[derive(Diagnostic, Debug, Error)]
 #[error("Unit not allowed here")]
 pub struct NoUnitHere {
@@ -358,23 +379,6 @@ impl TupleIndexOutOfBound {
     }
 }
 
-#[derive(Diagnostic, Debug, Error)]
-#[error("Type Annotation required for tuple")]
-pub struct TypeAnnotationRequiredForTuple {
-    #[source_code]
-    pub src: NamedSource,
-    #[label("Tuple-access operation on a variable here, type of which hasn't been determied")]
-    pub span: SourceSpan,
-}
-
-impl TypeAnnotationRequiredForTuple {
-    pub fn new(tuple_meta: &ast::Meta) -> Self {
-        Self {
-            src: tuple_meta.named_source(),
-            span: tuple_meta.span(),
-        }
-    }
-}
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Can not do tuple-access operation on type {}", type_)]

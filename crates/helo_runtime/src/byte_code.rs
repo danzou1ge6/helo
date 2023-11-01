@@ -403,7 +403,7 @@ impl OpCode {
             JUMP_IF_EQ_I64 => 2,
             JUMP_IF_EQ_BOOL => 3,
             JUMP_IF_EQ_STR => 5,
-            JUMP_IF_EQ_CHAR => 5,
+            JUMP_IF_EQ_CHAR => 6,
             _ => panic!("Only jumps have jump distance offset"),
         }
     }

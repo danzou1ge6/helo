@@ -447,7 +447,7 @@ fn infer_call<'s>(
                 ast::TypeNode::Callable
             };
 
-            if args.len() == params.len() {
+            if args.len() >= params.len() {
                 ret.as_ref().clone()
             } else {
                 // Curried
@@ -1257,27 +1257,33 @@ pub fn infer_function<'s>(
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
     let (map, var_cnt) = inferer.discretization_function(&f_type);
-    let f_type = f_type.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
+    let f_type = f_type.substitute_vars_with_nodes(|i, _| ast::TypeNode::Var(map[&i]));
 
     typed_functions.finish_infering();
     let body = typed_nodes.push(body_expr);
 
-    // dbg!(&f_type, &map);
-
-    // typed_nodes.walk(body, &mut |expr| {
-    //     let resolved = inferer.resolve(&expr.type_).unwrap_or_else(|err| {
-    //         e.push(err);
-    //         ast::Type::new_never(expr.type_.meta.clone())
-    //     });
-    //     let report = miette::miette!(
-    //         labels = vec![miette::LabeledSpan::at(expr.meta.span(), format!("{}", resolved.node))],
-    //         "Type here"
-    //     )
-    //     .with_source_code(expr.meta.named_source());
-    //     println!("{:?}", &report);
-    //     dbg!(&inferer);
-    //     expr.type_ = resolved.substitute_vars_with_nodes(&|i| ast::TypeNode::Var(map[&i]));
-    // });
+    typed_nodes.walk(body, &mut |expr| {
+        let resolved = inferer.resolve(&expr.type_).unwrap_or_else(|err| {
+            e.push(err);
+            ast::Type::new_never(expr.type_.meta.clone())
+        });
+        // let report = miette::miette!(
+        //     labels = vec![miette::LabeledSpan::at(expr.meta.span(), format!("{}", resolved.node))],
+        //     "Type here"
+        // )
+        // .with_source_code(expr.meta.named_source());
+        // println!("{:?}", &report);
+        // dbg!(&inferer);
+        expr.type_ = resolved.substitute_vars_with_nodes(|i, var_meta| {
+            map.get(&i).map_or_else(
+                || {
+                    e.push(errors::UnboundTypeVariable::new(var_meta));
+                    ast::TypeNode::Never
+                },
+                |x| ast::TypeNode::Var(*x),
+            )
+        });
+    });
 
     Some(typed::Function {
         var_cnt,

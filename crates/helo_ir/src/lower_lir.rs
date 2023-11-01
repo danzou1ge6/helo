@@ -597,7 +597,9 @@ fn lower_add_to_env(
     };
 
     inst.emit(chunk);
-    Instruction::Mov(from, to).emit(chunk);
+    if from != to {
+        Instruction::Mov(to, from).emit(chunk);
+    }
 }
 
 fn lower_push(

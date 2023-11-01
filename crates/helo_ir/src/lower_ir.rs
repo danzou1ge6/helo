@@ -726,7 +726,7 @@ fn lower_switch<'s>(
 ) -> Vec<lir::BlockId> {
     let operand_temp = compiler.new_temp();
     let block = lower_expr(
-        to,
+        Some(operand_temp),
         operand,
         ir_nodes,
         ir_functions,

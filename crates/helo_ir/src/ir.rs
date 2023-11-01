@@ -1,10 +1,19 @@
 use std::collections::HashMap;
 
-pub use helo_parse::ast::LocalId;
 pub use helo_parse::typed::Tag;
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct ExprId(pub usize);
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalId(pub usize);
+
+impl std::fmt::Display for LocalId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "'{}", self.0)
+    }
+}
 
 impl PartialEq for ExprId {
     fn eq(&self, other: &Self) -> bool {
@@ -12,6 +21,11 @@ impl PartialEq for ExprId {
     }
 }
 
+impl From<usize> for LocalId {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
 impl Eq for ExprId {}
 
 impl From<usize> for ExprId {

@@ -3,6 +3,7 @@ use helo_parse::ast;
 use helo_parse::typed;
 
 pub struct Context {
+    /// Count of ir locals, NOT ast locals
     local_cnt: usize,
     captured_cnt: usize,
 }
@@ -20,7 +21,7 @@ impl Context {
         captured_cnt: usize,
         f: impl FnOnce(&mut Context) -> R,
     ) -> R {
-        self.local_cnt = local_cnt;
+        self.local_cnt = local_cnt + captured_cnt;
         self.captured_cnt = captured_cnt;
         f(self)
     }
@@ -173,7 +174,7 @@ fn lower_expr<'s>(
             str_table,
             lower_ctx,
         ),
-        MakeClosure(fid) => lower_make_closure(fid, &expr.meta, symbols, ir_nodes),
+        MakeClosure(fid) => lower_make_closure(fid, &expr.meta, symbols, ir_nodes, &lower_ctx),
         Constructor(name) => {
             let tag = symbols.tag_for(&name);
             let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
@@ -202,10 +203,9 @@ fn lower_expr<'s>(
             ir_nodes.push(r)
         }
         AssignCaptured(captured, value) => {
-            let local = ir::LocalId::from(captured.0);
             let value = lower_expr(*value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
             let r = ir::Expr::new(
-                ir::ExprNode::Assign(map_local(local, &lower_ctx), value),
+                ir::ExprNode::Assign(map_captured(*captured, &lower_ctx), value),
                 (&expr.meta).into(),
             );
             ir_nodes.push(r)
@@ -244,7 +244,7 @@ mod lower_case {
                 if let Some(p) = p {
                     write!(f, "{p}, ")?;
                 } else {
-                    write!(f, "_")?;
+                    write!(f, "_, ")?;
                 }
             }
             write!(f, " -> {}", self.result.0)
@@ -256,7 +256,7 @@ mod lower_case {
     // There must be at least one row and one col
     fn col_index_with_least_binds(rows: &Vec<Row<'_>>) -> usize {
         (0..rows[0].patterns.len())
-            .max_by_key(|i| {
+            .min_by_key(|i| {
                 rows.iter()
                     .filter(|row| {
                         matches!(row.patterns[*i], Some(Pattern::Bind(_, _)))
@@ -390,12 +390,15 @@ mod lower_case {
                 let mut branch_rows = Vec::new();
                 let mut rest_rows = Vec::new();
 
+                let first_constructor_width = first_args.len();
+
                 rows.into_iter().for_each(|(pat, mut r)| {
                     if let Some(pat) = pat {
                         let (pat_constructor, pat_args, pat_meta) = pat.unwrap_construct();
                         if pat_constructor == first_constructor {
                             pat_args
                                 .into_iter()
+                                .rev()
                                 .for_each(|p| r.patterns.push_front(Some(p)));
                             branch_rows.push(r);
                         } else {
@@ -405,15 +408,16 @@ mod lower_case {
                             ));
                         }
                     } else {
-                        branch_rows.push(r.clone());
-                        rest_rows.push((None, r));
+                        rest_rows.push((None, r.clone()));
+                        (0..first_constructor_width).for_each(|_| r.patterns.push_front(None));
+                        branch_rows.push(r);
                     }
                 });
 
                 rows = rest_rows;
 
                 let mut rest_operands = rest_operands.clone();
-                (0..first_args.len()).for_each(|i| {
+                (0..first_constructor_width).rev().for_each(|i| {
                     rest_operands.push_front(ir_nodes.push(ir::Expr::new(
                         ir::ExprNode::VariantField(local_for_operand, i),
                         switch_meta.into(),
@@ -485,6 +489,7 @@ mod lower_case {
                     let (elems, _) = pat.unwrap_tuple();
                     elems
                         .into_iter()
+                        .rev()
                         .for_each(|e| r.patterns.push_front(Some(e)));
                     r
                 } else {
@@ -529,6 +534,7 @@ mod lower_case {
         switch_meta: &ast::Meta,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
+        lower_ctx: &Context,
     ) -> ir::ExprId {
         let mut cond_pairs = Vec::new();
         let mut default = None;
@@ -562,7 +568,7 @@ mod lower_case {
             accu
         });
 
-        build_binds(binds, result, switch_meta, ir_nodes)
+        build_binds(binds, result, switch_meta, ir_nodes, lower_ctx)
     }
 
     fn build_binds<'s>(
@@ -570,11 +576,12 @@ mod lower_case {
         mut result: ir::ExprId,
         switch_meta: &ast::Meta,
         ir_nodes: &mut ir::ExprHeap<'s>,
+        lower_ctx: &Context,
     ) -> ir::ExprId {
         for (local, value) in binds {
             let r = ir::Expr::new(
                 ir::ExprNode::LetBind {
-                    local,
+                    local: map_local(local, lower_ctx),
                     value,
                     in_: result,
                 },
@@ -605,7 +612,7 @@ mod lower_case {
         }
         // no col: use guards
         if rows[0].patterns.len() == 0 {
-            return build_guarded(rows, switch_meta, ir_nodes, str_table);
+            return build_guarded(rows, switch_meta, ir_nodes, str_table, &lower_ctx);
         }
 
         let col_index_with_least_binds = col_index_with_least_binds(&rows);
@@ -774,7 +781,11 @@ fn lower_let_bind<'s>(
     let in_ = lower_expr(in_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
 
     ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::LetBind { local, value, in_ },
+        ir::ExprNode::LetBind {
+            local: map_local(local, lower_ctx),
+            value,
+            in_,
+        },
         let_meta.into(),
     ))
 }
@@ -937,6 +948,10 @@ fn map_local(id: ast::LocalId, lower_ctx: &Context) -> ir::LocalId {
     ir::LocalId::from(id.0 + lower_ctx.captured_cnt)
 }
 
+fn map_captured(id: ast::CapturedId, _lower_ctx: &Context) -> ir::LocalId {
+    ir::LocalId::from(id.0)
+}
+
 fn lower_local<'s>(
     id: ast::LocalId,
     local_meta: &ast::Meta,
@@ -954,10 +969,18 @@ fn lower_make_closure<'s>(
     closure_meta: &ast::Meta,
     symbols: &typed::Symbols,
     ir_nodes: &mut ir::ExprHeap,
+    lower_ctx: &Context,
 ) -> ir::ExprId {
     let f = symbols.function(fid);
     ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::MakeClosure(fid.clone(), f.captures.clone()),
+        ir::ExprNode::MakeClosure(
+            fid.clone(),
+            f.captures
+                .iter()
+                .copied()
+                .map(|i| map_local(i, lower_ctx))
+                .collect(),
+        ),
         closure_meta.into(),
     ))
 }
