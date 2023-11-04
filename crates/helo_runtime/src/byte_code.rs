@@ -102,16 +102,21 @@ impl JumpDistance {
     }
 }
 
-impl TryFrom<usize> for JumpDistance {
-    type Error = std::num::TryFromIntError;
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        i16::try_from(value).map(|i| Self(i))
-    }
-}
-
 impl From<u16> for BuiltinId {
     fn from(value: u16) -> Self {
         Self(value)
+    }
+}
+
+impl JumpDistance {
+    pub fn new(from: usize, to: usize) -> Result<Self, ()> {
+        let delta = if to > from {
+            i16::try_from(to - from).map_err(|_| ())?
+        } else {
+            let pos = i16::try_from(from - to).map_err(|_| ())?;
+            pos.checked_neg().map_or(Err(()), |x| Ok(x))?
+        };
+        Ok(Self(delta))
     }
 }
 

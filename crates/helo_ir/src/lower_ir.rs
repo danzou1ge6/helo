@@ -594,7 +594,7 @@ fn lower_while<'s>(
     );
 
     blocks.seal(
-        block,
+        test_block,
         lir::Jump::JumpIfElse(test_temp, then_branch, else_branch),
     );
 

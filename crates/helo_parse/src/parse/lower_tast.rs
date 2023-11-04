@@ -194,13 +194,13 @@ fn lower_seq<'s>(
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
-    match stmts.pop_front() {
+    resolver.with_scope(|resolver| match stmts.pop_front() {
         Some(tast::Stmt {
             node: tast::StmtNode::LetDecl(pat, value),
             meta,
         }) => {
-            let rest = lower_seq(stmts, result, result_meta, resolver, symbols, ast_heap, e);
             let pat = lower_pattern(pat, resolver, e);
+            let rest = lower_seq(stmts, result, result_meta, resolver, symbols, ast_heap, e);
             let value = lower_expr(value, resolver, symbols, ast_heap, e);
             let expr = ast::Expr::new_untyped(
                 ast::ExprNode::LetPatIn {
@@ -234,7 +234,7 @@ fn lower_seq<'s>(
             );
             ast_heap.push(expr)
         }
-    }
+    })
 }
 
 fn lower_apply<'s>(

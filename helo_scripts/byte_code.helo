@@ -1,2 +1,5 @@
-routine main =
-    let r = readline () in println r `str_cat` "+++"
+routine main = begin
+    while 1 == 1 then begin
+        println "1"
+    end
+end

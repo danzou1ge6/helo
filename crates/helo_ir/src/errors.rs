@@ -4,21 +4,23 @@ use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Some branch in this function requires jumping {} instructions, but we only support jump distance that can be represented by 3 bytes", distance)]
+#[error("Some branch in this function requires jumping from instruction {} to {}, but we only support jump distance that can be represented by an i16", from, to)]
 pub struct TooLongJump {
     #[source_code]
     pub src: NamedSource,
     #[label("Function here")]
     pub span: SourceSpan,
-    pub distance: usize,
+    pub from: usize,
+    pub to: usize,
 }
 
 impl TooLongJump {
-    pub fn new(meta: &Meta, distance: usize) -> Self {
+    pub fn new(meta: &Meta, from: usize, to: usize) -> Self {
         Self {
             src: meta.named_source(),
             span: meta.span(),
-            distance,
+            from,
+            to,
         }
     }
 }

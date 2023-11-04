@@ -80,18 +80,13 @@ impl ChunkRelocations {
         &self,
         chunk: &mut byte_code::Chunk,
         block_addrs: &HashMap<lir::BlockId, usize>,
-    ) -> Result<(), usize> {
+    ) -> Result<(), (usize, usize)> {
         for (addr, origin, block_id) in self.relocations.iter() {
             let block_addr = block_addrs[block_id];
-            let delta = if block_addr > *origin {
-                block_addr - *origin
-            } else {
-                *origin - block_addr
-            };
-            if let Ok(delta) = byte_code::JumpDistance::try_from(delta) {
+            if let Ok(delta) = byte_code::JumpDistance::new(*origin, block_addr) {
                 chunk.write(*addr, delta);
             } else {
-                return Err(delta);
+                return Err((*origin, block_addr));
             }
         }
         Ok(())
@@ -135,8 +130,8 @@ pub fn lower_function(
         })
         .collect::<HashMap<_, _>>();
 
-    if let Err(distance) = chunk_relocations.relocate(chunk, &block_addrs) {
-        e.push(errors::TooLongJump::new(&f.meta, distance))
+    if let Err((from, to)) = chunk_relocations.relocate(chunk, &block_addrs) {
+        e.push(errors::TooLongJump::new(&f.meta, from, to))
     }
 
     if chunk.len() > u32::MAX as usize {

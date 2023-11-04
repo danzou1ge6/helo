@@ -501,9 +501,11 @@ mod constant_propagation {
         blocks_worklist: &mut HashSet<BlockId>,
     ) {
         let mut lift_to_run = |block_id, blocks: &ssa::SsaBlockHeap| {
-            block_run[block_id] = true;
-            blocks_worklist.insert(block_id);
-            for susc in blocks[block_id].successors() {
+            if block_run[block_id] == false {
+                block_run[block_id] = true;
+                blocks_worklist.insert(block_id);
+            }
+            for susc in blocks[block_id].successors().filter(|b| !block_run[*b]) {
                 blocks_worklist.insert(susc);
             }
         };
@@ -730,6 +732,7 @@ mod control_flow_simplification {
         blocks: &mut lir::BlockHeap,
         block_id: BlockId,
         block_run: &mut BlockIdVec<bool>,
+        entry: &mut BlockId,
     ) -> bool {
         let mut changed = false;
 
@@ -737,6 +740,7 @@ mod control_flow_simplification {
         if let Some(first_susc) = option_first_susc {
             if !matches!(blocks[block_id].exit, Some(Jump::Jump(_)))
                 && blocks[block_id].successors().all(|b| b == first_susc)
+                && first_susc != block_id
             {
                 blocks[block_id].exit = Some(Jump::Jump(first_susc));
                 changed = true;
@@ -744,6 +748,10 @@ mod control_flow_simplification {
         }
 
         if let Some(Jump::Jump(only_susc)) = blocks[block_id].exit {
+            if only_susc == block_id {
+                return changed;
+            }
+
             if blocks[block_id].body.is_empty() {
                 for pred in blocks[block_id]
                     .pred
@@ -762,6 +770,10 @@ mod control_flow_simplification {
                 blocks[only_susc].pred.remove(&block_id);
                 block_run[block_id] = false;
 
+                if block_id == *entry {
+                    *entry = only_susc;
+                }
+
                 return true;
             }
 
@@ -771,6 +783,7 @@ mod control_flow_simplification {
                 .filter(|b| block_run[**b])
                 .count()
                 == 1
+                && only_susc != *entry
             {
                 blocks[only_susc]
                     .successors()
@@ -788,6 +801,7 @@ mod control_flow_simplification {
                 blocks[block_id].exit = only_susc_block.exit;
 
                 block_run[only_susc] = false;
+
                 return true;
             }
 
@@ -809,14 +823,14 @@ mod control_flow_simplification {
         changed
     }
 
-    pub fn run(blocks: &mut lir::BlockHeap, entry: BlockId, block_run: &mut BlockIdVec<bool>) {
+    pub fn run(blocks: &mut lir::BlockHeap, entry: &mut BlockId, block_run: &mut BlockIdVec<bool>) {
         loop {
-            let post_order = ssa::BlocksOrder::post_order_of(blocks, entry);
+            let post_order = ssa::BlocksOrder::post_order_of(blocks, *entry);
 
             let mut changed = false;
             for block_id in post_order.iter() {
                 if block_run[block_id] {
-                    changed |= simplify_block(blocks, block_id, block_run);
+                    changed |= simplify_block(blocks, block_id, block_run, entry);
                 }
             }
 

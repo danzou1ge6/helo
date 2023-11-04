@@ -129,6 +129,17 @@ fn parse_expr_precedenced s,prec: [Str, Int] -> (Str, Result[Expr, ParseError]) 
 
 fn parse_expr s = parse_expr_precedenced s,0
 
+fn parse_expr_finish s =
+    case parse_expr s of
+        (s1, Ok expr) ->
+            if (str_len s1) /= 0 then
+                Err ParseError s1,"expression-finished"
+            else
+                Ok expr
+        | (s1, Err e) -> Err e
+    end
+            
+
 fn eval_expr expr =
     case expr of
         Lit x -> x
@@ -143,10 +154,34 @@ fn eval_expr expr =
             end
     end
 
-fn parse_and_eval s =
-    case parse_expr s of
-        (_, Ok expr) -> Ok eval_expr expr
-        | (_, Err e) -> Err e
+fn str_repeat c,n =
+    let fn helper s,c,n =
+        if n == 0 then
+            s
+        else
+            helper ((char_to_str c) `str_cat` s),c,(n - 1)
+    in
+        helper "",c,n
+
+routine print_parse_error e,s =
+    let ParseError at,name = e in
+    begin
+        println s;
+        println (str_repeat ' ',((str_len s) - (str_len at)))
+                 `str_cat` "| <- Error parsing "
+                 `str_cat` name
+                 `str_cat` " Here"
     end
 
-fn main = parse_and_eval "1+2*2-0.1"
+routine print_result x =
+    println "= " `str_cat` (float_to_str x)
+
+routine main = begin
+    while 1 == 1 then begin
+        let line = readline ();
+        case parse_expr_finish line of
+            Ok expr  -> print_result eval_expr expr
+            | Err e  -> print_parse_error e,line
+        end
+    end
+end

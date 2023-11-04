@@ -87,7 +87,7 @@ const PRECEDENCE_DEF: &'static str = r#"
     infix **.. 61 60
     infix /.   51 50
 
-    infix `str_cat` 41 40
+    infix `str_cat` 40 41
     infix `str_eq` 31 30
     infix `char_eq` 31 30
 "#;

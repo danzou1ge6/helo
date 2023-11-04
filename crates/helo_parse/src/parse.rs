@@ -84,7 +84,7 @@ fn alphabetic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
     let parse = |s| {
         let (s1, _) = nchar::none_of("0123456789~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n")(s)?;
         let (s2, left): (&str, Option<&str>) =
-            ncomb::opt(nbyte::is_not("~/<>,.:\"'[]{}|\\+=-()*&^%$#@!` \r\n"))(s1)?;
+            ncomb::opt(nbyte::is_not("~/<>,.;:\"'[]{}|\\+=-()*&^%$#@!` \r\n"))(s1)?;
 
         let (s2, id) = if let Some(left) = left {
             (s2, &s[0..left.len() + 1])
@@ -638,18 +638,6 @@ fn type_callable_type<'s>(
     nom_context("callable type", parse)(s)
 }
 
-fn type_unit<'s>(s: &'s str, ctx: &Source) -> PResult<'s, tast::Type<'s>> {
-    let (s1, _) = nbyte::tag("()")(s)?;
-    let (s2, _) = empty(s1)?;
-    Ok((
-        s2,
-        tast::Type {
-            node: tast::TypeNode::Unit,
-            meta: ctx.meta(s, s1),
-        },
-    ))
-}
-
 fn type_parenthesed<'s>(
     s: &'s str,
     ctx: &Source,
@@ -953,6 +941,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         nbyte::tag("in"),
         nbyte::tag("let"),
         nbyte::tag("fn"),
+        nbyte::tag("routine"),
         nbyte::tag("data"),
         nbyte::tag("end"),
         nbyte::tag("->"),
@@ -1118,22 +1107,15 @@ fn seq_expr<'s>(
         stmt(s, ctx, precedence_table, generic_params)
     })(s)?;
 
-    let (s2, result) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag(";"))(s1)? {
-        (s2, None)
+    let result = if let tast::StmtNode::Expr(_) = &stmts.last().unwrap().node {
+        Some(match stmts.pop().unwrap().node {
+            tast::StmtNode::Expr(expr) => expr,
+            _ => unreachable!(),
+        })
     } else {
-        if let tast::StmtNode::Expr(_) = &stmts.last().unwrap().node {
-            (
-                s1,
-                Some(match stmts.pop().unwrap().node {
-                    tast::StmtNode::Expr(expr) => expr,
-                    _ => unreachable!(),
-                }),
-            )
-        } else {
-            (s1, None)
-        }
+        None
     };
-    let (s3, _) = trailing_space_tag("end")(s2)?;
+    let (s3, _) = trailing_space_tag("end")(s1)?;
 
     Ok((
         s3,

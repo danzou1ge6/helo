@@ -158,7 +158,7 @@ pub fn constant_propagation(mut f: ssa::Function) -> ssa::Function {
 }
 
 pub fn control_flow_simplification(mut f: lir::FunctionOptimized) -> lir::FunctionOptimized {
-    lir::optimizations::control_flow_simplification(&mut f.blocks, f.body, &mut f.block_run);
+    lir::optimizations::control_flow_simplification(&mut f.blocks, &mut f.body, &mut f.block_run);
     f
 }
 
