@@ -512,6 +512,18 @@ pub fn string_println<'p>(
     Ok(ValueSafe::Int(0))
 }
 
+pub fn string_print<'p>(
+    [arg0]: [ValueSafe<'p>; 1],
+    _pool: &mut mem::GcPool,
+    _registers: &mut mem::ValueVec,
+    _call_stack: &mut vm::CallStack,
+    _lock: &'p mem::Lock,
+) -> BuiltinRet<'p> {
+    let s = arg0.unwrap_obj().cast::<mem::ObjString>();
+    print!("{}", s.as_ref());
+    Ok(ValueSafe::Int(0))
+}
+
 pub fn read_line<'p>(
     []: [ValueSafe<'p>; 0],
     pool: &mut mem::GcPool,

@@ -213,16 +213,25 @@ fn lower_seq<'s>(
             ast_heap.push(expr)
         }
         Some(stmt) => {
-            let rest = lower_seq(stmts, result, result_meta, resolver, symbols, ast_heap, e);
+            let rest = lower_seq(stmts, result, result_meta.clone(), resolver, symbols, ast_heap, e);
             let stmt = lower_stmt(stmt, resolver, symbols, ast_heap, e);
             match &mut ast_heap[rest] {
                 ast::Expr {
                     node: ast::ExprNode::Seq(stmts, ..),
                     ..
-                } => stmts.push_front(stmt),
-                _ => unreachable!(),
-            };
-            rest
+                } => {
+                    stmts.push_front(stmt);
+                    rest
+                }
+                _ => {
+                    let seq = VecDeque::from([stmt]);
+                    let expr = ast::Expr::new_untyped(
+                        ast::ExprNode::Seq(seq, Some(rest)),
+                        result_meta
+                    );
+                    ast_heap.push(expr)
+                }
+            }
         }
         None => {
             let expr = ast::Expr::new_untyped(

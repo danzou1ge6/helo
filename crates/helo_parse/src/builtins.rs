@@ -59,6 +59,7 @@ const BUILTIN_SIGS: &'static str = r#"
     fn panic 'a     msg   : [Str] -> Char        = ..
 
     routine  println msg   : [Str] -> ()         = ..
+    routine  print   msg   : [Str] -> ()         = ..
     routine  readline      : [] -> Str           = ..
 "#;
 

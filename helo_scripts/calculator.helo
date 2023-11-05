@@ -97,7 +97,7 @@ fn parse_expr_lit s: [Str] -> (Str, Result[Expr, ParseError]) =
 fn parse_prefix_expr s: [Str] -> (Str, Result[Expr, ParseError]) =
     case parse_tag '(',s of
         (s1, Ok _) ->
-            case parse_expr (str_tail s1) of
+            case parse_expr s1 of
                 (s2, Ok expr) ->
                     case parse_tag ')',s2 of
                         (s3, Ok _) -> (s3, Ok expr)
@@ -166,7 +166,6 @@ fn str_repeat c,n =
 routine print_parse_error e,s =
     let ParseError at,name = e in
     begin
-        println s;
         println (str_repeat ' ',((str_len s) - (str_len at)))
                  `str_cat` "| <- Error parsing "
                  `str_cat` name
@@ -177,7 +176,7 @@ routine print_result x =
     println "= " `str_cat` (float_to_str x)
 
 routine main = begin
-    while 1 == 1 then begin
+    while true then begin
         let line = readline ();
         case parse_expr_finish line of
             Ok expr  -> print_result eval_expr expr

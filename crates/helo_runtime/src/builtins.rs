@@ -155,7 +155,7 @@ impl BuiltinTable {
 }
 
 use functions::*;
-const BUILTINS: [(&'static str, Builtin); 45] = [
+const BUILTINS: [(&'static str, Builtin); 46] = [
     // Int arithmatics
     ("+", B2(int_add)),
     ("-", B2(int_subtract)),
@@ -210,5 +210,6 @@ const BUILTINS: [(&'static str, Builtin); 45] = [
     ("str_tail", B1(string_tail)),
     // Routines
     ("println", B1(string_println)),
+    ("print", B1(string_print)),
     ("readline", B0(read_line))
 ];

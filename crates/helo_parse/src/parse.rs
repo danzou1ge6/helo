@@ -200,6 +200,19 @@ fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     ))
 }
 
+fn bool_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
+    let (s1, item) = nbr::alt((trailing_space_tag("true"), trailing_space_tag("false")))(s)?;
+    let value = match item {
+        "true" =>  true,
+        "false" => false,
+        _ => unreachable!()
+    };
+    Ok((
+        s1,
+        tast::Expr::new_untyped(tast::ExprNode::Constant(tast::Constant::Bool(value)), ctx.meta(s, s1))
+    ))
+}
+
 fn string_literal_a<'s>(s: &'s str, ctx: &Source) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
         let (s1, _): (&str, _) = nbyte::tag("\"")(s)?;
@@ -794,6 +807,7 @@ fn expression_item<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     nom_context(
         "identifier, number literal, char literal or string literal",
         nbr::alt((
+            |s| bool_literal_expr(s, ctx),
             |s| identifier_expr(s, ctx),
             |s| num_literal_expr(s, ctx),
             |s| string_literal_expr(s, ctx),

@@ -103,12 +103,6 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
             (fid, f, dom_tree)
         })
         .map(|(fid, f, dom_tree)| {
-            let f = artifect::dead_code_elimination(f);
-            println!("\nAfter dead code elimination");
-            print_ssa_blocks(fid, &f, &str_list, &function_names);
-            (fid, f, dom_tree)
-        })
-        .map(|(fid, f, dom_tree)| {
             let f = artifect::constant_propagation(f);
             println!("\nAfter constant propagation");
             print_ssa_blocks(fid, &f, &str_list, &function_names);
