@@ -43,49 +43,90 @@ fn collect_uses_defs(
 }
 
 mod dead_code_elimination {
-    use std::collections::HashSet;
 
     use super::collect_uses_defs;
+    use crate::lir;
     use crate::lir::ssa;
     use crate::lir::TempId;
 
     use super::Site;
     pub fn run(blocks: &mut ssa::SsaBlockHeap, temp_cnt: usize) {
-        let (mut uses, mut defs) = collect_uses_defs(blocks, temp_cnt);
+        let (_,  defs) = collect_uses_defs(blocks, temp_cnt);
 
-        let mut to_delete = HashSet::new();
+        let mut phi_markers: lir::BlockIdVec<Vec<bool>> = blocks
+            .iter_id()
+            .map(|id| vec![false; blocks[id].phis.len()])
+            .collect();
+        let mut inst_markers: lir::BlockIdVec<Vec<bool>> = blocks
+            .iter_id()
+            .map(|id| vec![false; blocks[id].body.len()])
+            .collect();
 
-        let mut work_list: Vec<_> = (0..temp_cnt).map(|i| TempId(i)).collect();
-        while let Some(t) = work_list.pop() {
-            if uses[t].len() == 0 {
-                let def_site = defs[t];
+        fn mark_site(
+            site: Site,
+            defs: &lir::AltIdxVec<Option<Site>, TempId>,
+            inst_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            phi_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            blocks: &ssa::SsaBlockHeap,
+        ) {
+            match site {
+                Site::Inst(block_id, idx) => {
+                    mark_inst(block_id, idx, defs, inst_markers, phi_markers, blocks)
+                }
+                Site::Phi(block_id, idx) => {
+                    mark_phi(block_id, idx, defs, inst_markers, phi_markers, blocks)
+                }
+                Site::Exit(..) => unreachable!(),
+            }
+        }
 
-                match def_site {
-                    Some(site @ Site::Phi(block, i)) => {
-                        to_delete.insert(site);
-
-                        let ssa::Phi(ret, args) = &blocks[block].phis[i];
-                        defs[*ret] = None;
-                        args.into_iter().for_each(|arg| {
-                            uses[*arg].remove(&Site::Phi(block, i));
-                            work_list.push(*arg);
-                        });
+        fn mark_inst(
+            block_id: lir::BlockId,
+            idx: usize,
+            defs: &lir::AltIdxVec<Option<Site>, TempId>,
+            inst_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            phi_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            blocks: &ssa::SsaBlockHeap,
+        ) {
+            if !inst_markers[block_id][idx] {
+                inst_markers[block_id][idx] = true;
+                for u in blocks[block_id].body[idx].uses() {
+                    if let Some(def) = defs[u] {
+                        mark_site(def, defs, inst_markers, phi_markers, blocks)
                     }
-                    Some(site @ Site::Inst(block, i)) => {
-                        let inst = &blocks[block].body[i];
+                }
+            }
+        }
 
-                        if inst.functional() {
-                            to_delete.insert(site);
+        fn mark_phi(
+            block_id: lir::BlockId,
+            idx: usize,
+            defs: &lir::AltIdxVec<Option<Site>, TempId>,
+            inst_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            phi_markers: &mut lir::BlockIdVec<Vec<bool>>,
+            blocks: &ssa::SsaBlockHeap,
+        ) {
+            if !phi_markers[block_id][idx] {
+                phi_markers[block_id][idx] = true;
+                let ssa::Phi(_, args) = &blocks[block_id].phis[idx];
 
-                            defs[inst.def()] = None;
-                            inst.uses().for_each(|u| {
-                                uses[u].remove(&Site::Inst(block, i));
-                                work_list.push(u);
-                            });
-                        }
+                for u in args {
+                    if let Some(def) = defs[*u] {
+                        mark_site(def, defs, inst_markers, phi_markers, blocks)
                     }
-                    Some(Site::Exit(..)) => unreachable!(),
-                    None => {}
+                }
+            }
+        }
+
+        for block_id in blocks.iter_id() {
+            for (inst_idx, inst) in blocks[block_id].body.iter().enumerate() {
+                if !inst.functional() {
+                    mark_inst(block_id, inst_idx, &defs, &mut inst_markers, &mut phi_markers, blocks)
+                }
+            }
+            if let Some(u) = blocks[block_id].exit.uses() {
+                if let Some(def) = defs[u] {
+                    mark_site(def, &defs, &mut inst_markers, &mut phi_markers, &blocks);
                 }
             }
         }
@@ -94,14 +135,14 @@ mod dead_code_elimination {
             blocks[block_id].phis = std::mem::take(&mut blocks[block_id].phis)
                 .into_iter()
                 .enumerate()
-                .filter(|(i, _)| !to_delete.contains(&Site::Phi(block_id, *i)))
+                .filter(|(i, _)| phi_markers[block_id][*i])
                 .map(|(_, p)| p)
                 .collect();
 
             blocks[block_id].body = std::mem::take(&mut blocks[block_id].body)
                 .into_iter()
                 .enumerate()
-                .filter(|(i, _)| !to_delete.contains(&Site::Inst(block_id, *i)))
+                .filter(|(i, _)| inst_markers[block_id][*i])
                 .map(|(_, inst)| inst)
                 .collect();
         }
