@@ -1332,13 +1332,7 @@ pub fn infer_function<'s>(
                 e.push(err);
                 ast::Type::new_never()
             });
-        // let report = miette::miette!(
-        //     labels = vec![miette::LabeledSpan::at(expr.meta.span(), format!("{}", resolved.node))],
-        //     "Type here"
-        // )
-        // .with_source_code(expr.meta.named_source());
-        // println!("{:?}", &report);
-        // dbg!(&inferer);
+            
         expr.type_ = resolved.substitute_vars_with_nodes(|i| {
             map.get(&i).map_or_else(
                 || {

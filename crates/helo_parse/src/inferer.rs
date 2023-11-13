@@ -128,6 +128,11 @@ impl<'s> Inferer<'s> {
         type_: &ast::Type<'s>,
     ) -> Result<(), ()> {
         let root = self.uf.find(id);
+        if let ast::TypeNode::Var(type_var) = type_.node {
+            if self.uf.find(type_var) == root {
+                return Ok(());
+            }
+        }
         match self.uf.get(root).clone() {
             Slot::Empty => self.fill_empty_slot(root, type_),
             Slot::Value(old_value) => self.unify_no_rollback(&old_value, &type_)?,

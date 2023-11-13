@@ -21,6 +21,7 @@
     Not possible
 [x] Curry notion for callable type
 [x] Impurity and IO
-[ ] Recursive type in inference, for example List['0] = '0
+[x] Recursive type in inference, for example List['0] = '0
+[ ] Emit artifect and run
 [ ] Module
 [ ] Comments

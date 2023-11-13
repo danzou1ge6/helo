@@ -8,7 +8,7 @@ fn cauchian_product xs, ys =
 
 
 fn concat_list 'a xs, ys: [List['a], List['a]] -> List['a] =
-    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys)
+    case xs of Con x1, xs1 -> Con x1, (concat_list x1, ys)
              | Nil         -> Nil
     end
 
