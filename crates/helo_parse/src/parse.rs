@@ -394,6 +394,8 @@ fn case_expr<'s>(
 
         let (s3, _) = trailing_space_tag("of")(s2)?;
 
+        let (s3, _) = ncomb::opt(trailing_space_tag("|"))(s3)?;
+
         let (s4, arms) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
             case_arm(s, ctx, precedence_table, generic_params)
         })(s3)?;

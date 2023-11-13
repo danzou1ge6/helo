@@ -96,7 +96,7 @@ fn parse_expr_lit s: [Str] -> (Str, Result[Expr, ParseError]) =
 
 fn parse_prefix_expr s: [Str] -> (Str, Result[Expr, ParseError]) =
     case parse_tag '(',s of
-        (s1, Ok _) ->
+        | (s1, Ok _) ->
             case parse_expr s1 of
                 (s2, Ok expr) ->
                     case parse_tag ')',s2 of
@@ -105,7 +105,16 @@ fn parse_prefix_expr s: [Str] -> (Str, Result[Expr, ParseError]) =
                     end
                 | (s2, Err e) -> (s2, Err e)
             end
-        | _        -> parse_expr_lit s
+        | _        ->
+            case parse_tag '-',s of
+                | (s1, Ok _) ->
+                    let p_right = op_precedence_right OpSub in
+                    case parse_expr_precedenced s1,p_right of
+                        | (s2, Ok expr) -> (s2, Ok Apply OpSub,(Lit 0.0),expr)
+                        | (s2, Err e) -> (s2, Err e)
+                    end
+                | _ -> parse_expr_lit s
+            end
     end
 
 fn parse_expr_precedenced s,prec: [Str, Int] -> (Str, Result[Expr, ParseError]) =
