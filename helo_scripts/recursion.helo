@@ -4,25 +4,30 @@ fn cauchian_product xs, ys =
     case xs of Con x1, xs1 -> let fn construct_pair y = Pair x1, y
                               in concat_list (map_list construct_pair, ys), (cauchian_product xs1, ys)
              | Nil         -> Nil
+    end
 
 
-fn concat_list '0 xs, ys =
-    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys: List[_])
+fn concat_list 'a xs, ys: [List['a], List['a]] -> List['a] =
+    case xs of Con x1, xs1 -> Con x1, (concat_list xs1, ys)
              | Nil         -> Nil
+    end
 
 fn map_list f, xs =
     case xs of Con y, ys -> Con (f y), (map_list f, ys)
              | Nil       -> Nil
+    end
 
 fn fold f, init, xs =
     case xs of Con y, ys -> fold f, (f y, init), ys
              | Nil       -> init
+    end
 
 fn find f, xs =
     let fn find_inner f,xs,i =
         case xs of Con y,ys if f y -> Some (y, i)
                  | Con y,ys        -> find_inner f,ys,(i + 1)
                  | Nil             -> None
+        end
     in find_inner f,xs,0
 
 data CrazyList['a] = End
@@ -31,6 +36,8 @@ data CrazyList['a] = End
 fn crazyListSize xs = case xs of
      End              -> 0
     |CrazyCon _,rest -> 1 + crazyListSize rest
+end
+
 fn filter_out s,c =
     if str_some s then
         if (str_head s) `char_eq` c then

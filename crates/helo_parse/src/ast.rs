@@ -137,7 +137,7 @@ impl<'s> Constant<'s> {
 #[derive(Debug)]
 pub struct Expr<'s> {
     pub node: ExprNode<'s>,
-    pub type_: Option<Type<'s>>,
+    pub type_: Option<(Type<'s>, Meta)>,
     pub meta: Meta,
 }
 
@@ -149,7 +149,7 @@ impl<'s> Expr<'s> {
             type_: None,
         }
     }
-    pub fn new(node: ExprNode<'s>, meta: Meta, type_: Option<Type<'s>>) -> Self {
+    pub fn new(node: ExprNode<'s>, meta: Meta, type_: Option<(Type<'s>, Meta)>) -> Self {
         Self { node, meta, type_ }
     }
 }
@@ -296,7 +296,7 @@ pub struct Data<'s> {
 }
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Meta {
@@ -423,7 +423,7 @@ pub struct FunctionType<'s> {
 }
 
 impl<'s> FunctionType<'s> {
-    pub fn collect_vars(&self, vars: &mut HashMap<TypeVarId, Meta>) {
+    pub fn collect_vars(&self, vars: &mut HashSet<TypeVarId>) {
         self.params.iter().for_each(|p| p.collect_vars(vars));
         self.captures.iter().for_each(|c| c.collect_vars(vars));
         self.ret.collect_vars(vars);
@@ -553,7 +553,6 @@ impl std::fmt::Display for PrimitiveType {
 #[derive(Clone)]
 pub struct Type<'s> {
     pub node: TypeNode<'s>,
-    pub meta: Meta,
 }
 
 pub trait TypeApply<'s> {
@@ -563,17 +562,14 @@ pub trait TypeApply<'s> {
         f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
     ) -> Self;
 
-    fn substitute_vars_with_nodes(&self, mut nodes: impl FnMut(TypeVarId, &Meta) -> TypeNode<'s>) -> Self
+    fn substitute_vars_with_nodes(&self, mut nodes: impl FnMut(TypeVarId) -> TypeNode<'s>) -> Self
     where
         Self: Sized,
     {
         self.apply(
             &|t| matches!(t.node, TypeNode::Var(_)),
             &mut |t| match t.node {
-                TypeNode::Var(v) => Type {
-                    node: nodes(v, &t.meta),
-                    meta: t.meta.clone(),
-                },
+                TypeNode::Var(v) => Type { node: nodes(v) },
                 _ => unreachable!(),
             },
         )
@@ -613,10 +609,7 @@ impl<'s> TypeApply<'s> for Type<'s> {
             Never => Never,
             WildCard => WildCard,
         };
-        Type {
-            node,
-            meta: self.meta.clone(),
-        }
+        Type { node }
     }
 }
 
@@ -634,24 +627,21 @@ impl<'s> TypeNode<'s> {
 }
 
 impl<'s> Type<'s> {
-    pub fn new_var(id: TypeVarId, meta: Meta) -> Self {
+    pub fn new_var(id: TypeVarId) -> Self {
         Self {
             node: TypeNode::Var(id),
-            meta,
         }
     }
 
-    pub fn new_never(meta: Meta) -> Self {
+    pub fn new_never() -> Self {
         Self {
             node: TypeNode::Never,
-            meta,
         }
     }
 
-    pub fn new_unit(meta: Meta) -> Self {
+    pub fn new_unit() -> Self {
         Self {
             node: TypeNode::Unit,
-            meta,
         }
     }
 
@@ -695,10 +685,7 @@ impl<'s> Type<'s> {
             Never => Never,
             WildCard => WildCard,
         };
-        Ok(Type {
-            node,
-            meta: self.meta.clone(),
-        })
+        Ok(Type { node })
     }
 
     pub fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {
@@ -725,10 +712,10 @@ impl<'s> Type<'s> {
         }
     }
 
-    pub fn collect_vars(&self, vars: &mut HashMap<TypeVarId, Meta>) {
+    pub fn collect_vars(&self, vars: &mut HashSet<TypeVarId>) {
         self.walk(&mut |t| match &t.node {
             TypeNode::Var(v) => {
-                vars.insert(*v, t.meta.clone());
+                vars.insert(*v);
             }
             _ => {}
         });
@@ -751,7 +738,6 @@ impl<'s> Type<'s> {
             &mut |t| match t.node {
                 TypeNode::Var(v) => Type {
                     node: TypeNode::Var(v + offset),
-                    meta: t.meta.clone(),
                 },
                 _ => unreachable!(),
             },
@@ -767,13 +753,7 @@ impl<'s> std::fmt::Display for Type<'s> {
 
 impl<'s> std::fmt::Debug for Type<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let span = (self.meta.span.0)..(self.meta.span.0 + self.meta.span.1);
-        let report = miette::miette!(
-            labels = vec![miette::LabeledSpan::at(span, format!("{}", self.node))],
-            "Type here"
-        )
-        .with_source_code(self.meta.named_source());
-        writeln!(f, "{:?}", report)
+        writeln!(f, "{}", self.node)
     }
 }
 
@@ -816,53 +796,56 @@ impl<'s, F> Symbols_<'s, F> {
         self.functions.get(name)
     }
 
-    pub fn validate_type(&self, type_: &Type<'s>) -> Result<(), miette::Report> {
+    pub fn validate_type(&self, type_: &Type<'s>, meta: &Meta) -> Result<(), miette::Report> {
         use crate::errors;
         use TypeNode::*;
         match &type_.node {
             Generic(template, args) => {
                 if let None = self.get_data(&template) {
                     return Err(miette::Report::new(errors::ConstructorNotFound::new(
-                        &template,
-                        &type_.meta,
+                        &template, meta,
                     )));
                 }
                 if args.len() != self.data(&template).kind_arity {
                     return Err(miette::Report::new(errors::WrongNumberOfArgs::new(
                         self.data(&template).kind_arity,
-                        &type_.meta,
+                        meta,
                     )));
                 }
                 Ok(())
             }
             Callable(callable) => {
                 for p in &callable.params {
-                    self.validate_type(p)?;
+                    self.validate_type(p, meta)?;
                 }
-                self.validate_type(&callable.ret)?;
+                self.validate_type(&callable.ret, meta)?;
                 Ok(())
             }
             ImpureCallable(callable) => {
                 for p in &callable.params {
-                    self.validate_type(p)?;
+                    self.validate_type(p, meta)?;
                 }
-                self.validate_type(&callable.ret)?;
+                self.validate_type(&callable.ret, meta)?;
                 Ok(())
             }
             Tuple(v) => {
                 for elem in v {
-                    self.validate_type(elem)?;
+                    self.validate_type(elem, meta)?;
                 }
                 Ok(())
             }
             Primitive(_) | Var(_) | Unit | Never | WildCard => Ok(()),
         }
     }
-    pub fn validate_callable_type(&self, type_: &CallableType<'s>) -> Result<(), miette::Report> {
+    pub fn validate_callable_type(
+        &self,
+        type_: &CallableType<'s>,
+        meta: &Meta,
+    ) -> Result<(), miette::Report> {
         for p in &type_.params {
-            self.validate_type(p)?;
+            self.validate_type(p, meta)?;
         }
-        self.validate_type(&type_.ret)
+        self.validate_type(&type_.ret, meta)
     }
 
     pub fn get_builtin(&self, name: &str) -> Option<&BuiltinFunction<'s>> {

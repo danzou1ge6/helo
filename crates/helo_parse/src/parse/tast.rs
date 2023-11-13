@@ -21,7 +21,7 @@ pub use ast::{CallableType, Constructor, Type, TypeNode};
 #[derive(Debug, Clone)]
 pub struct Expr<'s> {
     pub node: ExprNode<'s>,
-    pub type_: Option<Type<'s>>,
+    pub type_: Option<(Type<'s>, Meta)>,
     pub meta: ast::Meta,
 }
 

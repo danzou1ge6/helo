@@ -4,6 +4,7 @@ use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 fn infer_expr<'s>(
     expr_id: ast::ExprId,
@@ -145,15 +146,24 @@ fn infer_expr<'s>(
             e.push(errors::NoUnitHere::new(&expr.meta));
             typed::Expr {
                 node: typed::ExprNode::Never,
-                type_: ast::Type::new_never(expr.meta.clone()),
+                type_: ast::Type::new_never(),
                 meta: expr.meta.clone(),
             }
         }
     };
-    if let Some(provided_type) = &expr.type_ {
-        let provided_type = inferer.instantiate_wildcard(provided_type);
+    if let Some((type_annotated, annotation_meta)) = &expr.type_ {
+        let provided_type = inferer.instantiate_wildcard(type_annotated);
         inferer
-            .unify(&provided_type, &typed_expr.type_, &expr.meta)
+            .unify(&provided_type, &typed_expr.type_)
+            .map_err(|_| {
+                errors::UnificationFailure::new(
+                    &provided_type,
+                    annotation_meta,
+                    &typed_expr.type_,
+                    &expr.meta,
+                    &expr.meta,
+                )
+            })
             .commit(e);
     }
 
@@ -272,7 +282,6 @@ fn infer_seq<'s, 'a>(
     let type_ = result.as_ref().map_or(
         ast::Type {
             node: ast::TypeNode::Unit,
-            meta: stmts_meta.clone(),
         },
         |expr| expr.type_.clone(),
     );
@@ -309,21 +318,21 @@ fn infer_assign<'s>(
     match &ast_nodes[to].node {
         ast::ExprNode::Local(local, true) => typed::Expr {
             node: typed::ExprNode::AssignLocal(*local, typed_nodes.push(from)),
-            type_: ast::Type::new_unit(assign_meta.clone()),
+            type_: ast::Type::new_unit(),
             meta: assign_meta.clone(),
         },
         ast::ExprNode::Captured {
             id, mutable: true, ..
         } => typed::Expr {
             node: typed::ExprNode::AssignCaptured(*id, typed_nodes.push(from)),
-            type_: ast::Type::new_unit(assign_meta.clone()),
+            type_: ast::Type::new_unit(),
             meta: assign_meta.clone(),
         },
         _ => {
             e.push(errors::OnlyLocalAssign::new(assign_meta));
             typed::Expr {
                 node: typed::ExprNode::Never,
-                type_: ast::Type::new_never(assign_meta.clone()),
+                type_: ast::Type::new_never(),
                 meta: assign_meta.clone(),
             }
         }
@@ -379,7 +388,6 @@ fn infer_tuple<'s>(
         node: typed::ExprNode::Tuple(elements),
         type_: ast::Type {
             node: ast::TypeNode::Tuple(type_),
-            meta: tuple_meta.clone(),
         },
         meta: tuple_meta.clone(),
     }
@@ -416,10 +424,10 @@ fn infer_call<'s>(
     );
 
     let callee_type_node = inferer
-        .resolve(&callee.type_)
+        .resolve(&callee.type_, &callee.meta)
         .unwrap_or_else(|err| {
             e.push(err);
-            ast::Type::new_never(call_meta.clone())
+            ast::Type::new_never()
         })
         .node;
     let ret_type = match &callee_type_node {
@@ -430,7 +438,16 @@ fn infer_call<'s>(
                 e.push(errors::TooManyArguments::new(call_meta, params.len()));
             }
             inferer
-                .unify_list(args.iter().map(|a| &a.type_), params.iter(), call_meta)
+                .unify_list(args.iter().map(|a| &a.type_), params.iter())
+                .map_err(|i| {
+                    errors::ArgumentUnificationFailure::new(
+                        &callee.type_,
+                        &callee.meta,
+                        &args[i].type_,
+                        &args[i].meta,
+                        call_meta,
+                    )
+                })
                 .commit(e);
 
             if callee_type_node.impure()
@@ -457,7 +474,6 @@ fn infer_call<'s>(
                 };
                 let ret_type = ast::Type {
                     node: type_constructor(ret_callable_type),
-                    meta: call_meta.clone(),
                 };
                 ret_type
             }
@@ -465,7 +481,6 @@ fn infer_call<'s>(
         ast::TypeNode::Var(v_id) => {
             let ret_type = ast::Type {
                 node: ast::TypeNode::Var(inferer.alloc_var()),
-                meta: call_meta.clone(),
             };
 
             let type_constructor = if symbols
@@ -485,18 +500,23 @@ fn infer_call<'s>(
                             params: args.iter().map(|a| a.type_.clone()).collect(),
                             ret: Box::new(ret_type.clone()),
                         }),
-                        meta: call_meta.clone(),
                     },
-                    call_meta,
                 )
+                .map_err(|_| {
+                    errors::ArgumentsUnificationFailure::new(
+                        &callee.type_,
+                        args.iter().map(|arg| &arg.type_),
+                        call_meta,
+                    )
+                })
                 .commit(e);
             ret_type
         }
         otherwise => {
             if !matches!(otherwise, ast::TypeNode::Never) {
-                e.push(errors::NotCallable::new(&callee.type_));
+                e.push(errors::NotCallable::new(&callee.type_, &callee.meta));
             }
-            ast::Type::new_never(call_meta.clone())
+            ast::Type::new_never()
         }
     };
 
@@ -533,7 +553,10 @@ fn infer_let_in<'s>(
     );
     // Bind type of value to local
     inferer
-        .update_var(type_var_id_for_local(bind), &value.type_, &value.meta)
+        .update_var(type_var_id_for_local(bind), &value.type_)
+        .map_err(|_| {
+            errors::LocalUnificationFailure::new(bind, &value.type_, &value.meta, let_in_meta)
+        })
         .commit(e);
 
     // Infer type of in clause
@@ -587,7 +610,16 @@ fn infer_let_pattern_in<'s>(
     );
     // Bind type of value to pattern
     inferer
-        .unify(&pattern_type, &value.type_, let_in_meta)
+        .unify(&pattern_type, &value.type_)
+        .map_err(|_| {
+            errors::UnificationFailure::new(
+                &pattern_type,
+                pattern.meta(),
+                &value.type_,
+                &value.meta,
+                let_in_meta,
+            )
+        })
         .commit(e);
 
     // Infer type of in clause
@@ -645,7 +677,6 @@ fn infer_global<'s>(
                 node: typed::ExprNode::UserFunction(name),
                 type_: ast::Type {
                     node: type_constructor(renamed_f_type.into()),
-                    meta: f.meta.clone(),
                 },
                 meta: global_meta.clone(),
             };
@@ -667,7 +698,6 @@ fn infer_global<'s>(
             node: typed::ExprNode::Builtin(name),
             type_: ast::Type {
                 node: type_constructor(renamed_type),
-                meta: f.meta.clone(),
             },
             meta: global_meta.clone(),
         };
@@ -680,10 +710,9 @@ fn infer_global<'s>(
             node: ast::TypeNode::Generic(
                 constructor.belongs_to,
                 (0..data.kind_arity)
-                    .map(|i| ast::Type::new_var(i.into(), data.generic_metas[i].clone()))
+                    .map(|i| ast::Type::new_var(i.into()))
                     .collect(),
             ),
-            meta: data.meta.clone(),
         };
         let type_ = ast::CallableType {
             params: constructor.params.clone(),
@@ -696,7 +725,6 @@ fn infer_global<'s>(
         } else {
             ast::Type {
                 node: ast::TypeNode::Callable(type_),
-                meta: constructor.meta.clone(),
             }
         };
         return typed::Expr {
@@ -713,7 +741,7 @@ fn infer_global<'s>(
     // Fail: fallthrough
     typed::Expr {
         node: typed::ExprNode::Never,
-        type_: ast::Type::new_never(global_meta.clone()),
+        type_: ast::Type::new_never(),
         meta: global_meta.clone(),
     }
 }
@@ -759,15 +787,19 @@ fn infer_if_else<'s>(
     );
 
     // then and else clause must have same type
-    let ret_type = inferer
-        .unify(&then.type_, &else_.type_, if_else_meta)
-        .map_or_else(
-            |err| {
-                e.push(err);
-                ast::Type::new_never(if_else_meta.clone())
-            },
-            |_| then.type_.clone(),
-        );
+    let ret_type = inferer.unify(&then.type_, &else_.type_).map_or_else(
+        |_| {
+            e.push(errors::UnificationFailure::new(
+                &then.type_,
+                &then.meta,
+                &else_.type_,
+                &else_.meta,
+                if_else_meta,
+            ));
+            ast::Type::new_never()
+        },
+        |_| then.type_.clone(),
+    );
 
     // Test clause must be bool
     inferer
@@ -775,11 +807,18 @@ fn infer_if_else<'s>(
             &test.type_,
             &ast::Type {
                 node: ast::TypeNode::Primitive(ast::PrimitiveType::Bool),
-                meta: test.meta.clone(),
             },
-            &test.meta,
         )
-        .map_or_else(|err| e.push(err), |x| x);
+        .map_or_else(
+            |_| {
+                e.push(errors::NonBoolTest::new(
+                    &test.type_,
+                    &test.meta,
+                    if_else_meta,
+                ))
+            },
+            |x| x,
+        );
 
     typed::Expr {
         node: typed::ExprNode::IfElse {
@@ -797,7 +836,6 @@ fn infer_constant<'s>(constant: &ast::Constant<'s>, constant_meta: &ast::Meta) -
         node: typed::ExprNode::Constant(constant.clone()),
         type_: ast::Type {
             node: ast::TypeNode::Primitive(constant.type_()),
-            meta: constant_meta.clone(),
         },
         meta: constant_meta.clone(),
     }
@@ -832,7 +870,7 @@ fn infer_make_closure<'s>(
         e,
     )
     .map_or_else(
-        || ast::Type::new_never(closure_meta.clone()),
+        || ast::Type::new_never(),
         |c| {
             let f = symbols.function(&closure_id);
             let type_constructor = if f.pure {
@@ -846,12 +884,19 @@ fn infer_make_closure<'s>(
                 .zip(f.captures_meta.iter())
                 .for_each(|((ctype, local_id), local_meta)| {
                     inferer
-                        .update_var(type_var_id_for_local(*local_id), ctype, local_meta)
+                        .update_var(type_var_id_for_local(*local_id), ctype)
+                        .map_err(|_| {
+                            errors::LocalUnificationFailure::new(
+                                *local_id,
+                                &ctype,
+                                &local_meta,
+                                closure_meta,
+                            )
+                        })
                         .commit(e);
                 });
             ast::Type {
                 node: type_constructor(c.into()),
-                meta: closure_meta.clone(),
             }
         },
     );
@@ -869,13 +914,11 @@ fn infer_pattern_type<'s>(
     e: &mut crate::errors::ManyError,
 ) -> ast::Type<'s> {
     match pattern {
-        ast::Pattern::Bind(local_id, meta) => ast::Type {
+        ast::Pattern::Bind(local_id, _meta) => ast::Type {
             node: ast::TypeNode::Var(type_var_id_for_local(*local_id)),
-            meta: meta.clone(),
         },
-        ast::Pattern::Literal(c, meta) => ast::Type {
+        ast::Pattern::Literal(c, _meta) => ast::Type {
             node: ast::TypeNode::Primitive(c.type_()),
-            meta: meta.clone(),
         },
         ast::Pattern::Construct(constructor, args, meta) => {
             let args_type: Vec<_> = args
@@ -887,7 +930,7 @@ fn infer_pattern_type<'s>(
 
             let type_var_zero = inferer.new_slots(data.kind_arity);
             let data_params = (0..data.kind_arity)
-                .map(|i| ast::Type::new_var(type_var_zero.offset(i), data.generic_metas[i].clone()))
+                .map(|i| ast::Type::new_var(type_var_zero.offset(i)))
                 .collect();
 
             let params: Vec<_> = constructor
@@ -896,22 +939,26 @@ fn infer_pattern_type<'s>(
                 .map(|p| p.offset_vars(type_var_zero))
                 .collect();
 
-            if let Err(err) = inferer.unify_list(args_type.iter(), params.iter(), meta) {
-                e.push(err);
-                return ast::Type::new_never(meta.clone());
+            if let Err(err_i) = inferer.unify_list(args_type.iter(), params.iter()) {
+                e.push(errors::PatternUnificationFailure::new(
+                    &args_type[err_i],
+                    &params[err_i],
+                    err_i,
+                    args[err_i].meta(),
+                    meta,
+                ));
+                return ast::Type::new_never();
             }
             ast::Type {
                 node: ast::TypeNode::Generic(constructor.belongs_to, data_params),
-                meta: meta.clone(),
             }
         }
-        ast::Pattern::Tuple(v, meta) => ast::Type {
+        ast::Pattern::Tuple(v, _meta) => ast::Type {
             node: ast::TypeNode::Tuple(
                 v.iter()
                     .map(|x| infer_pattern_type(x, symbols, inferer, e))
                     .collect(),
             ),
-            meta: meta.clone(),
         },
     }
 }
@@ -936,7 +983,7 @@ fn infer_case<'s>(
         inferer,
         e,
     );
-    let ret_type = ast::Type::new_var(inferer.alloc_var(), case_meta.clone());
+    let ret_type = ast::Type::new_var(inferer.alloc_var());
 
     let typed_arms = arms
         .iter()
@@ -966,17 +1013,21 @@ fn infer_case<'s>(
                         &guard_expr.type_,
                         &ast::Type {
                             node: ast::TypeNode::Primitive(ast::PrimitiveType::Bool),
-                            meta: guard_expr.meta.clone(),
                         },
-                        &guard_expr.meta,
                     )
+                    .map_err(|_| {
+                        errors::NonBoolTest::new(&guard_expr.type_, &guard_expr.meta, case_meta)
+                    })
                     .commit(e);
 
                 typed_nodes.push(guard_expr)
             });
 
             inferer
-                .unify(&ret_type, &result.type_, &result.meta)
+                .unify(&ret_type, &result.type_)
+                .map_err(|_| {
+                    errors::ArmTypeUnificationFailure::new(&result.type_, &result.meta, case_meta)
+                })
                 .commit(e);
 
             if let Err(err) = arm.pattern.validate(symbols) {
@@ -992,7 +1043,16 @@ fn infer_case<'s>(
             let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
 
             inferer
-                .unify(&operand.type_, &pat_type, arm.pattern.meta())
+                .unify(&operand.type_, &pat_type)
+                .map_err(|_| {
+                    errors::UnificationFailure::new(
+                        &operand.type_,
+                        &operand.meta,
+                        &pat_type,
+                        arm.pattern.meta(),
+                        case_meta,
+                    )
+                })
                 .commit(e);
             typed::CaseArm {
                 pattern: arm.pattern.clone(),
@@ -1015,7 +1075,7 @@ fn infer_case<'s>(
 fn infer_local(id: ast::LocalId, _mutable: bool, id_meta: &ast::Meta) -> typed::Expr<'static> {
     typed::Expr {
         node: typed::ExprNode::Local(id),
-        type_: ast::Type::new_var(type_var_id_for_local(id), id_meta.clone()),
+        type_: ast::Type::new_var(type_var_id_for_local(id)),
         meta: id_meta.clone(),
     }
 }
@@ -1033,7 +1093,7 @@ fn infer_captured<'s>(
         .local_cnt;
     typed::Expr {
         node: typed::ExprNode::Captured { id, is_self },
-        type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id), id_meta.clone()),
+        type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id)),
         meta: id_meta.clone(),
     }
 }
@@ -1084,7 +1144,7 @@ fn infer_function_type_renamed<'s>(
                         .resolve_var(type_var_id_for_local(i.into()), &f.param_metas[i])
                         .unwrap_or_else(|err| {
                             e.push(err);
-                            ast::Type::new_never(f.param_metas[i].clone())
+                            ast::Type::new_never()
                         })
                 })
                 .collect(),
@@ -1097,7 +1157,7 @@ fn infer_function_type_renamed<'s>(
                         )
                         .unwrap_or_else(|err| {
                             e.push(err);
-                            ast::Type::new_never(f.param_metas[i].clone())
+                            ast::Type::new_never()
                         })
                 })
                 .collect(),
@@ -1106,18 +1166,18 @@ fn infer_function_type_renamed<'s>(
                     .resolve_var(type_var_id_for_ret(f.local_cnt), &f.meta)
                     .unwrap_or_else(|err| {
                         e.push(err);
-                        ast::Type::new_never(f.meta.clone())
+                        ast::Type::new_never()
                     }),
             ),
         };
 
-        let mut vars = HashMap::new();
+        let mut vars = HashSet::new();
         currently_infered.collect_vars(&mut vars);
         let new_vars = inferer.alloc_vars(vars.len());
         let var_subs: HashMap<_, _> = vars
             .into_iter()
             .zip(new_vars)
-            .map(|((from, meta), to)| (from, ast::Type::new_var(to, meta)))
+            .map(|(from, to)| (from, ast::Type::new_var(to)))
             .collect();
 
         currently_infered.substitute_vars(&|id| var_subs[&id].clone());
@@ -1148,12 +1208,12 @@ fn init_inferer_for_function_inference<'s>(
     // allocate type-vars for locals and return-value and captures
     let _ = inferer.alloc_vars(f.local_cnt + 1 + f.captures.len());
 
-    let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt), f.meta.clone());
+    let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt));
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
         // Validate user provided function signature
-        if let Err(err) = symbols.validate_callable_type(f_type) {
+        if let Err(err) = symbols.validate_callable_type(f_type, &f.meta) {
             e.push_boxed(err);
             return ret_type;
         }
@@ -1161,13 +1221,11 @@ fn init_inferer_for_function_inference<'s>(
         let f_type = inferer.rename_type_vars(f_type, f.var_cnt);
         // Unify parameters
         for i in 0..f_type.params.len() {
-            inferer
-                .update_var(i.into(), &f_type.params[i], &f.param_metas[i])
-                .commit(e);
+            inferer.update_var(i.into(), &f_type.params[i]).unwrap()
         }
         inferer
-            .update_var(type_var_id_for_ret(f.local_cnt), &f_type.ret, &f.meta)
-            .commit(e);
+            .update_var(type_var_id_for_ret(f.local_cnt), &f_type.ret)
+            .unwrap()
     };
 
     ret_type
@@ -1217,7 +1275,8 @@ pub fn infer_function<'s>(
     );
 
     inferer
-        .unify(&ret_type, &body_expr.type_, &f.meta)
+        .unify(&ret_type, &body_expr.type_)
+        .map_err(|_| errors::BodyTypeMismatchAnnotation::new(&body_expr.type_, &body_expr.meta))
         .commit(e);
 
     // Construct type of function
@@ -1229,7 +1288,7 @@ pub fn infer_function<'s>(
                     .resolve_var(type_var_id_for_local(i.into()), m)
                     .unwrap_or_else(|err| {
                         e.push(err);
-                        ast::Type::new_never(f.param_metas[i].clone())
+                        ast::Type::new_never()
                     })
             })
             .collect(),
@@ -1242,14 +1301,18 @@ pub fn infer_function<'s>(
                     )
                     .unwrap_or_else(|err| {
                         e.push(err);
-                        ast::Type::new_never(f.captures_meta[i].clone())
+                        ast::Type::new_never()
                     })
             })
             .collect(),
-        ret: Box::new(inferer.resolve(&body_expr.type_).unwrap_or_else(|err| {
-            e.push(err);
-            ast::Type::new_never(body_expr.meta.clone())
-        })),
+        ret: Box::new(
+            inferer
+                .resolve(&body_expr.type_, &body_expr.meta)
+                .unwrap_or_else(|err| {
+                    e.push(err);
+                    ast::Type::new_never()
+                }),
+        ),
     };
 
     use ast::TypeApply;
@@ -1257,16 +1320,18 @@ pub fn infer_function<'s>(
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
     let (map, var_cnt) = inferer.discretization_function(&f_type);
-    let f_type = f_type.substitute_vars_with_nodes(|i, _| ast::TypeNode::Var(map[&i]));
+    let f_type = f_type.substitute_vars_with_nodes(|i| ast::TypeNode::Var(map[&i]));
 
     typed_functions.finish_infering();
     let body = typed_nodes.push(body_expr);
 
     typed_nodes.walk(body, &mut |expr| {
-        let resolved = inferer.resolve(&expr.type_).unwrap_or_else(|err| {
-            e.push(err);
-            ast::Type::new_never(expr.type_.meta.clone())
-        });
+        let resolved = inferer
+            .resolve(&expr.type_, &expr.meta)
+            .unwrap_or_else(|err| {
+                e.push(err);
+                ast::Type::new_never()
+            });
         // let report = miette::miette!(
         //     labels = vec![miette::LabeledSpan::at(expr.meta.span(), format!("{}", resolved.node))],
         //     "Type here"
@@ -1274,10 +1339,10 @@ pub fn infer_function<'s>(
         // .with_source_code(expr.meta.named_source());
         // println!("{:?}", &report);
         // dbg!(&inferer);
-        expr.type_ = resolved.substitute_vars_with_nodes(|i, var_meta| {
+        expr.type_ = resolved.substitute_vars_with_nodes(|i| {
             map.get(&i).map_or_else(
                 || {
-                    e.push(errors::UnboundTypeVariable::new(var_meta));
+                    e.push(errors::UnboundTypeVariable::new(&expr.meta));
                     ast::TypeNode::Never
                 },
                 |x| ast::TypeNode::Var(*x),

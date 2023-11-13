@@ -109,13 +109,11 @@ impl<'s> Inferer<'s> {
         match type_ {
             ast::Type {
                 node: ast::TypeNode::Var(var_id),
-                meta,
             } => {
                 let root1 = self.uf.find(*var_id);
                 if root != root1 {
                     *self.uf.get_mut(root) = Slot::Value(ast::Type {
                         node: ast::TypeNode::Var(root1),
-                        meta: meta.clone(),
                     })
                 }
             }
@@ -128,27 +126,20 @@ impl<'s> Inferer<'s> {
         &mut self,
         id: ast::TypeVarId,
         type_: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
+    ) -> Result<(), ()> {
         let root = self.uf.find(id);
         match self.uf.get(root).clone() {
             Slot::Empty => self.fill_empty_slot(root, type_),
-            Slot::Value(old_value) => self.unify_no_rollback(&old_value, &type_, meta)?,
+            Slot::Value(old_value) => self.unify_no_rollback(&old_value, &type_)?,
         };
         Ok(())
     }
 
     /// Unify type variable `id` with `type_`
-    pub fn update_var(
-        &mut self,
-        id: ast::TypeVarId,
-        type_: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
+    pub fn update_var(&mut self, id: ast::TypeVarId, type_: &ast::Type<'s>) -> Result<(), ()> {
         let uf_backup = self.uf.clone();
-        self.update_var_no_rollback(id, type_, meta).map_err(|e| {
+        self.update_var_no_rollback(id, type_).map_err(|_| {
             self.uf = uf_backup;
-            e
         })
     }
 
@@ -166,111 +157,89 @@ impl<'s> Inferer<'s> {
     pub fn alloc_type_vars<'a>(
         &mut self,
         var_cnt: usize,
-        meta_i: &'a (dyn Fn(usize) -> ast::Meta),
     ) -> impl Iterator<Item = ast::Type<'static>> + 'a {
-        self.alloc_vars(var_cnt)
-            .enumerate()
-            .map(|(i, id)| ast::Type {
-                node: ast::TypeNode::Var(id),
-                meta: meta_i(i),
-            })
+        self.alloc_vars(var_cnt).map(|id| ast::Type {
+            node: ast::TypeNode::Var(id),
+        })
     }
 
-    fn unify_list_no_rollback<'a, 'b, TA, TB>(
+    pub fn unify_list_no_rollback<'a, 'a1, 'b, 'b1>(
         &mut self,
-        a: TA,
-        b: TB,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure>
+        a: impl Iterator<Item = &'a ast::Type<'s>>,
+        b: impl Iterator<Item = &'b ast::Type<'s>>,
+    ) -> Result<(), ()>
     where
-        TA: Iterator<Item = &'a ast::Type<'s>>,
-        's: 'a,
-        TB: Iterator<Item = &'b ast::Type<'s>>,
-        's: 'b,
+        's: 'a + 'b + 'a1 + 'b1,
     {
         for (a, b) in a.zip(b) {
-            self.unify_no_rollback(a, b, meta)?;
+            self.unify_no_rollback(a, b)?;
         }
         Ok(())
     }
 
-    pub fn unify_list<'a, 'b, TA, TB>(
+    pub fn unify_list<'a, 'b>(
         &mut self,
-        a: TA,
-        b: TB,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure>
+        a: impl Iterator<Item = &'a ast::Type<'s>>,
+        b: impl Iterator<Item = &'b ast::Type<'s>>,
+    ) -> Result<(), usize>
     where
-        TA: Iterator<Item = &'a ast::Type<'s>>,
-        's: 'a,
-        TB: Iterator<Item = &'b ast::Type<'s>>,
-        's: 'b,
+        's: 'a + 'b,
     {
         let uf_backup = self.uf.clone();
-        self.unify_list_no_rollback(a, b, meta).map_err(|e| {
-            self.uf = uf_backup;
-            e
-        })
+        for (i, (a, b)) in a.zip(b).enumerate() {
+            if let Err(..) = self.unify_no_rollback(a, b) {
+                self.uf = uf_backup;
+                return Err(i);
+            }
+        }
+        Ok(())
     }
 
     /// Unify type expressions `a` with `b`
-    fn unify_no_rollback(
-        &mut self,
-        a: &ast::Type<'s>,
-        b: &ast::Type<'s>,
-        meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
+    fn unify_no_rollback(&mut self, a: &ast::Type<'s>, b: &ast::Type<'s>) -> Result<(), ()> {
         use ast::TypeNode::*;
         let r = match (&a.node, &b.node) {
             (Unit, Unit) => Ok(()),
-            (Var(a_id), _) => Ok(self.update_var_no_rollback(*a_id, b, meta)?),
-            (_, Var(b_id)) => Ok(self.update_var_no_rollback(*b_id, a, meta)?),
+            (Var(a_id), _) => Ok(self.update_var_no_rollback(*a_id, b)?),
+            (_, Var(b_id)) => Ok(self.update_var_no_rollback(*b_id, a)?),
             (Never, _) => Ok(()),
             (_, Never) => Ok(()),
-            (Tuple(a_list, ..), Tuple(b_list, ..)) => {
-                Ok(self.unify_list_no_rollback(a_list.iter(), b_list.iter(), meta)?)
-            }
+            (Tuple(a_list, ..), Tuple(b_list, ..)) => Ok(self
+                .unify_list_no_rollback(a_list.iter(), b_list.iter())
+                .map_err(|_| ())?),
             (Generic(a_template, a_args), Generic(b_template, b_args))
                 if a_template == b_template =>
             {
-                Ok(self.unify_list_no_rollback(a_args.iter(), b_args.iter(), meta)?)
+                Ok(self
+                    .unify_list_no_rollback(a_args.iter(), b_args.iter())
+                    .map_err(|_| ())?)
             }
-            (
-                Callable(a),
-                Callable(b),
-            ) => {
+            (Callable(a), Callable(b)) => {
                 let a_normalized = a.clone().normalize(true);
                 let b_normalized = b.clone().normalize(true);
-                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter(), meta)?;
-                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref(), meta)?;
+                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter())
+                    .map_err(|_| ())?;
+                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref())?;
                 Ok(())
             }
-            (
-                ImpureCallable(a),
-                ImpureCallable(b),
-            ) => {
+            (ImpureCallable(a), ImpureCallable(b)) => {
                 let a_normalized = a.clone().normalize(false);
                 let b_normalized = b.clone().normalize(false);
-                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter(), meta)?;
-                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref(), meta)?;
+                self.unify_list_no_rollback(a_normalized.params.iter(), b_normalized.params.iter())
+                    .map_err(|_| ())?;
+                self.unify_no_rollback(a_normalized.ret.as_ref(), b_normalized.ret.as_ref())?;
                 Ok(())
             }
             (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
-            _ => Err(errors::UnificationFailure::new(a, b, meta, false)),
+            _ => Err(()),
         };
         r
     }
 
-    pub fn unify(
-        &mut self,
-        a: &ast::Type<'s>,
-        b: &ast::Type<'s>,
-        ctx_meta: &ast::Meta,
-    ) -> Result<(), errors::UnificationFailure> {
+    pub fn unify(&mut self, a: &ast::Type<'s>, b: &ast::Type<'s>) -> Result<(), ()> {
         let uf_backup = self.uf.clone();
-        self.unify_no_rollback(a, b, ctx_meta).map_err(|e| {
+        self.unify_no_rollback(a, b).map_err(|_| {
             self.uf = uf_backup;
-            e
         })
     }
 
@@ -284,7 +253,6 @@ impl<'s> Inferer<'s> {
             &mut |t| match t.node {
                 ast::TypeNode::Var(v) => ast::Type {
                     node: ast::TypeNode::Var(v + offset),
-                    meta: t.meta.clone(),
                 },
                 _ => unreachable!(),
             },
@@ -306,11 +274,11 @@ impl<'s> Inferer<'s> {
                     return Err(errors::InfiniteType::new(id, meta, v));
                 }
                 var_stack.push(root_var_id);
-                let r = self.resolve_descdent(&v, var_stack)?;
+                let r = self.resolve_descdent(&v, meta, var_stack)?;
                 var_stack.pop().unwrap();
                 Ok(r)
             }
-            Slot::Empty => Ok(ast::Type::new_var(root_var_id, meta.clone())),
+            Slot::Empty => Ok(ast::Type::new_var(root_var_id)),
         }
     }
 
@@ -326,13 +294,14 @@ impl<'s> Inferer<'s> {
     fn resolve_descdent(
         &mut self,
         type_: &ast::Type<'s>,
+        meta: &ast::Meta,
         var_stack: &mut Vec<ast::TypeVarId>,
     ) -> Result<ast::Type<'s>, errors::InfiniteType> {
         use ast::TypeNode::*;
         // During traversing of the tree, some [`Var`] node resolves to another variable, then the resolution
         // is not clean
         type_.apply_result(&|t| matches!(t.node, Var(_)), &mut |t| match t.node {
-            Var(v) => self.resolve_var_descdent(v, &t.meta, var_stack),
+            Var(v) => self.resolve_var_descdent(v, meta, var_stack),
             _ => unreachable!(),
         })
     }
@@ -340,8 +309,9 @@ impl<'s> Inferer<'s> {
     pub fn resolve(
         &mut self,
         type_: &ast::Type<'s>,
+        meta: &ast::Meta,
     ) -> Result<ast::Type<'s>, errors::InfiniteType> {
-        self.resolve_descdent(type_, &mut Vec::new())
+        self.resolve_descdent(type_, meta, &mut Vec::new())
     }
 
     fn discretization_walk(
@@ -426,7 +396,7 @@ impl<'s> Inferer<'s> {
     pub fn instantiate_wildcard(&mut self, type_: &ast::Type<'s>) -> ast::Type<'s> {
         use ast::TypeApply;
         type_.apply(&|t| matches!(&t.node, ast::TypeNode::WildCard), &mut |_| {
-            ast::Type::new_var(self.alloc_var(), type_.meta.clone())
+            ast::Type::new_var(self.alloc_var())
         })
     }
 }

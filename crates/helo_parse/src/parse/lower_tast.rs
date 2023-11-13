@@ -213,7 +213,15 @@ fn lower_seq<'s>(
             ast_heap.push(expr)
         }
         Some(stmt) => {
-            let rest = lower_seq(stmts, result, result_meta.clone(), resolver, symbols, ast_heap, e);
+            let rest = lower_seq(
+                stmts,
+                result,
+                result_meta.clone(),
+                resolver,
+                symbols,
+                ast_heap,
+                e,
+            );
             let stmt = lower_stmt(stmt, resolver, symbols, ast_heap, e);
             match &mut ast_heap[rest] {
                 ast::Expr {
@@ -225,10 +233,8 @@ fn lower_seq<'s>(
                 }
                 _ => {
                     let seq = VecDeque::from([stmt]);
-                    let expr = ast::Expr::new_untyped(
-                        ast::ExprNode::Seq(seq, Some(rest)),
-                        result_meta
-                    );
+                    let expr =
+                        ast::Expr::new_untyped(ast::ExprNode::Seq(seq, Some(rest)), result_meta);
                     ast_heap.push(expr)
                 }
             }
@@ -250,7 +256,7 @@ fn lower_apply<'s>(
     callee: tast::Expr<'s>,
     mut args: Vec<tast::Expr<'s>>,
     apply_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -277,7 +283,7 @@ fn lower_if_else<'s>(
     then: tast::Expr<'s>,
     else_: tast::Expr<'s>,
     if_else_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -323,7 +329,7 @@ fn lower_let_pat<'s>(
     value: tast::Expr<'s>,
     in_: tast::Expr<'s>,
     let_pat_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -349,7 +355,7 @@ fn lower_case_of<'s>(
     operand: tast::Expr<'s>,
     arms: Vec<tast::CaseArm<'s>>,
     case_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -385,7 +391,7 @@ fn lower_let_fn<'s>(
     f: tast::Function<'s>,
     in_: tast::Expr<'s>,
     let_fn_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -439,7 +445,7 @@ fn lower_let_fn<'s>(
 fn lower_tuple<'s>(
     args: Vec<tast::Expr<'s>>,
     tuple_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,
@@ -459,7 +465,7 @@ fn lower_tuple<'s>(
 fn lower_identifier<'s>(
     id: &'s str,
     id_meta: Meta,
-    type_: Option<ast::Type<'s>>,
+    type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
     _symbols: &mut ast::Symbols,
     ast_heap: &mut ast::ExprHeap<'s>,

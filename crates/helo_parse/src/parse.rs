@@ -203,13 +203,16 @@ fn char_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
 fn bool_literal_expr<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     let (s1, item) = nbr::alt((trailing_space_tag("true"), trailing_space_tag("false")))(s)?;
     let value = match item {
-        "true" =>  true,
+        "true" => true,
         "false" => false,
-        _ => unreachable!()
+        _ => unreachable!(),
     };
     Ok((
         s1,
-        tast::Expr::new_untyped(tast::ExprNode::Constant(tast::Constant::Bool(value)), ctx.meta(s, s1))
+        tast::Expr::new_untyped(
+            tast::ExprNode::Constant(tast::Constant::Bool(value)),
+            ctx.meta(s, s1),
+        ),
     ))
 }
 
@@ -539,7 +542,7 @@ fn type_generic<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
-        let (s1, (template, template_meta)) = alphabetic_identifier_str_with_meta(s, ctx)?;
+        let (s1, (template, _)) = alphabetic_identifier_str_with_meta(s, ctx)?;
 
         macro_rules! return_constant {
             ($ty:ident) => {
@@ -547,7 +550,6 @@ fn type_generic<'s>(
                     s1,
                     tast::Type {
                         node: tast::TypeNode::Primitive(ast::PrimitiveType::$ty),
-                        meta: ctx.meta(s, s1),
                     },
                 ))
             };
@@ -567,27 +569,25 @@ fn type_generic<'s>(
                 s1,
                 tast::Type {
                     node: tast::TypeNode::WildCard,
-                    meta: ctx.meta(s, s1),
                 },
             ));
         }
 
-        let (s4, args, meta) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("["))(s1)? {
+        let (s4, args) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("["))(s1)? {
             let (s3, args) = nmulti::separated_list1(trailing_space_tag(","), |s| {
                 type_(s, ctx, generic_params)
             })(s2)?;
             let (s4, _) = nbyte::tag("]")(s3)?;
             let (s5, _) = empty(s4)?;
-            (s5, args, ctx.meta(s, s4))
+            (s5, args)
         } else {
-            (s1, vec![], template_meta)
+            (s1, vec![])
         };
 
         Ok((
             s4,
             tast::Type {
                 node: tast::TypeNode::Generic(template, args),
-                meta,
             },
         ))
     };
@@ -617,7 +617,6 @@ fn type_callable<'s>(
                     params,
                     ret: Box::new(ret),
                 }),
-                meta: ctx.meta(s, s4),
             },
         ))
     };
@@ -670,18 +669,13 @@ fn type_parenthesed<'s>(
                 } else {
                     tast::TypeNode::Unit
                 },
-                meta: ctx.meta(s, s3),
             },
         ))
     };
     nom_context("tuple type", parse)(s)
 }
 
-fn type_var<'s>(
-    s: &'s str,
-    ctx: &Source,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
+fn type_var<'s>(s: &'s str, generic_params: &Vec<&'s str>) -> PResult<'s, tast::Type<'s>> {
     let (s1, id) = alphabetic_identifier_str(s)?;
 
     if let Some(idx) = generic_params.iter().position(|p| *p == id) {
@@ -689,7 +683,6 @@ fn type_var<'s>(
             s1,
             tast::Type {
                 node: tast::TypeNode::Var(idx.into()),
-                meta: ctx.meta(s, s1),
             },
         ))
     } else {
@@ -712,7 +705,7 @@ fn type_<'s>(
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("["))(s)? {
         type_callable(s1, ctx, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("'"))(s)? {
-        type_var(s1, ctx, generic_params)
+        type_var(s1, generic_params)
     } else {
         type_generic(s, ctx, generic_params)
     }
@@ -941,7 +934,8 @@ fn add_type<'s>(
     generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let (s1, type_) = type_(rest, ctx, generic_params)?;
-    lhs.type_ = Some(type_);
+    let meta = ctx.meta(rest, s1);
+    lhs.type_ = Some((type_, meta));
     Ok((s1, lhs))
 }
 

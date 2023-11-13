@@ -21,7 +21,6 @@ impl OnlyLocalAssign {
     }
 }
 
-
 #[derive(Diagnostic, Debug, Error)]
 #[error("Type variable ubound")]
 #[diagnostic(help("Consider annotating the type of the function containing this expression"))]
@@ -156,14 +155,6 @@ pub struct SpannedHint {
 }
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Details")]
-#[diagnostic()]
-pub struct TwoSpannedHint {
-    #[related]
-    hints: [SpannedHint; 2],
-}
-
-#[derive(Diagnostic, Debug, Error)]
 #[error("Unification Failure: can't unify types a = {a} with b = {b}")]
 pub struct UnificationFailure {
     pub a: String,
@@ -172,42 +163,225 @@ pub struct UnificationFailure {
     pub src: NamedSource,
     #[label("Unification in this expression")]
     pub span: SourceSpan,
-    #[source]
-    #[diagnostic_source]
-    pub hints: TwoSpannedHint,
+    #[label("a here")]
+    pub a_span: SourceSpan,
+    #[label("b here")]
+    pub b_span: SourceSpan,
 }
 
 impl UnificationFailure {
     pub fn new<'s>(
         a: &ast::Type<'s>,
+        a_meta: &ast::Meta,
         b: &ast::Type<'s>,
+        b_meta: &ast::Meta,
         meta: &ast::Meta,
-        b_is_upper_bound: bool,
     ) -> Self {
-        let b_repr = if b_is_upper_bound {
-            format!("upper-bounded by {b}")
-        } else {
-            b.to_string()
-        };
         UnificationFailure {
             a: a.to_string(),
-            b: b_repr.clone(),
+            b: b.to_string(),
             src: meta.named_source(),
             span: meta.span(),
-            hints: TwoSpannedHint {
-                hints: [
-                    SpannedHint {
-                        msg: format!("Type a = {} here", a),
-                        src: a.meta.named_source(),
-                        span: a.meta.span.into(),
-                    },
-                    SpannedHint {
-                        msg: format!("Type b = {} here", b_repr),
-                        src: b.meta.named_source(),
-                        span: b.meta.span.into(),
-                    },
-                ],
+            a_span: a_meta.span(),
+            b_span: b_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: can't unify local {local} with value = {value}")]
+pub struct LocalUnificationFailure {
+    pub local: String,
+    pub value: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Unification in this expression")]
+    pub span: SourceSpan,
+    #[label("Value here")]
+    pub value_span: SourceSpan,
+}
+
+impl LocalUnificationFailure {
+    pub fn new<'s>(
+        local: ast::LocalId,
+        value: &ast::Type<'s>,
+        value_meta: &ast::Meta,
+        meta: &ast::Meta,
+    ) -> Self {
+        Self {
+            local: local.to_string(),
+            value: value.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+            value_span: value_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: Test-expr must be type Bool")]
+pub struct NonBoolTest {
+    pub value: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("In expression here")]
+    pub span: SourceSpan,
+    #[label("Test-expr here has type {}", .value)]
+    pub value_span: SourceSpan,
+}
+
+impl NonBoolTest {
+    pub fn new<'s>(value: &ast::Type<'s>, value_meta: &ast::Meta, meta: &ast::Meta) -> Self {
+        Self {
+            value: value.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+            value_span: value_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: Type of function body does not match provided annotation")]
+pub struct BodyTypeMismatchAnnotation {
+    pub value: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Functio body here has type {}", .value)]
+    pub span: SourceSpan,
+}
+
+impl BodyTypeMismatchAnnotation {
+    pub fn new<'s>(value: &ast::Type<'s>, meta: &ast::Meta) -> Self {
+        Self {
+            value: value.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: Can not infer type of pattern-expression")]
+pub struct PatternUnificationFailure {
+    pub arg_type: String,
+    pub param_type: String,
+    pub i: usize,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("In expression here")]
+    pub span: SourceSpan,
+    #[label("Argument to constructor here has type {}, but the {}th parameter of the constructor has type {}", arg_type, i, param_type)]
+    pub arg_span: SourceSpan,
+}
+
+impl PatternUnificationFailure {
+    pub fn new<'s>(
+        arg_type: &ast::Type<'s>,
+        param_type: &ast::Type<'s>,
+        i: usize,
+        arg_meta: &ast::Meta,
+        ctx_meta: &ast::Meta,
+    ) -> Self {
+        Self {
+            arg_type: arg_type.to_string(),
+            param_type: param_type.to_string(),
+            i,
+            src: ctx_meta.named_source(),
+            span: ctx_meta.span(),
+            arg_span: arg_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: Case-arm has different type from previous arms")]
+pub struct ArmTypeUnificationFailure {
+    pub value: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("In expression here")]
+    pub span: SourceSpan,
+    #[label("Case-arm here has type {}", .value)]
+    pub value_span: SourceSpan,
+}
+
+impl ArmTypeUnificationFailure {
+    pub fn new<'s>(value: &ast::Type<'s>, value_meta: &ast::Meta, meta: &ast::Meta) -> Self {
+        Self {
+            value: value.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+            value_span: value_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: can't unify callable type a = {a} with argument type b = {b}")]
+pub struct ArgumentUnificationFailure {
+    pub a: String,
+    pub b: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Unification in this expression")]
+    pub span: SourceSpan,
+    #[label("Argument here")]
+    pub arg_span: SourceSpan,
+    #[label("Callee here")]
+    pub callee_span: SourceSpan,
+}
+
+impl ArgumentUnificationFailure {
+    pub fn new<'s>(
+        a: &ast::Type<'s>,
+        callee_meta: &ast::Meta,
+        b: &ast::Type<'s>,
+        arg_meta: &ast::Meta,
+        meta: &ast::Meta,
+    ) -> Self {
+        Self {
+            a: a.to_string(),
+            b: b.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+            callee_span: callee_meta.span(),
+            arg_span: arg_meta.span(),
+        }
+    }
+}
+
+#[derive(Debug, Diagnostic, Error)]
+#[error("Unification Failure: can't unify callable type {callee} with arguments of types {args}")]
+pub struct ArgumentsUnificationFailure {
+    pub callee: String,
+    pub args: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Unification in this expression")]
+    pub span: SourceSpan,
+}
+
+impl ArgumentsUnificationFailure {
+    pub fn new<'s: 'a, 'a>(
+        callee_type: &ast::Type<'s>,
+        mut args_types: impl Iterator<Item = &'a ast::Type<'s>>,
+        meta: &ast::Meta,
+    ) -> Self {
+        Self {
+            callee: callee_type.to_string(),
+            args: {
+                let mut s = String::new();
+                if let Some(first) = args_types.next() {
+                    s.push_str(&first.to_string());
+                }
+                for arg_typ in args_types {
+                    s.push_str(&format!(", {}", arg_typ));
+                }
+                s
             },
+            src: meta.named_source(),
+            span: meta.span(),
         }
     }
 }
@@ -224,11 +398,11 @@ pub struct NotCallable {
 }
 
 impl NotCallable {
-    pub fn new(type_: &ast::Type<'_>) -> Self {
+    pub fn new(type_: &ast::Type<'_>, type_meta: &ast::Meta) -> Self {
         Self {
             type_: type_.node.to_string(),
-            src: type_.meta.named_source(),
-            span: type_.meta.span(),
+            src: type_meta.named_source(),
+            span: type_meta.span(),
         }
     }
 }
@@ -370,32 +544,11 @@ pub struct TupleIndexOutOfBound {
 }
 
 impl TupleIndexOutOfBound {
-    pub fn new(tuple_type: &ast::Type) -> Self {
+    pub fn new(tuple_type: &ast::Type, meta: &ast::Meta) -> Self {
         Self {
-            src: tuple_type.meta.named_source(),
-            span: tuple_type.meta.span(),
+            src: meta.named_source(),
+            span: meta.span(),
             type_: tuple_type.to_string(),
-        }
-    }
-}
-
-
-#[derive(Diagnostic, Debug, Error)]
-#[error("Can not do tuple-access operation on type {}", type_)]
-pub struct NoTupleAccess {
-    #[source_code]
-    pub src: NamedSource,
-    #[label("Tuple access here")]
-    pub span: SourceSpan,
-    pub type_: String,
-}
-
-impl NoTupleAccess {
-    pub fn new(type_: &ast::Type) -> Self {
-        Self {
-            src: type_.meta.named_source(),
-            span: type_.meta.span(),
-            type_: type_.to_string(),
         }
     }
 }
