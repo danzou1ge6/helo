@@ -1,0 +1,71 @@
+relation Bigger 'a,'b end
+
+
+relation Eat 'a,'b,'c -> 'c where Bigger 'a,'b
+    routine eat a,b : ['a,'b] -> 'c
+end
+
+relation Carnivorous 'a,'c -> 'c
+    routine car_eat 'b a,b: ['a,'b] -> 'c where Bigger 'a,'b
+end
+
+relation Poop 'b end
+
+relation PoopEating 'a,'c -> 'c
+    routine eat_poop 'b a,b: ['a,'b] -> 'c where Poop 'b
+end
+
+instance 'a,'b,'c Eat 'a,'b,'c where PoopEating 'a,'c + Poop 'b + Bigger 'a,'b
+    routine eat a,b = eat_poop a,b
+end
+
+instance 'a,'b,'c Eat 'a,'b,'c where Carnivorous 'a,'c + Bigger 'a,'b
+    routine eat a,b = car_eat a,b
+end
+
+data Neko = Neko Str
+data NekoPoop = NekoPoop Int
+data Mickey = Mickey Str
+data MickeyPoop = MickeyPoop Int
+data Rice = Rice Str
+data Bacteria = Bacteria Str
+data CO2 = CO2 Int
+
+instance Poop NekoPoop end
+instance Poop MickeyPoop end
+instance 'p Bigger Bacteria,'p where Poop 'p end
+
+instance PoopEating Bacteria,CO2
+    routine eat_poop a,b = begin
+        println "Bacteria eat poop";
+        CO2 1
+    end
+end
+
+instance Bigger Neko,Mickey end
+instance Bigger Mickey,Rice end
+
+instance Carnivorous Neko,NekoPoop
+    routine car_eat a,b = begin
+        println "Neko eat";
+        NekoPoop 1
+    end
+end
+
+instance Eat Mickey,Rice,MickeyPoop
+    routine eat a,b = begin
+        println "Mickey eats rice";
+        MickeyPoop 1
+    end
+end
+
+routine main =
+    let neko = Neko "1" in
+    let rice = Rice "3" in
+    let bacteria = Bacteria "4" in
+    let mickey = Mickey "2" in begin
+        let neko_poop = eat neko,mickey;
+        let mickey_poop = eat mickey,rice;
+        eat bacteria,neko_poop
+    end
+

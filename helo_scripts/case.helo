@@ -3,13 +3,19 @@ data Tree['a] = Branch Tree['a], Tree['a]
               | Leaf 'a
 
 
-let fn fold f, init, xs =
+fn fold f, init, xs =
     case xs of Con y, ys -> fold f, (f y, init), ys
              | Nil       -> init
+    end
 
-let fn left_most 'a tree : [Tree['a]] -> 'a =
+fn left_most 'a tree : [Tree['a]] -> 'a =
     case tree of Branch left,_ -> left_most left
                | Leaf x        -> x
+    end
 
-let fn sum xs = fold (+), 0, xs
+fn sum xs = fold (+), 0, xs
+
+routine main =
+    let list = Con 1 (Con 2 (Con 3 Nil)) in
+    println sum list
 

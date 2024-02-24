@@ -5,7 +5,6 @@ pub use helo_parse::typed::Tag;
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct ExprId(pub usize);
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalId(pub usize);
 
@@ -52,7 +51,7 @@ pub struct Function {
     pub has_return: bool,
 }
 
-use helo_parse::ast;
+use helo_parse::{ast, inferer};
 
 #[derive(Debug, Clone, Hash)]
 pub enum Immediate {
@@ -168,31 +167,75 @@ impl StrList {
     }
 }
 
-pub use ast::{CapturedId, FunctionId};
+pub use ast::CapturedId;
 
-pub struct FunctionTable {
-    tab: HashMap<FunctionId, Function>,
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct FunctionId<'s> {
+    pub ast_id: ast::FunctionId<'s>,
+    pub type_args: inferer::TypeVarStore<'s>,
 }
 
-impl FunctionTable {
+impl<'s> FunctionId<'s> {
+    pub fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        ins_tab: &ast::InstanceTable<'s>,
+    ) -> std::fmt::Result {
+        self.ast_id.fmt(f, ins_tab)?;
+        write!(f, "::<")?;
+        ast::str_join_vec(f, ", ", self.type_args.as_slice())?;
+        write!(f, ">")
+    }
+    pub fn to_string(&self, ins_tab: &ast::InstanceTable<'s>) -> String {
+        let mut buf = String::new();
+        let mut formatter = core::fmt::Formatter::new(&mut buf);
+        self.fmt(&mut formatter, ins_tab).unwrap();
+        buf
+    }
+}
+
+impl<'s> FunctionId<'s> {
+    pub fn of_non_generic(id: ast::FunctionId<'s>) -> Self {
+        Self {
+            ast_id: id,
+            type_args: inferer::TypeVarStore::empty(),
+        }
+    }
+    pub fn main() -> Self {
+        Self::of_non_generic(ast::FunctionId::main())
+    }
+}
+
+pub struct FunctionTable<'s> {
+    tab: HashMap<FunctionId<'s>, Option<Function>>,
+}
+
+impl<'s> FunctionTable<'s> {
     pub fn new() -> Self {
         Self {
             tab: HashMap::new(),
         }
     }
-    pub fn function_names(&self) -> impl Iterator<Item = &FunctionId> {
+    pub fn function_ids(&self) -> impl Iterator<Item = &FunctionId<'s>> {
         self.tab.keys()
     }
-    pub fn get(&self, name: &str) -> Option<&Function> {
-        self.tab.get(name)
+    pub fn get(&self, id: &FunctionId<'s>) -> Option<&Function> {
+        self.tab.get(id).map(|x| x.as_ref().unwrap())
     }
-    pub fn insert(&mut self, k: FunctionId, v: Function) {
-        self.tab.insert(k, v);
+    pub fn reserve(&mut self, k: FunctionId<'s>) {
+        self.tab.insert(k, None);
+    }
+    pub fn reserved(&mut self, k: &FunctionId<'s>) -> bool {
+        self.tab.get(k).is_some_and(|v| v.is_none())
+    }
+    pub fn insert(&mut self, k: FunctionId<'s>, v: Function) {
+        self.tab.insert(k, Some(v));
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum ExprNode<'s> {
+    Never,
     LetBind {
         local: LocalId,
         value: ExprId,
@@ -212,12 +255,12 @@ pub enum ExprNode<'s> {
         callee_impure: bool,
     },
     Immediate(Immediate),
-    MakeClosure(FunctionId, Vec<LocalId>),
+    MakeClosure(FunctionId<'s>, Vec<LocalId>),
     Local(LocalId),
     /// Indiacates that at .0 lies the closure being called. Distinguishes from [`ExprNode::Local`] for tail call optimization
     ThisClosure(LocalId),
-    UserFunction(FunctionId),
-    Builtin(&'s str),
+    UserFunction(FunctionId<'s>),
+    Builtin(ast::BuiltinFunctionName<'s>),
     VariantField(LocalId, usize),
     TupleField(LocalId, usize),
     MakeTuple(Vec<ExprId>),
@@ -272,13 +315,13 @@ impl From<&helo_parse::ast::Meta> for Meta {
 }
 
 #[derive(Debug, Clone)]
-pub struct Expr<'s>(ExprNode<'s>, Meta);
+pub struct Expr<'s>(pub ExprNode<'s>, Meta);
 
 impl<'s> Expr<'s> {
     pub fn new(node: ExprNode<'s>, meta: Meta) -> Self {
         Self(node, meta)
     }
-    pub fn node(&self) -> &ExprNode {
+    pub fn node(&self) -> &ExprNode<'s> {
         &self.0
     }
     pub fn meta(&self) -> &Meta {

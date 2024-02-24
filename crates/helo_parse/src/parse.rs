@@ -484,6 +484,7 @@ fn let_in_closure_expr<'s>(
             params,
             param_metas: params_meta,
             pure,
+            constrains: Vec::new(),
         };
 
         let (s5, _) = trailing_space_tag("in")(s4)?;
@@ -589,7 +590,7 @@ fn type_generic<'s>(
         Ok((
             s4,
             tast::Type {
-                node: tast::TypeNode::Generic(template, args),
+                node: tast::TypeNode::Generic(ast::DataName(template), args),
             },
         ))
     };
@@ -678,15 +679,15 @@ fn type_parenthesed<'s>(
 }
 
 fn type_var<'s>(s: &'s str, generic_params: &Vec<&'s str>) -> PResult<'s, tast::Type<'s>> {
+    let (s, idx) = type_var_idx(s, generic_params)?;
+    Ok((s, ast::Type::new_var(idx.into())))
+}
+
+fn type_var_idx<'s>(s: &'s str, generic_params: &Vec<&'s str>) -> PResult<'s, usize> {
     let (s1, id) = alphabetic_identifier_str(s)?;
 
     if let Some(idx) = generic_params.iter().position(|p| *p == id) {
-        Ok((
-            s1,
-            tast::Type {
-                node: tast::TypeNode::Var(idx.into()),
-            },
-        ))
+        Ok((s1, idx))
     } else {
         Err(nom::Err::Error(nom::error::VerboseError {
             errors: vec![(
@@ -731,7 +732,7 @@ fn constructor<'s>(
             tast::Constructor {
                 name,
                 params,
-                belongs_to: data_name,
+                belongs_to: ast::DataName(data_name),
                 meta: ctx.meta(s, s2),
             },
         ))
@@ -768,7 +769,10 @@ fn data<'s>(
         let data = ast::Data {
             name: data_name,
             kind_arity,
-            constructors: constructors.iter().map(|c| c.name).collect(),
+            constructors: constructors
+                .iter()
+                .map(|c| ast::ConstructorName(c.name))
+                .collect(),
             meta,
             generic_metas,
         };
@@ -1117,15 +1121,23 @@ fn seq_expr<'s>(
         stmt(s, ctx, precedence_table, generic_params)
     })(s)?;
 
-    let result = if let tast::StmtNode::Expr(_) = &stmts.last().unwrap().node {
-        Some(match stmts.pop().unwrap().node {
-            tast::StmtNode::Expr(expr) => expr,
-            _ => unreachable!(),
-        })
+    let (s2, stmts, result) = if let tast::StmtNode::Expr(_) = &stmts.last().unwrap().node {
+        if let (s2, Some(_)) = ncomb::opt(trailing_space_tag(";"))(s1)? {
+            // Sequence ends with expression, but no trailing semiolon
+            (s2, stmts, None)
+        } else {
+            // Sequence ends with expression, that expression is used as value of the sequence
+            let expr = Some(match stmts.pop().unwrap().node {
+                tast::StmtNode::Expr(expr) => expr,
+                _ => unreachable!(),
+            });
+            (s1, stmts, expr)
+        }
     } else {
-        None
+        (s1, stmts, None)
     };
-    let (s3, _) = trailing_space_tag("end")(s1)?;
+
+    let (s3, _) = trailing_space_tag("end")(s2)?;
 
     Ok((
         s3,
@@ -1164,24 +1176,57 @@ fn function_signature<'s>(
     Ok((s6, (f_name, t, generic_params.len(), pure, ctx.meta(s, s5))))
 }
 
-fn function<'s>(
+fn constrain<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, ast::Constrain<'s>> {
+    let (s1, rel_name) = alphabetic_identifier_str(s)?;
+    let (s2, args) =
+        nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(s1)?;
+
+    Ok((
+        s2,
+        ast::Constrain {
+            rel_name: ast::RelationName(rel_name),
+            args,
+            meta: ctx.meta(s, s2),
+        },
+    ))
+}
+
+fn constrains<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &Vec<&'s str>,
+) -> PResult<'s, Vec<ast::Constrain<'s>>> {
+    nmulti::separated_list1(trailing_space_tag("+"), |s| {
+        constrain(s, ctx, generic_params)
+    })(s)
+}
+
+fn function_after_generic_params<'s>(
     s: &'s str,
     pure: bool,
     ctx: &Source,
+    generic_params: &Vec<&'s str>,
     precedence_table: &PrecedenceTable<'s>,
-) -> PResult<'s, (&'s str, tast::Function<'s>)> {
-    let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
+) -> PResult<'s, tast::Function<'s>> {
+    let (s3, (params, param_metas)) = function_params(s, ctx)?;
 
-    let (s2, (generic_params, _)) = generic_params_decl(s1, ctx)?;
-
-    let (s3, (params, param_metas)) = function_params(s2, ctx)?;
-
-    let (s4, f_type) = if let (s4, Some(_)) = ncomb::opt(nbyte::tag(":"))(s3)? {
+    let (s4, f_type, constrains) = if let (s4, Some(_)) = ncomb::opt(nbyte::tag(":"))(s3)? {
         let (s4, _) = empty(s4)?;
         let (s4, t) = type_callable_type(s4, ctx, &generic_params)?;
-        (s4, Some(t))
+
+        if let (s5, Some(_)) = ncomb::opt(nbyte::tag("where"))(s4)? {
+            let (s5, _) = empty(s5)?;
+            let (s6, constrains) = constrains(s5, ctx, &generic_params)?;
+            (s6, Some(t), constrains)
+        } else {
+            (s4, Some(t), Vec::new())
+        }
     } else {
-        (s3, None)
+        (s3, None, Vec::new())
     };
 
     let (s5, _) = trailing_space_tag("=")(s4)?;
@@ -1196,9 +1241,175 @@ fn function<'s>(
         param_metas,
         params,
         pure,
+        constrains,
     };
 
+    Ok((s6, f))
+}
+
+fn function<'s>(
+    s: &'s str,
+    pure: bool,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, (&'s str, tast::Function<'s>)> {
+    let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
+
+    let (s2, (generic_params, _)) = generic_params_decl(s1, ctx)?;
+
+    let (s6, f) = function_after_generic_params(s2, pure, ctx, &generic_params, precedence_table)?;
+
     Ok((s6, (f_name, f)))
+}
+
+fn routine_or_fn<'s>(s: &'s str) -> PResult<'s, bool> {
+    let (s, keyword) = nbr::alt((trailing_space_tag("fn"), trailing_space_tag("routine")))(s)?;
+
+    let pure = match keyword {
+        "fn" => true,
+        "routine" => false,
+        _ => unreachable!(),
+    };
+
+    Ok((s, pure))
+}
+
+fn method_signature<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &[&'s str],
+    primary_constrain: &ast::Constrain<'s>,
+) -> PResult<'s, (&'s str, ast::MethodSig<'s>)> {
+    let s0 = s;
+    let (s, pure) = routine_or_fn(s)?;
+
+    let (s, (f_name, _)) = function_name_identifier(s, ctx)?;
+    let (s, (generic_params2, _)) = generic_params_decl(s, ctx)?;
+    let mut generic_params = generic_params.to_vec();
+    generic_params.extend_from_slice(&generic_params2);
+
+    let (s, (_, _)) = function_params(s, ctx)?;
+
+    let (s, _) = trailing_space_tag(":")(s)?;
+    let (s, type_) = type_callable_type(s, ctx, &generic_params)?;
+
+    let (s1, constrains) = ncomb::opt(nseq::preceded(trailing_space_tag("where"), |s| {
+        constrains(s, ctx, &generic_params)
+    }))(s)?;
+
+    let constrains = constrains.unwrap_or_else(|| Vec::new());
+
+    let sig = ast::MethodSig {
+        var_cnt: generic_params.len(),
+        type_,
+        pure,
+        constrains,
+        primary_constrain: primary_constrain.clone(),
+        meta: ctx.meta(s0, s1),
+    };
+
+    Ok((s1, (f_name, sig)))
+}
+
+fn relation<'s>(s: &'s str, ctx: &Source) -> PResult<'s, ast::Relation<'s>> {
+    let s0 = s;
+    let (s, rel_name) = alphabetic_identifier_str(s)?;
+    let (s, (args, _)) = generic_params_decl(s, ctx)?;
+    let s1 = s;
+
+    let (s, dependents) = if let (s, Some(_)) = ncomb::opt(trailing_space_tag("->"))(s)? {
+        nmulti::separated_list1(
+            trailing_space_tag(","),
+            nseq::preceded(trailing_space_tag("'"), |s| type_var_idx(s, &args)),
+        )(s)?
+    } else {
+        (s, Vec::new())
+    };
+    let arity = args.len();
+
+    let (s, constrains) = ncomb::opt(nseq::preceded(trailing_space_tag("where"), |s| {
+        constrains(s, ctx, &args)
+    }))(s)?;
+    let constrains = constrains.unwrap_or_else(|| Vec::new());
+
+    let primary_constrain = ast::Constrain {
+        rel_name: ast::RelationName(rel_name),
+        args: (0..args.len())
+            .map(|x| ast::Type::new_var(ast::TypeVarId(x)))
+            .collect(),
+        meta: ctx.meta(s0, s1),
+    };
+
+    let (s, sigs) = nmulti::many0(|s| method_signature(s, ctx, &args[..], &primary_constrain))(s)?;
+
+    let rel = ast::Relation {
+        name: ast::RelationName(rel_name),
+        dependent: dependents,
+        constrains,
+        arity,
+        f_sigs: sigs
+            .into_iter()
+            .map(|(f_name, sig)| (ast::FunctionName(f_name), sig))
+            .collect(),
+        meta: ctx.meta(s0, s1),
+    };
+
+    let (s, _) = trailing_space_tag("end")(s)?;
+
+    Ok((s, rel))
+}
+
+fn instance_method<'s>(
+    s: &'s str,
+    ctx: &Source,
+    generic_params: &[&'s str],
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, (&'s str, tast::Function<'s>)> {
+    let (s, pure) = routine_or_fn(s)?;
+
+    let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
+
+    let (s2, (generic_params2, _)) = generic_params_decl(s1, ctx)?;
+    let mut generic_params = generic_params.to_vec();
+    generic_params.extend_from_slice(&generic_params2);
+
+    let (s3, f) = function_after_generic_params(s2, pure, ctx, &generic_params, precedence_table)?;
+
+    Ok((s3, (f_name, f)))
+}
+
+fn instance<'s>(
+    s: &'s str,
+    ctx: &Source,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, (ast::Instance<'s>, Vec<(&'s str, tast::Function<'s>)>)> {
+    let (s1, (generic_params, _)) = generic_params_decl(s, ctx)?;
+    let (s2, rel_name) = alphabetic_identifier_str(s1)?;
+    let (s3, args) =
+        nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, &generic_params))(s2)?;
+
+    let (s5, constrains) = ncomb::opt(nseq::preceded(trailing_space_tag("where"), |s| {
+        constrains(s, ctx, &generic_params)
+    }))(s3)?;
+    let constrains = constrains.unwrap_or_else(|| Vec::new());
+
+    let instance = ast::Instance {
+        var_cnt: generic_params.len(),
+        rel: ast::Constrain {
+            rel_name: ast::RelationName(rel_name),
+            args,
+            meta: ctx.meta(s1, s3),
+        },
+        constrains,
+        meta: ctx.meta(s1, s3),
+    };
+
+    let (s6, methods) =
+        nmulti::many0(|s| instance_method(s, ctx, &generic_params, precedence_table))(s5)?;
+
+    let (s6, _) = trailing_space_tag("end")(s6)?;
+
+    Ok((s6, (instance, methods)))
 }
 
 use std::sync::Arc;
@@ -1214,10 +1425,10 @@ fn parse_ast_<'s>(
         while s.len() > 0 {
             if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("data"))(s)? {
                 let (s2, (data_name, data, constructors)) = data(s1, ctx)?;
-                symbols.add_data(data_name, data);
-                constructors
-                    .into_iter()
-                    .for_each(|c| symbols.add_constructor(c.name, c));
+                symbols.datas.insert(ast::DataName(data_name), data);
+                constructors.into_iter().for_each(|c| {
+                    symbols.constructors.insert(ast::ConstructorName(c.name), c);
+                });
                 s = s2;
                 continue;
             }
@@ -1225,14 +1436,18 @@ fn parse_ast_<'s>(
             if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("fn"))(s)? {
                 let (s1, (f_name, f)) = function(s1, true, ctx, precedence_table)?;
                 s = s1;
-                symbols.add_function(f_name.to_string(), f);
+                symbols
+                    .functions
+                    .insert(ast::FunctionId::assume_exists(f_name), f);
                 continue;
             }
 
             if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("routine"))(s)? {
                 let (s1, (f_name, f)) = function(s1, false, ctx, precedence_table)?;
                 s = s1;
-                symbols.add_function(f_name.to_string(), f);
+                symbols
+                    .functions
+                    .insert(ast::FunctionId::assume_exists(f_name), f);
                 continue;
             }
 
@@ -1240,6 +1455,35 @@ fn parse_ast_<'s>(
                 let (s1, (id, prece)) = infix_decl(s1)?;
                 precedence_table.insert(id, prece);
                 s = s1;
+                continue;
+            }
+
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("relation"))(s)? {
+                let (s1, relation) = relation(s1, ctx)?;
+                s = s1;
+                symbols.relations.insert(relation.name, relation);
+                continue;
+            }
+
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("instance"))(s)? {
+                let (s1, (instance, methods)) = instance(s1, ctx, &precedence_table)?;
+                s = s1;
+
+                let relation_name = instance.rel_name();
+                let instance_id = symbols.instances.insert(relation_name, instance);
+
+                methods.iter().for_each(|(f_name, _)| {
+                    symbols
+                        .methods
+                        .insert(ast::FunctionName(*f_name), relation_name);
+                });
+
+                methods.into_iter().for_each(|(f_name, f)| {
+                    let function_id =
+                        ast::FunctionId::of_method(instance_id.clone(), ast::FunctionName(f_name));
+                    symbols.functions.insert(function_id, f);
+                });
+
                 continue;
             }
 
@@ -1254,7 +1498,10 @@ fn parse_ast_<'s>(
 
         Ok((s, ()))
     };
-    nom_context("data, function or declaration of infix operator", parse)(s)
+    nom_context(
+        "data, function, relation, instance or declaration of infix operator",
+        parse,
+    )(s)
 }
 
 pub fn parse_ast<'s>(
@@ -1290,15 +1537,15 @@ pub fn parse_builtin_function_signatures<'s>(
     let (_, sigs) = nmulti::many1(|s| function_signature(s, &ctx))(s).unwrap();
 
     for (name, type_, var_cnt, pure, meta) in sigs.into_iter() {
-        symbols.add_builtin(
-            name,
+        symbols.builtins.insert(
+            ast::BuiltinFunctionName(name),
             ast::BuiltinFunction {
                 var_cnt,
                 type_,
                 meta,
                 pure,
             },
-        )
+        );
     }
 }
 
@@ -1319,9 +1566,11 @@ pub fn parse_builtin_data<'s>(
     let (_, datas) = nmulti::many1(data_complete)(s).unwrap();
 
     for (data_name, data, constructors) in datas.into_iter() {
-        symbols.add_data(data_name, data);
+        symbols.datas.insert(ast::DataName(data_name), data);
         for constructor in constructors.into_iter() {
-            symbols.add_constructor(constructor.name, constructor);
+            symbols
+                .constructors
+                .insert(ast::ConstructorName(constructor.name), constructor);
         }
     }
 }

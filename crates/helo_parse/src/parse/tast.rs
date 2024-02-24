@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::ast::{self, Constrain};
 
 #[derive(Clone, Debug)]
 pub struct CaseArm<'s> {
@@ -106,6 +106,7 @@ pub struct Function<'s> {
     pub body: Box<Expr<'s>>,
     pub meta: ast::Meta,
     pub pure: bool,
+    pub constrains: Vec<Constrain<'s>>,
 }
 
 use ast::Symbols_;

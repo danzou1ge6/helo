@@ -1,4 +1,4 @@
-use helo_parse::ast::Meta;
+use helo_parse::ast::{self, Meta};
 
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
@@ -32,5 +32,45 @@ pub struct TooLongCode {
 }
 
 #[derive(Diagnostic, Debug, Error)]
+#[error("Generic functions cannot be entry points")]
+pub struct InvalidEntryPoint {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Function here has type `{}`", type_)]
+    pub span: SourceSpan,
+    pub type_: String,
+}
+
+impl InvalidEntryPoint {
+    pub fn new(f_meta: &Meta, type_: &ast::FunctionType<'_>) -> Self {
+        Self {
+            src: f_meta.named_source(),
+            span: f_meta.span(),
+            type_: type_.to_string(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
 #[error("No function `main` found, which is the entry point of the program.")]
 pub struct MainNotFound {}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("`main` must have type `^[] -> ()`")]
+pub struct MainBadType {
+    type_: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("But it has type `{}`", type_)]
+    pub span: SourceSpan,
+}
+
+impl MainBadType {
+    pub fn new(f_meta: &Meta, type_: &ast::FunctionType<'_>) -> Self {
+        Self {
+            src: f_meta.named_source(),
+            span: f_meta.span(),
+            type_: type_.to_string(),
+        }
+    }
+}

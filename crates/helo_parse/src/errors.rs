@@ -461,11 +461,11 @@ pub struct CircularInference {
 }
 
 impl CircularInference {
-    pub fn new(ref_: &str, meta: &ast::Meta) -> Self {
+    pub fn new(ref_: ast::FunctionId, meta: &ast::Meta) -> Self {
         Self {
             src: meta.named_source(),
             span: meta.span(),
-            referenced_name: ref_.to_string(),
+            referenced_name: format!("{:?}", ref_),
         }
     }
 }
@@ -481,15 +481,34 @@ pub struct ConstructorNotFound {
 }
 
 impl ConstructorNotFound {
-    pub fn new(name: &str, meta: &ast::Meta) -> Self {
+    pub fn new(name: ast::ConstructorName<'_>, meta: &ast::Meta) -> Self {
         Self {
-            name: name.to_string(),
+            name: format!("{:?}", name),
             span: meta.span(),
             src: meta.named_source(),
         }
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Data {} not found", name)]
+pub struct DataNotFound {
+    name: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced here")]
+    pub span: SourceSpan,
+}
+
+impl DataNotFound {
+    pub fn new(name: ast::DataName<'_>, meta: &ast::Meta) -> Self {
+        Self {
+            name: format!("{:?}", name),
+            span: meta.span(),
+            src: meta.named_source(),
+        }
+    }
+}
 #[derive(Diagnostic, Debug, Error)]
 #[error("Wrong number of arguments")]
 pub struct WrongNumberOfArgs {
@@ -671,6 +690,190 @@ impl TooManyVariants {
     }
 }
 
+#[derive(Diagnostic, Debug, Error)]
+#[error("Constrain not satisfied")]
+pub struct ConstrainProofFailed {
+    constrain: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Relation-method here require constrain {}", constrain)]
+    pub span: SourceSpan,
+}
+
+impl ConstrainProofFailed {
+    pub fn new(meta: &ast::Meta, c: &ast::Constrain<'_>) -> Self {
+        Self {
+            constrain: c.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Too many hit of matching instance")]
+pub struct TooManyHitMatchingInstance {
+    #[related]
+    pub instances: Vec<SpannedHint>,
+    pub constrain: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Relation-method here require constrain {}", constrain)]
+    pub span: SourceSpan,
+}
+
+impl TooManyHitMatchingInstance {
+    pub fn new(instance_metas: impl Iterator<Item = ast::Meta>, c: &ast::Constrain) -> Self {
+        let instances = instance_metas
+            .map(|m| SpannedHint {
+                msg: "Instance here is a match".to_string(),
+                src: m.named_source(),
+                span: m.span(),
+            })
+            .collect();
+        Self {
+            instances,
+            constrain: c.to_string(),
+            src: c.meta.named_source(),
+            span: c.meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Method not implemented")]
+pub struct MethodNotImplemented {
+    pub method_name: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Method `{}` required in this instance", method_name)]
+    pub span: SourceSpan,
+}
+
+impl MethodNotImplemented {
+    pub fn new(method_name: ast::FunctionName, ins_meta: &ast::Meta) -> Self {
+        Self {
+            method_name: method_name.0.to_string(),
+            src: ins_meta.named_source(),
+            span: ins_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Undeclared methond")]
+pub struct UndeclaredMethod {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("This method is not declared in relation definition ")]
+    pub span: SourceSpan,
+}
+
+impl UndeclaredMethod {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Method doesnot match signature in relation definition")]
+pub struct MethodUnmatchRelationDefinition {
+    pub method_sig: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Method here has signature {}", method_sig)]
+    pub span: SourceSpan,
+}
+
+impl MethodUnmatchRelationDefinition {
+    pub fn new(method_sig: &ast::MethodSig<'_>, method_meta: &ast::Meta) -> Self {
+        Self {
+            method_sig: method_sig.to_string(),
+            src: method_meta.named_source(),
+            span: method_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Relation constrains cannot be satisfied")]
+pub struct RelationConstrainUnsatisfied {
+    pub constrain: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Instance here need constrain `{}` to be satisfied", constrain)]
+    pub span: SourceSpan,
+}
+
+impl RelationConstrainUnsatisfied {
+    pub fn new(constrain: &ast::Constrain<'_>, ins_meta: &ast::Meta) -> Self {
+        Self {
+            constrain: constrain.to_string(),
+            src: ins_meta.named_source(),
+            span: ins_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Relation doesnot exist")]
+pub struct RelationNonExists {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Relation mentioned here")]
+    pub span: SourceSpan,
+}
+
+impl RelationNonExists {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Relation arity wrong")]
+pub struct RelationArityWrong {
+    pub expected: usize,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Relation mentioned here")]
+    pub span: SourceSpan,
+}
+
+impl RelationArityWrong {
+    pub fn new(meta: &ast::Meta, expected: usize) -> Self {
+        Self {
+            expected,
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Method type annotation not supported")]
+pub struct MethodTypeAnnotationNotSupported {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Relation mentioned here")]
+    pub span: SourceSpan,
+}
+
+impl MethodTypeAnnotationNotSupported {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {
@@ -704,9 +907,9 @@ impl ManyError {
         }
     }
 
-    pub fn emit(self) -> Result<(), miette::Report> {
+    pub fn emit(self) -> Result<Self, miette::Report> {
         if self.e.len() == 0 {
-            return Ok(());
+            return Ok(self);
         }
         Err(miette::Report::new(self))
     }

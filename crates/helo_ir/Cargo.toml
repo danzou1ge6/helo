@@ -5,14 +5,6 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "helo_compile_ir"
-required-features = ["pretty_print"]
-
-[[bin]]
-name = "helo_infer_type"
-required-features = ["pretty_print"]
-
 [features]
 default = ["pretty_print"]
 pretty_print = ["terminal_size", "pretty", "miette/fancy"]

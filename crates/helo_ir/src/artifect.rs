@@ -40,63 +40,80 @@ pub fn parse<'s>(
 pub fn infer_type<'s>(
     symbols: ast::Symbols<'s>,
     ast_nodes: ast::ExprHeap<'s>,
-) -> miette::Result<(typed::Symbols<'s>, typed::ExprHeap<'s>)> {
+    e: &mut errors::ManyError,
+) -> (typed::Symbols<'s>, typed::ExprHeap<'s>) {
     let mut typed_nodes = typed::ExprHeap::new();
     let mut typed_functions = typed::FunctionTable::new();
-    let mut e = errors::ManyError::new();
 
-    for f_name in symbols.function_names() {
+    for f_id in symbols.functions.keys() {
         let f = infer::infer_function(
-            &f_name,
+            f_id.clone(),
             &symbols,
             &ast_nodes,
             &mut typed_nodes,
             &mut typed_functions,
-            &mut e,
+            e,
         );
         if let Some(f) = f {
-            typed_functions.insert(f_name.to_string(), f);
+            typed_functions.insert(f_id.clone(), f);
         }
     }
 
-    e.emit()?;
-
     let symbols = typed::Symbols::new(symbols, typed_functions);
-    Ok((symbols, typed_nodes))
+    (symbols, typed_nodes)
 }
 
-pub fn compiler_ir<'s>(
-    symbols: typed::Symbols<'s>,
+pub fn compiler_ir<'s: 'a, 'a>(
+    entries: impl Iterator<Item = &'a ast::FunctionId<'s>>,
+    symbols: &typed::Symbols<'s>,
     typed_nodes: typed::ExprHeap<'s>,
-) -> (ir::FunctionTable, ir::ExprHeap<'s>, ir::StrList) {
+    e: &mut errors::ManyError,
+) -> (
+    ir::FunctionTable<'s>,
+    ir::ExprHeap<'s>,
+    ir::StrList,
+    Vec<ir::FunctionId<'s>>,
+) {
     let mut ir_nodes = ir::ExprHeap::new();
     let mut str_table = ir::StrTable::new();
     let mut ir_functions = ir::FunctionTable::new();
 
-    for f_name in symbols.function_names() {
-        let f = lower_ast::lower_function(
-            f_name,
-            &symbols,
-            &typed_nodes,
-            &mut ir_nodes,
-            &mut str_table,
-        );
-        ir_functions.insert(f_name.clone(), f);
-    }
+    let ir_fids = entries
+        .into_iter()
+        .filter_map(|f_id| {
+            let f = symbols.function(f_id);
+            if f.var_cnt != 0 {
+                e.push(crate::errors::InvalidEntryPoint::new(&f.meta, &f.type_));
+                return None;
+            }
+            let inferer = helo_parse::inferer::Inferer::new();
+            let ir_fid = lower_ast::lower_function(
+                f_id,
+                &inferer,
+                &symbols,
+                &typed_nodes,
+                &mut ir_functions,
+                &mut ir_nodes,
+                &mut str_table,
+                e,
+            );
+            Some(ir_fid)
+        })
+        .collect();
 
     let str_list = str_table.to_list();
-    (ir_functions, ir_nodes, str_list)
+    (ir_functions, ir_nodes, str_list, ir_fids)
 }
 
 pub fn compile_lir<'s>(
-    ir_functions: ir::FunctionTable,
+    ir_functions: ir::FunctionTable<'s>,
     ir_nodes: ir::ExprHeap<'s>,
-) -> lir::FunctionTable<lir::Function> {
+) -> lir::FunctionTable<'s, lir::Function> {
     let mut lir_functions = lir::FunctionTable::new();
     let rt_builtins = rt_builtins::BuiltinTable::new();
-    for fid in ir_functions.function_names() {
+    for fid in ir_functions.function_ids() {
         lower_ir::lower_function(
-            fid,
+            fid.clone(),
             &ir_nodes,
             &ir_functions,
             &rt_builtins,

@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use crate::ast;
+use crate::ast::{self, DataName, RelationName};
 
-use ast::{CapturedId, Constant, FunctionId, LocalId, Pattern};
+use ast::{
+    BuiltinFunctionName, CapturedId, Constant, ConstructorName, FunctionId, FunctionName, LocalId,
+    Pattern,
+};
 
 #[derive(Debug, Clone)]
 pub enum ExprNode<'s> {
@@ -29,10 +32,16 @@ pub enum ExprNode<'s> {
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure(FunctionId),
-    Constructor(&'s str),
-    UserFunction(&'s str),
-    Builtin(&'s str),
+    MakeClosure(FunctionId<'s>, ast::FunctionType<'s>),
+    Constructor(ConstructorName<'s>),
+    UserFunction(FunctionId<'s>),
+    UnresolvedMethod {
+        rel_name: RelationName<'s>,
+        f_name: FunctionName<'s>,
+        constrains: Vec<ast::Constrain<'s>>,
+        primary_constrain: ast::Constrain<'s>,
+    },
+    Builtin(BuiltinFunctionName<'s>),
     Tuple(Vec<ExprId>),
     Captured {
         id: CapturedId,
@@ -57,6 +66,22 @@ pub enum StmtNode {
 pub struct Stmt {
     pub node: StmtNode,
     pub meta: ast::Meta,
+}
+
+impl Stmt {
+    pub fn walk<'s>(&self, expr_heap: &mut ExprHeap<'s>, f: &mut impl FnMut(&mut Expr<'s>)) {
+        match &self.node {
+            StmtNode::If { test, then } => {
+                expr_heap.walk(*test, f);
+                expr_heap.walk(*then, f);
+            }
+            StmtNode::Expr(e) => expr_heap.walk(*e, f),
+            StmtNode::While { test, then } => {
+                expr_heap.walk(*test, f);
+                expr_heap.walk(*then, f)
+            }
+        }
+    }
 }
 
 impl Stmt {
@@ -85,6 +110,7 @@ impl From<usize> for ExprId {
     }
 }
 
+#[derive(Clone)]
 pub struct Expr<'s> {
     pub node: ExprNode<'s>,
     pub type_: ast::Type<'s>,
@@ -148,6 +174,12 @@ impl<'s> ExprHeap<'s> {
                 self.walk(in_, f);
             }
             Tuple(elems) => elems.iter().for_each(|id| self.walk(*id, f)),
+            Seq(stmts, ret) => {
+                stmts.iter().for_each(|stmt| stmt.walk(self, f));
+                if let Some(r) = ret {
+                    self.walk(r, f);
+                }
+            }
             _ => {}
         };
     }
@@ -169,8 +201,8 @@ impl<'s> ExprHeap<'s> {
 }
 
 pub struct FunctionTable<'s> {
-    tab: HashMap<String, Function<'s>>,
-    infering: Vec<String>,
+    tab: HashMap<FunctionId<'s>, Function<'s>>,
+    infering: Vec<FunctionId<'s>>,
 }
 impl<'s> FunctionTable<'s> {
     pub fn new() -> Self {
@@ -179,38 +211,44 @@ impl<'s> FunctionTable<'s> {
             infering: Vec::new(),
         }
     }
-    pub fn currently_infering(&self) -> Option<&str> {
-        self.infering.last().map(|x| x.as_str())
+    pub fn currently_infering(&self) -> Option<&FunctionId> {
+        self.infering.last()
     }
-    pub fn insert(&mut self, name: String, f: Function<'s>) {
-        self.tab.insert(name, f);
+    pub fn insert(&mut self, id: FunctionId<'s>, f: Function<'s>) {
+        self.tab.insert(id, f);
     }
-    pub fn get(&self, name: &str) -> Option<&Function<'s>> {
-        self.tab.get(name)
+    pub fn get(&self, id: &FunctionId<'s>) -> Option<&Function<'s>> {
+        self.tab.get(id)
     }
-    pub fn begin_infering(&mut self, name: String) {
+    pub fn begin_infering(&mut self, name: FunctionId<'s>) {
         self.infering.push(name);
     }
-    pub fn is_infering(&self, name: &str) -> bool {
-        self.infering.iter().find(|x| x.as_str() == name).is_some()
+    pub fn is_infering(&self, name: &FunctionId) -> bool {
+        self.infering.iter().find(|x| *x == name).is_some()
     }
     pub fn finish_infering(&mut self) {
         self.infering.pop().unwrap();
     }
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Function<'s>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&FunctionId, &Function<'s>)> {
         self.tab.iter()
+    }
+    pub fn contains(&self, id: &FunctionId<'s>) -> bool {
+        self.tab.contains_key(id)
     }
 }
 
 pub struct Symbols<'s> {
-    functions: FunctionTable<'s>,
-    pub constructors: HashMap<&'s str, ast::Constructor<'s>>,
-    pub datas: HashMap<&'s str, ast::Data<'s>>,
-    pub builtins: HashMap<&'s str, ast::BuiltinFunction<'s>>,
+    pub functions: FunctionTable<'s>,
+    pub constructors: HashMap<ConstructorName<'s>, ast::Constructor<'s>>,
+    pub datas: HashMap<DataName<'s>, ast::Data<'s>>,
+    pub builtins: HashMap<BuiltinFunctionName<'s>, ast::BuiltinFunction<'s>>,
+    pub relations: HashMap<RelationName<'s>, ast::Relation<'s>>,
+    pub instances: ast::InstanceTable<'s>,
+    pub methods: HashMap<FunctionName<'s>, RelationName<'s>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Tag<'s>(u8, u8, &'s str);
+pub struct Tag<'s>(u8, u8, ConstructorName<'s>);
 
 impl<'s> std::hash::Hash for Tag<'s> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -220,7 +258,7 @@ impl<'s> std::hash::Hash for Tag<'s> {
 
 impl<'s> Tag<'s> {
     pub fn name(&self) -> &'s str {
-        self.2
+        self.2 .0
     }
     pub fn code(&self) -> u8 {
         self.0
@@ -240,11 +278,14 @@ impl<'s> Symbols<'s> {
             constructors: symbols.constructors,
             datas: symbols.datas,
             builtins: symbols.builtins,
+            relations: symbols.relations,
+            instances: symbols.instances,
+            methods: symbols.methods,
         }
     }
-    pub fn tag_for(&self, constructor: &'s str) -> Tag<'s> {
-        let data_name = self.constructors.get(constructor).unwrap().belongs_to;
-        let data = self.datas.get(data_name).unwrap();
+    pub fn tag_for(&self, constructor: ConstructorName<'s>) -> Tag<'s> {
+        let data_name = self.constructors.get(&constructor).unwrap().belongs_to;
+        let data = &self.datas[&data_name];
         Tag(
             data.constructors
                 .iter()
@@ -255,7 +296,7 @@ impl<'s> Symbols<'s> {
         )
     }
 
-    pub fn function(&self, name: &str) -> &Function<'s> {
-        self.functions.get(name).unwrap()
+    pub fn function(&self, id: &FunctionId<'s>) -> &Function<'s> {
+        self.functions.get(id).unwrap()
     }
 }

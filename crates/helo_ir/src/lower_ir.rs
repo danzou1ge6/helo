@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use helo_parse::ast::BuiltinFunctionName;
+
 use crate::{ir, lir};
 
 pub struct Compiler {
@@ -57,11 +59,12 @@ fn lower_expr_untied<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> BlockEnd {
     use ir::ExprNode::*;
     match ir_nodes[id].node() {
+        Never => panic!("IR with Never nodes can never be lowered to LIR"),
         LetBind { local, value, in_ } => lower_let_bind(
             to,
             *local,
@@ -158,7 +161,7 @@ fn lower_expr_untied<'s>(
         .into(),
         MakeClosure(fid, captures) => lower_make_closure(
             to.unwrap_or_else(|| compiler.new_temp()),
-            fid,
+            fid.clone(),
             captures,
             ir_nodes,
             ir_functions,
@@ -187,7 +190,7 @@ fn lower_expr_untied<'s>(
         .into(),
         UserFunction(fid) => lower_user_function(
             to.unwrap_or_else(|| compiler.new_temp()),
-            fid,
+            fid.clone(),
             ir_nodes,
             ir_functions,
             builtins,
@@ -198,7 +201,7 @@ fn lower_expr_untied<'s>(
         .into(),
         Builtin(fid) => lower_builtin(
             to.unwrap_or_else(|| compiler.new_temp()),
-            fid,
+            *fid,
             builtins,
             block,
             blocks,
@@ -300,7 +303,7 @@ fn lower_expr<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let end = lower_expr_untied(
@@ -336,7 +339,7 @@ fn lower_function_body<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) {
     let end = lower_expr_untied(
@@ -367,18 +370,18 @@ fn lower_function_body<'s>(
 }
 
 pub fn lower_function<'s>(
-    fid: &ir::FunctionId,
+    fid: ir::FunctionId<'s>,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::BuiltinTable,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
 ) -> lir::FunctionId {
-    if let Some(id) = functions.get(fid) {
+    if let Some(id) = functions.get(&fid) {
         return id;
     }
 
     functions.insert(fid.clone(), move |_, functions| {
-        let f = ir_functions.get(fid).unwrap();
+        let f = ir_functions.get(&fid).unwrap();
         let mut compiler = Compiler::new(f.local_cnt, f.arity);
         let mut blocks = lir::BlockHeap::new();
 
@@ -418,7 +421,7 @@ fn lower_expr_new_block<'s>(
     ir_functions: &ir::FunctionTable,
     builtins: &lir::BuiltinTable,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> (lir::BlockId, lir::BlockId) {
     let begin = blocks.new_block();
@@ -444,7 +447,7 @@ fn lower_assign<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let value_temp = compiler.new_temp();
@@ -475,7 +478,7 @@ fn lower_seq<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let mut block = exprs.iter().copied().fold(block, |block, expr| {
@@ -518,7 +521,7 @@ fn lower_if<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     let test_temp = compiler.new_temp();
@@ -561,7 +564,7 @@ fn lower_while<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let test_temp = compiler.new_temp();
@@ -612,7 +615,7 @@ fn lower_let_bind<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let temp_id = compiler.local_id_to_temp(local);
@@ -651,7 +654,7 @@ fn lower_switch_tag<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     if arms.len() == 0 {
@@ -721,7 +724,7 @@ fn lower_switch<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     let operand_temp = compiler.new_temp();
@@ -830,7 +833,7 @@ fn lower_cond<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     let mut expr_map = HashMap::new();
@@ -896,7 +899,7 @@ fn lower_if_else<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> Vec<lir::BlockId> {
     let test_temp = compiler.new_temp();
@@ -951,7 +954,7 @@ fn lower_apply<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     use lir::Instruction::*;
@@ -981,7 +984,7 @@ fn lower_apply<'s>(
     match &ir_nodes[callee].node() {
         // Optimization: we don't load a builtin and then apply arguments to it when we have enough arguments
         // Instead, we call the builtin directly.
-        ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name) => {
+        ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name.0) => {
             let block = emit_arguments!(block);
 
             let inst = if callee_impure {
@@ -990,14 +993,14 @@ fn lower_apply<'s>(
                 CallBuiltin
             };
 
-            blocks[block].push(inst(to, builtins.id_by_name(name), args_temp));
+            blocks[block].push(inst(to, builtins.id_by_name(name.0), args_temp));
             block
         }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
         // Instead, we call this user function directly
-        ir::ExprNode::UserFunction(name) if args.len() == ir_functions.get(name).unwrap().arity => {
+        ir::ExprNode::UserFunction(f_id) if args.len() == ir_functions.get(f_id).unwrap().arity => {
             let block = emit_arguments!(block);
-            let lir_fid = lower_function(name, ir_nodes, ir_functions, builtins, functions);
+            let lir_fid = lower_function(f_id.clone(), ir_nodes, ir_functions, builtins, functions);
 
             let inst = if callee_impure { CallImpure } else { Call };
 
@@ -1064,14 +1067,14 @@ fn lower_immediate<'s>(
 
 fn lower_make_closure<'s>(
     to: lir::TempId,
-    fid: &ir::FunctionId,
+    fid: ir::FunctionId<'s>,
     captures: &[ir::LocalId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
@@ -1099,13 +1102,13 @@ fn lower_local<'s>(
 
 fn lower_user_function<'s>(
     to: lir::TempId,
-    fid: &ir::FunctionId,
+    fid: ir::FunctionId<'s>,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
 ) -> lir::BlockId {
     let lir_fid = lower_function(fid, ir_nodes, ir_functions, builtins, functions);
     blocks[block].push(lir::Instruction::Function(to, lir_fid));
@@ -1114,12 +1117,12 @@ fn lower_user_function<'s>(
 
 fn lower_builtin<'s>(
     to: lir::TempId,
-    name: &str,
+    name: BuiltinFunctionName,
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
 ) -> lir::BlockId {
-    let builtin_id = builtins.id_by_name(name);
+    let builtin_id = builtins.id_by_name(name.0);
     blocks[block].push(lir::Instruction::Buitltin(to, builtin_id));
     block
 }
@@ -1149,7 +1152,7 @@ fn lower_make_tagged<'s>(
     builtins: &lir::BuiltinTable,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
-    functions: &mut lir::FunctionTable<lir::Function>,
+    functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
 ) -> lir::BlockId {
     let fields_temp: Vec<_> = fields.iter().map(|_| compiler.new_temp()).collect();

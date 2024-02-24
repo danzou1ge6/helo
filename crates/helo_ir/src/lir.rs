@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 
-use crate::errors;
 use crate::ir;
 
 use helo_runtime::byte_code;
@@ -563,12 +562,12 @@ pub struct FunctionOptimized {
     pub block_run: BlockIdVec<bool>,
 }
 
-pub struct FunctionTable<F> {
-    tab: HashMap<ir::FunctionId, FunctionId>,
+pub struct FunctionTable<'s, F> {
+    tab: HashMap<ir::FunctionId<'s>, FunctionId>,
     store: Vec<Option<F>>,
 }
 
-impl<F> FunctionTable<F> {
+impl<'s, F> FunctionTable<'s, F> {
     pub fn new() -> Self {
         Self {
             tab: HashMap::new(),
@@ -580,8 +579,8 @@ impl<F> FunctionTable<F> {
     }
     pub fn insert(
         &mut self,
-        fid: ir::FunctionId,
-        gen: impl FnOnce(FunctionId, &mut FunctionTable<F>) -> F,
+        fid: ir::FunctionId<'s>,
+        gen: impl FnOnce(FunctionId, &mut FunctionTable<'s, F>) -> F,
     ) -> FunctionId {
         let id = FunctionId(self.store.len());
         self.store.push(None);
@@ -591,11 +590,6 @@ impl<F> FunctionTable<F> {
         self.store[id.0] = Some(f);
 
         id
-    }
-    pub fn main_id(&self) -> Result<FunctionId, errors::MainNotFound> {
-        self.tab
-            .get("main")
-            .map_or_else(|| Err(errors::MainNotFound {}), |x| Ok(*x))
     }
     pub fn to_list(self) -> FunctionList<F> {
         FunctionList {

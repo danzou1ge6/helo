@@ -1,4 +1,5 @@
 use crate::{ir, lir::BlockTopology};
+use helo_parse::ast;
 use pretty::{self};
 
 pub fn pretty_ir_function<'s, 'b, D, A>(
@@ -6,6 +7,7 @@ pub fn pretty_ir_function<'s, 'b, D, A>(
     name: &str,
     nodes: &ir::ExprHeap<'s>,
     str_list: &ir::StrList,
+    instances: &ast::InstanceTable<'s>,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -19,13 +21,14 @@ where
         .append(format!(" ({})", f.arity))
         .append(allocator.text(" ="))
         .append(allocator.hardline())
-        .append(pretty_ir(f.body, nodes, str_list, allocator).indent(2))
+        .append(pretty_ir(f.body, nodes, str_list, instances, allocator).indent(2))
 }
 
 pub fn pretty_ir<'s, 'b, D, A>(
     id: ir::ExprId,
     nodes: &ir::ExprHeap<'s>,
     str_list: &ir::StrList,
+    instances: &ast::InstanceTable<'s>,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -35,6 +38,7 @@ where
 {
     use ir::ExprNode::*;
     match nodes[id].node() {
+        Never => allocator.text("Never"),
         LetBind { local, value, in_ } => allocator
             .text("LET")
             .append(allocator.softline())
@@ -42,17 +46,17 @@ where
                 allocator
                     .text(local.to_string())
                     .append(allocator.text(" = "))
-                    .append(pretty_ir(*value, nodes, str_list, allocator))
+                    .append(pretty_ir(*value, nodes, str_list, instances, allocator))
                     .indent(2),
             )
             .append(allocator.space())
             .append("IN")
             .append(allocator.hardline())
-            .append(pretty_ir(*in_, nodes, str_list, allocator))
+            .append(pretty_ir(*in_, nodes, str_list, instances, allocator))
             .align(),
         SwitchTag(operand, v, default) => allocator
             .text("SWITCH_TAG ")
-            .append(pretty_ir(*operand, nodes, str_list, allocator))
+            .append(pretty_ir(*operand, nodes, str_list, instances, allocator))
             .append(allocator.hardline())
             .append(
                 allocator
@@ -62,7 +66,7 @@ where
                                 .text("| ")
                                 .append(allocator.text(tag.name().to_string()))
                                 .append(" -> ")
-                                .append(pretty_ir(*e, nodes, str_list, allocator))
+                                .append(pretty_ir(*e, nodes, str_list, instances, allocator))
                         }),
                         allocator.hardline(),
                     )
@@ -73,12 +77,12 @@ where
             .append(
                 allocator
                     .text("| _ -> ")
-                    .append(pretty_ir(*default, nodes, str_list, allocator))
+                    .append(pretty_ir(*default, nodes, str_list, instances, allocator))
                     .indent(2),
             ),
         Switch(operand, v, default) => allocator
             .text("SWITCH ")
-            .append(pretty_ir(*operand, nodes, str_list, allocator))
+            .append(pretty_ir(*operand, nodes, str_list, instances, allocator))
             .append(allocator.hardline())
             .append(
                 allocator
@@ -88,7 +92,7 @@ where
                                 .text("| ")
                                 .append(allocator.text(trunc_str(&immediate.to_string(str_list))))
                                 .append(" -> ")
-                                .append(pretty_ir(*e, nodes, str_list, allocator))
+                                .append(pretty_ir(*e, nodes, str_list, instances, allocator))
                         }),
                         allocator.hardline(),
                     )
@@ -99,7 +103,7 @@ where
             .append(
                 allocator
                     .text("| _ -> ")
-                    .append(pretty_ir(*default, nodes, str_list, allocator))
+                    .append(pretty_ir(*default, nodes, str_list, instances, allocator))
                     .indent(2),
             ),
         Cond(v, default) => allocator.text("COND").append(allocator.softline()).append(
@@ -111,9 +115,9 @@ where
                             v.iter().map(|(case, e)| {
                                 allocator
                                     .text("if ")
-                                    .append(pretty_ir(*case, nodes, str_list, allocator))
+                                    .append(pretty_ir(*case, nodes, str_list, instances, allocator))
                                     .append(" -> ")
-                                    .append(pretty_ir(*e, nodes, str_list, allocator))
+                                    .append(pretty_ir(*e, nodes, str_list, instances, allocator))
                             }),
                             allocator.hardline(),
                         )
@@ -123,20 +127,20 @@ where
                 .append(
                     allocator
                         .text("if true -> ")
-                        .append(pretty_ir(*default, nodes, str_list, allocator))
+                        .append(pretty_ir(*default, nodes, str_list, instances, allocator))
                         .indent(2),
                 )
                 .align(),
         ),
         IfElse { test, then, else_ } => allocator
             .text("IF ")
-            .append(pretty_ir(*test, nodes, str_list, allocator))
+            .append(pretty_ir(*test, nodes, str_list, instances, allocator))
             .append(allocator.hardline())
             .append("THEN")
             .append(
                 allocator
                     .softline()
-                    .append(pretty_ir(*then, nodes, str_list, allocator))
+                    .append(pretty_ir(*then, nodes, str_list, instances, allocator))
                     .indent(2),
             )
             .append(allocator.hardline())
@@ -144,7 +148,7 @@ where
             .append(
                 allocator
                     .softline()
-                    .append(pretty_ir(*else_, nodes, str_list, allocator))
+                    .append(pretty_ir(*else_, nodes, str_list, instances, allocator))
                     .indent(2),
             ),
         Apply {
@@ -153,13 +157,13 @@ where
             callee_impure,
         } => allocator
             .text(if *callee_impure { "('" } else { "(" })
-            .append(pretty_ir(*callee, nodes, str_list, allocator))
+            .append(pretty_ir(*callee, nodes, str_list, instances, allocator))
             .append(allocator.softline())
             .append(
                 allocator
                     .intersperse(
                         args.iter()
-                            .map(|arg| pretty_ir(*arg, nodes, str_list, allocator)),
+                            .map(|arg| pretty_ir(*arg, nodes, str_list, instances, allocator)),
                         allocator.softline(),
                     )
                     .indent(2)
@@ -170,7 +174,7 @@ where
         Immediate(im) => allocator.text(im.to_string(str_list)),
         MakeClosure(f, captures) => allocator
             .text("(MAKE_CLOSURE ")
-            .append(allocator.text(f.clone()).indent(2))
+            .append(allocator.text(f.to_string(instances)).indent(2))
             .append(allocator.space())
             .append(
                 allocator
@@ -183,7 +187,7 @@ where
             )
             .append(")"),
         Local(local) => allocator.text(local.to_string()),
-        UserFunction(f) => allocator.text(f.clone()),
+        UserFunction(f) => allocator.text(f.to_string(instances)),
         Builtin(builtin) => allocator.text(builtin.to_string()),
         VariantField(local, field) | TupleField(local, field) => {
             allocator.text(format!("{}.{}", local, field))
@@ -195,7 +199,7 @@ where
                     .intersperse(
                         elems
                             .iter()
-                            .map(|elem| pretty_ir(*elem, nodes, str_list, allocator)),
+                            .map(|elem| pretty_ir(*elem, nodes, str_list, instances, allocator)),
                         allocator.softline(),
                     )
                     .indent(2)
@@ -212,7 +216,7 @@ where
                     .intersperse(
                         elems
                             .iter()
-                            .map(|elem| pretty_ir(*elem, nodes, str_list, allocator)),
+                            .map(|elem| pretty_ir(*elem, nodes, str_list, instances, allocator)),
                         allocator.softline(),
                     )
                     .indent(2)
@@ -242,7 +246,7 @@ where
             .append(allocator.softline())
             .append(to.to_string())
             .append(allocator.softline())
-            .append(pretty_ir(*from, nodes, str_list, allocator))
+            .append(pretty_ir(*from, nodes, str_list, instances, allocator))
             .append(")"),
         Seq(exprs, result) => allocator
             .text("(BEGIN")
@@ -251,27 +255,27 @@ where
                     .intersperse(
                         exprs
                             .iter()
-                            .map(|expr| pretty_ir(*expr, nodes, str_list, allocator)),
+                            .map(|expr| pretty_ir(*expr, nodes, str_list, instances, allocator)),
                         allocator.hardline(),
                     )
                     .align()
                     .indent(2),
             )
-            .append(result.map(|r| pretty_ir(r, nodes, str_list, allocator).indent(2)))
+            .append(result.map(|r| pretty_ir(r, nodes, str_list, instances, allocator).indent(2)))
             .append(")"),
         If { test, then } => allocator
             .text("(IF")
             .append(allocator.softline())
-            .append(pretty_ir(*test, nodes, str_list, allocator))
+            .append(pretty_ir(*test, nodes, str_list, instances, allocator))
             .append(allocator.softline())
-            .append(pretty_ir(*then, nodes, str_list, allocator))
+            .append(pretty_ir(*then, nodes, str_list, instances, allocator))
             .append(")"),
         While { test, then } => allocator
             .text("(WHILE")
             .append(allocator.softline())
-            .append(pretty_ir(*test, nodes, str_list, allocator))
+            .append(pretty_ir(*test, nodes, str_list, instances, allocator))
             .append(allocator.softline())
-            .append(pretty_ir(*then, nodes, str_list, allocator))
+            .append(pretty_ir(*then, nodes, str_list, instances, allocator))
             .append(")"),
     }
 }

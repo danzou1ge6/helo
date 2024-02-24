@@ -1,5 +1,6 @@
 use helo_ir::pretty_print;
-use helo_ir::{artifect, lir, lir::ssa};
+use helo_ir::{artifect, ir, lir, lir::ssa};
+use helo_parse::{ast, errors};
 use helo_runtime::{disassembler, executable, vm};
 
 use miette::{Context, IntoDiagnostic};
@@ -8,6 +9,34 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::sync::Arc;
+
+fn pretty_ir_functions<'s>(
+    ir_functions: &ir::FunctionTable<'s>,
+    ir_nodes: &ir::ExprHeap<'s>,
+    str_list: &helo_ir::ir::StrList,
+    instances: &ast::InstanceTable<'s>,
+) {
+    for f_id in ir_functions.function_ids() {
+        #[cfg(feature = "term_width")]
+        let terminal_size = {
+            use terminal_size;
+            terminal_size.terminal_size().unwrap().0 .0
+        };
+        #[cfg(not(feature = "term_width"))]
+        let term_width = 80;
+        let allocator = pretty::RcAllocator;
+        let doc_builder = pretty_print::pretty_ir_function::<_, ()>(
+            ir_functions.get(f_id).unwrap(),
+            &f_id.to_string(instances),
+            &ir_nodes,
+            &str_list,
+            instances,
+            &allocator,
+        );
+        let doc = doc_builder.pretty(term_width);
+        println!("{doc}");
+    }
+}
 
 fn pretty_lir_functions(
     lir_functions: &helo_ir::lir::FunctionList<lir::Function>,
@@ -82,18 +111,53 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
     let file_name = Arc::new(file_name);
     let s = &src.clone()[..];
 
+    // Parse
     let (ast_symbols, ast_nodes) = artifect::parse(s, src, file_name)?;
-    let (typed_symbols, typed_nodes) = artifect::infer_type(ast_symbols, ast_nodes)?;
-    let (ir_functions, ir_nodes, str_list) = artifect::compiler_ir(typed_symbols, typed_nodes);
 
+    // Type inference and lower to IR
+    let mut e = errors::ManyError::new();
+    let (typed_symbols, typed_nodes) = artifect::infer_type(ast_symbols, ast_nodes, &mut e);
+
+    println!("Infered type:");
+    for (name, f) in typed_symbols.functions.iter() {
+        println!("{}: {}", name.to_string(&typed_symbols.instances), f.type_);
+    }
+
+    let main = ast::FunctionId::main();
+    if let Some(f) = typed_symbols.functions.get(&main) {
+        let ast::FunctionType {
+            params, captures, ..
+        } = &f.type_;
+        if params.len() != 0 || captures.len() != 0 {
+            e.push(helo_ir::errors::MainBadType::new(&f.meta, &f.type_));
+        }
+    } else {
+        e.push(helo_ir::errors::MainNotFound {});
+    }
+    let mut e = e.emit()?;
+
+    let (ir_functions, ir_nodes, str_list, _) =
+        artifect::compiler_ir([main].iter(), &typed_symbols, typed_nodes, &mut e);
+    let _ = e.emit()?;
+
+    println!("IR:");
+    pretty_ir_functions(
+        &ir_functions,
+        &ir_nodes,
+        &str_list,
+        &typed_symbols.instances,
+    );
+
+    // Lower to LIR
     let lir_functions = artifect::compile_lir(ir_functions, ir_nodes);
-    let main_fid = lir_functions.main_id();
+    let main_fid = lir_functions.get(&ir::FunctionId::main()).unwrap();
     let lir_functions = lir_functions.to_list();
     let function_names = lir_functions.function_name_list();
     println!("Before optimization:");
     pretty_lir_functions(&lir_functions, &function_names, &str_list);
     println!("");
 
+    // Optimization passes
     let lir_functions = lir_functions
         .into_iter_id()
         .map(|(fid, f)| (fid, artifect::compile_ssa(f)))
@@ -135,7 +199,8 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
     println!("\nAfter contro flow simplification");
     pretty_lir_functions_optimized(&lir_functions, &function_names, &str_list);
 
-    let executable = artifect::compile_byte_code(lir_functions, str_list, main_fid?)?;
+    // Compile byte-code
+    let executable = artifect::compile_byte_code(lir_functions, str_list, main_fid)?;
 
     let pretty_table = disassembler::disassemble(&executable);
     println!("\n{pretty_table}");
@@ -183,7 +248,7 @@ pub fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_compile_ir <file_name>"))
     //     .clone();
-    let file_name = "helo_scripts/calculator.helo".to_string();
+    let file_name = "helo_scripts/relation.helo".to_string();
     let mut file = fs::File::open(&file_name)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

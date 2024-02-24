@@ -19,7 +19,6 @@ type BuiltinFunc<const N: usize> = for<'p> fn(
     lock: &'p mem::Lock,
 ) -> BuiltinRet<'p>;
 
-
 type BuiltinRet<'p> = Result<ValueSafe<'p>, RunTimeError>;
 
 mod functions;
@@ -211,5 +210,5 @@ const BUILTINS: [(&'static str, Builtin); 46] = [
     // Routines
     ("println", B1(string_println)),
     ("print", B1(string_print)),
-    ("readline", B0(read_line))
+    ("readline", B0(read_line)),
 ];

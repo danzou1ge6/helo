@@ -1,0 +1,15 @@
+{
+  "binaries": [
+    {
+      "name": "helo_run",
+      "src_path": "/home/ylk/Important/repo/helo/src/bin/helo_run.rs"
+    },
+    {
+      "name": "helo",
+      "src_path": "/home/ylk/Important/repo/helo/src/main.rs"
+    }
+  ],
+  "examples": [],
+  "integration_tests": [],
+  "unit_tests": []
+}

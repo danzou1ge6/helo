@@ -1,5 +1,10 @@
-routine main = begin
-    while 1 == 1 then begin
-        println "1"
+fn fold f, init, xs =
+    case xs of Con y, ys -> fold f, (f y, init), ys
+             | Nil       -> init
     end
-end
+
+fn sum xs = fold (+), 0, xs
+
+routine main =
+    let list = Con 1 (Con 2 (Con 3 Nil)) in
+    println sum list

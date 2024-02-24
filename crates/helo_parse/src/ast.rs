@@ -50,7 +50,63 @@ impl From<usize> for CapturedId {
     }
 }
 
-pub type FunctionId = String;
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct FunctionName<'s>(pub &'s str);
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum FunctionId<'s> {
+    Method(InstanceId<'s>, &'s str),
+    Standard(&'s str),
+    Closure {
+        span: (usize, usize),
+        file: Arc<String>,
+    },
+}
+
+impl<'s> FunctionId<'s> {
+    pub fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        ins_tab: &InstanceTable<'s>,
+    ) -> std::fmt::Result {
+        match self {
+            Self::Method(ins, name) => {
+                write!(f, "{}<", ins.rel_name.0)?;
+                let ins = ins_tab.get(ins).unwrap();
+                str_join_vec(f, ", ", &ins.rel.args)?;
+                write!(f, ">::{}", name)
+            }
+            Self::Standard(name) => write!(f, "{}", name),
+            Self::Closure { span, file } => write!(f, "closure@{}:{}-{}", file, span.0, span.1),
+        }
+    }
+
+    pub fn to_string(&self, ins_tab: &InstanceTable<'s>) -> String {
+        let mut buf = String::new();
+        let mut formatter = core::fmt::Formatter::new(&mut buf);
+        self.fmt(&mut formatter, ins_tab).unwrap();
+        buf
+    }
+
+    pub fn main() -> Self {
+        Self::Standard("main")
+    }
+}
+
+impl<'s> FunctionId<'s> {
+    pub fn assume_exists(name: &'s str) -> Self {
+        Self::Standard(name)
+    }
+    pub fn of_method(ins: InstanceId<'s>, name: FunctionName<'s>) -> Self {
+        Self::Method(ins, name.0)
+    }
+    pub fn of_closure_at(meta: &Meta) -> Self {
+        Self::Closure {
+            span: meta.span,
+            file: meta.file_name.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum ExprNode<'s> {
@@ -77,7 +133,7 @@ pub enum ExprNode<'s> {
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure(FunctionId),
+    MakeClosure(FunctionId<'s>),
     Global(&'s str),
     Tuple(Vec<ExprId>),
     Captured {
@@ -166,6 +222,7 @@ pub struct Function<'s> {
     pub captures: Vec<LocalId>,
     pub captures_meta: Vec<Meta>,
     pub pure: bool,
+    pub constrains: Vec<Constrain<'s>>,
 }
 
 #[derive(Debug, Clone)]
@@ -179,7 +236,7 @@ pub type CaseArm<'s> = CaseArm_<'s, ExprId>;
 
 #[derive(Clone)]
 pub enum Pattern<'s> {
-    Construct(&'s str, Vec<Pattern<'s>>, Meta),
+    Construct(ConstructorName<'s>, Vec<Pattern<'s>>, Meta),
     Bind(LocalId, Meta),
     Literal(Constant<'s>, Meta),
     Tuple(Vec<Pattern<'s>>, Meta),
@@ -189,7 +246,7 @@ impl<'s> std::fmt::Display for Pattern<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Pattern::*;
         match self {
-            Construct(name, args, _) => {
+            Construct(ConstructorName(name), args, _) => {
                 write!(f, "{name}(")?;
                 str_join_vec(f, ", ", args)?;
                 write!(f, ")")
@@ -211,10 +268,13 @@ impl<'s> std::fmt::Debug for Pattern<'s> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConstructorName<'s>(pub &'s str);
+
 pub struct Constructor<'s> {
     pub name: &'s str,
     pub params: Vec<Type<'s>>,
-    pub belongs_to: &'s str,
+    pub belongs_to: DataName<'s>,
     pub meta: Meta,
 }
 
@@ -233,7 +293,7 @@ impl<'s> Pattern<'s> {
             _ => panic!("Called `unwrap_literal` on a pattern {:?}", self),
         }
     }
-    pub fn unwrap_construct(self) -> (&'s str, Vec<Pattern<'s>>, Meta) {
+    pub fn unwrap_construct(self) -> (ConstructorName<'s>, Vec<Pattern<'s>>, Meta) {
         match self {
             Pattern::Construct(c, args, m) => (c, args, m),
             _ => panic!("Called `unwrap_construct` on a pattern {:?}", self),
@@ -252,14 +312,14 @@ impl<'s> Pattern<'s> {
             Pattern::Bind(_, _) => Ok(()),
             Pattern::Literal(_, _) => Ok(()),
             Pattern::Construct(constructor, args, m) => {
-                if let Some(_) = symbols.get_constructor(&constructor) {
+                if let Some(_) = symbols.constructors.get(&constructor) {
                     for a in args {
                         a.validate(symbols)?;
                     }
                     Ok(())
                 } else {
                     Err(miette::Report::new(errors::ConstructorNotFound::new(
-                        constructor,
+                        *constructor,
                         m,
                     )))
                 }
@@ -276,8 +336,8 @@ impl<'s> Pattern<'s> {
     pub fn inrefutable(&self, symbols: &Symbols<'s>) -> bool {
         match self {
             Pattern::Construct(constructor, args, _) => {
-                let c = symbols.constructor(&constructor);
-                let data = symbols.data(c.belongs_to);
+                let c = symbols.constructors.get(&constructor).unwrap();
+                let data = symbols.datas.get(&c.belongs_to).unwrap();
                 data.constructors.len() == 1 && args.iter().all(|pat| pat.inrefutable(symbols))
             }
             Self::Tuple(elements, _) => elements.iter().all(|pat| pat.inrefutable(symbols)),
@@ -287,10 +347,13 @@ impl<'s> Pattern<'s> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DataName<'s>(pub &'s str);
+
 pub struct Data<'s> {
     pub name: &'s str,
     pub kind_arity: usize,
-    pub constructors: Vec<&'s str>,
+    pub constructors: Vec<ConstructorName<'s>>,
     pub meta: Meta,
     pub generic_metas: Vec<Meta>,
 }
@@ -298,7 +361,7 @@ pub struct Data<'s> {
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct Meta {
     pub span: (usize, usize),
     pub file_name: Arc<String>,
@@ -345,11 +408,181 @@ impl From<usize> for TypeVarId {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Signatures for a method.
+///
+/// For relation methods,
+/// `var_cnt` is number of generic parameters in relation definition plus
+/// those in function signature. `type_` should contain both kind of generic parameters.
+#[derive(Clone, Debug)]
+pub struct MethodSig<'s> {
+    pub var_cnt: usize,
+    pub type_: CallableType<'s>,
+    pub pure: bool,
+    pub constrains: Vec<Constrain<'s>>,
+    pub primary_constrain: Constrain<'s>,
+    pub meta: Meta,
+}
+
+impl<'s> std::fmt::Display for MethodSig<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.type_.fmt(f)?;
+        write!(f, " where ")?;
+        str_join_vec(f, " + ", &self.constrains)
+    }
+}
+
+impl<'s> TypeApply<'s> for MethodSig<'s> {
+    fn apply(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
+    ) -> Self {
+        let type_ = self.type_.apply(selector, f);
+        let constrains = self
+            .constrains
+            .iter()
+            .map(|x| x.apply(selector, f))
+            .collect();
+        let primary_constrain = self.primary_constrain.apply(selector, f);
+        MethodSig {
+            type_,
+            constrains,
+            primary_constrain,
+            pure: self.pure,
+            meta: self.meta.clone(),
+            var_cnt: self.var_cnt,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RelationName<'s>(pub &'s str);
+
+#[derive(Clone, Debug)]
+pub struct Relation<'s> {
+    pub name: RelationName<'s>,
+    /// Indicates whether some parameter is dependent on others
+    pub dependent: Vec<usize>,
+    pub constrains: Vec<Constrain<'s>>,
+    pub arity: usize,
+    pub f_sigs: HashMap<FunctionName<'s>, MethodSig<'s>>,
+    pub meta: Meta,
+}
+
+#[derive(Clone, Debug, Hash)]
+pub struct Constrain<'s> {
+    pub rel_name: RelationName<'s>,
+    pub args: Vec<Type<'s>>,
+    pub meta: Meta,
+}
+
+impl<'s> std::fmt::Display for Constrain<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ", self.rel_name.0)?;
+        str_join_vec(f, ", ", &self.args[..])
+    }
+}
+
+impl<'s> PartialEq for Constrain<'s> {
+    fn eq(&self, other: &Self) -> bool {
+        self.rel_name == other.rel_name && self.args == other.args
+    }
+    fn ne(&self, other: &Self) -> bool {
+        !self.eq(other)
+    }
+}
+impl<'s> Eq for Constrain<'s> {}
+
+impl<'s> TypeApply<'s> for Constrain<'s> {
+    fn apply(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
+    ) -> Self {
+        let args = self.args.iter().map(|t| t.apply(selector, f)).collect();
+        Constrain {
+            rel_name: self.rel_name,
+            args,
+            meta: self.meta.clone(),
+        }
+    }
+}
+
+impl<'s> TypeApplyResult<'s> for Constrain<'s> {
+    fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+    ) -> Result<Self, E> {
+        let args = Type::apply_many_result(self.args.iter(), selector, f)?;
+        Ok(Constrain {
+            rel_name: self.rel_name,
+            args,
+            meta: self.meta.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct InstanceId<'s> {
+    pub rel_name: RelationName<'s>,
+    pub n: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Instance<'s> {
+    pub var_cnt: usize,
+    pub rel: Constrain<'s>,
+    pub constrains: Vec<Constrain<'s>>,
+    pub meta: Meta,
+}
+
+impl<'s> Instance<'s> {
+    pub fn rel_name(&self) -> RelationName<'s> {
+        self.rel.rel_name
+    }
+}
+
+impl<'s> TypeApply<'s> for Instance<'s> {
+    fn apply(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
+    ) -> Self {
+        let rel = self.rel.apply(selector, f);
+        let constrains = self
+            .constrains
+            .iter()
+            .map(|c| c.apply(selector, f))
+            .collect();
+        Self {
+            rel,
+            constrains,
+            ..self.clone()
+        }
+    }
+}
+
+impl<'s> Relation<'s> {
+    pub fn primary_constrain(&self) -> Constrain<'s> {
+        Constrain {
+            rel_name: self.name,
+            args: (0..self.arity)
+                .map(|x| Type::new_var(TypeVarId(x)))
+                .collect(),
+            meta: self.meta.clone(),
+        }
+    }
+    pub fn method_sig(&self, fid: &FunctionName<'s>) -> &MethodSig<'s> {
+        &self.f_sigs[fid]
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum TypeNode<'s> {
     Callable(CallableType<'s>),
     ImpureCallable(CallableType<'s>),
-    Generic(&'s str, Vec<Type<'s>>),
+    Generic(DataName<'s>, Vec<Type<'s>>),
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
     Var(TypeVarId),
@@ -369,7 +602,7 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
             ImpureCallable(c) => {
                 write!(f, "^{c}")
             }
-            Generic(template, args) => {
+            Generic(DataName(template), args) => {
                 if args.len() == 0 {
                     write!(f, "{}", template)
                 } else {
@@ -392,30 +625,13 @@ impl<'s> std::fmt::Display for TypeNode<'s> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct CallableType<'s> {
     pub params: Vec<Type<'s>>,
     pub ret: Box<Type<'s>>,
 }
 
-impl<'s> CallableType<'s> {
-    pub fn normalize(mut self, pure: bool) -> Self {
-        match self.ret.node {
-            TypeNode::Callable(ret_callable) if pure => {
-                self.params.extend(ret_callable.params.into_iter());
-                self.ret = ret_callable.ret;
-            }
-            TypeNode::ImpureCallable(ret_callable) if pure => {
-                self.params.extend(ret_callable.params.into_iter());
-                self.ret = ret_callable.ret;
-            }
-            _ => return self,
-        }
-        self.normalize(pure)
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct FunctionType<'s> {
     pub params: Vec<Type<'s>>,
     pub ret: Box<Type<'s>>,
@@ -457,7 +673,7 @@ impl<'s> From<CallableType<'s>> for FunctionType<'s> {
     }
 }
 
-fn str_join_vec<T>(f: &mut std::fmt::Formatter<'_>, j: &str, slice: &[T]) -> std::fmt::Result
+pub fn str_join_vec<T>(f: &mut std::fmt::Formatter<'_>, j: &str, slice: &[T]) -> std::fmt::Result
 where
     T: std::fmt::Display,
 {
@@ -522,7 +738,27 @@ impl<'s> TypeApply<'s> for FunctionType<'s> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl<'s> TypeApplyResult<'s> for FunctionType<'s> {
+    fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+    ) -> Result<Self, E>
+    where
+        Self: Sized,
+    {
+        let params = Type::apply_many_result(self.params.iter(), selector, f)?;
+        let ret = Box::new(self.ret.apply_result(selector, f)?);
+        let captures = Type::apply_many_result(self.captures.iter(), selector, f)?;
+        Ok(FunctionType {
+            params,
+            ret,
+            captures,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrimitiveType {
     Int,
     Float,
@@ -550,7 +786,7 @@ impl std::fmt::Display for PrimitiveType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Type<'s> {
     pub node: TypeNode<'s>,
 }
@@ -574,6 +810,42 @@ pub trait TypeApply<'s> {
             },
         )
     }
+
+    fn substitute_vars(&self, mut nodes: impl FnMut(TypeVarId) -> Type<'s>) -> Self
+    where
+        Self: Sized,
+    {
+        self.apply(
+            &|t| matches!(t.node, TypeNode::Var(_)),
+            &mut |t| match t.node {
+                TypeNode::Var(v) => nodes(v),
+                _ => unreachable!(),
+            },
+        )
+    }
+}
+
+impl<'s, T> TypeApply<'s> for Vec<T>
+where
+    T: TypeApply<'s>,
+{
+    fn apply(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Type<'s>,
+    ) -> Self {
+        self.iter().map(|x| x.apply(selector, f)).collect()
+    }
+}
+
+pub trait TypeApplyResult<'s> {
+    fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+    ) -> Result<Self, E>
+    where
+        Self: Sized;
 }
 
 impl<'s> TypeApply<'s> for Type<'s> {
@@ -595,7 +867,7 @@ impl<'s> TypeApply<'s> for Type<'s> {
         let node = match &self.node {
             Primitive(p) => Primitive(*p),
             Unit => Unit,
-            Generic(template, args) => Generic(template, apply_many(args.iter(), selector, f)),
+            Generic(template, args) => Generic(*template, apply_many(args.iter(), selector, f)),
             Callable(v) => Callable(CallableType {
                 params: apply_many(v.params.iter(), selector, f),
                 ret: Box::new(v.ret.apply(selector, f)),
@@ -621,8 +893,49 @@ impl<'s> TypeNode<'s> {
             _ => panic!("Only callable types have the notion of purity"),
         }
     }
+    pub fn unwrap_callable(self) -> CallableType<'s> {
+        match self {
+            Self::Callable(c) => c,
+            Self::ImpureCallable(c) => c,
+            other => panic!("Called `unwrap_callable` on type {}", other),
+        }
+    }
     pub fn is_unit(&self) -> bool {
         matches!(self, TypeNode::Unit)
+    }
+}
+
+impl<'s> TypeApplyResult<'s> for Type<'s> {
+    fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+    ) -> Result<Type<'s>, E> {
+        use TypeNode::*;
+        if selector(self) {
+            return f(self);
+        }
+        let node = match &self.node {
+            Primitive(p) => Primitive(*p),
+            Unit => Unit,
+            Generic(template, args) => Generic(
+                *template,
+                Type::apply_many_result(args.iter(), selector, f)?,
+            ),
+            Callable(v) => Callable(CallableType {
+                params: Type::apply_many_result(v.params.iter(), selector, f)?,
+                ret: Box::new(v.ret.apply_result(selector, f)?),
+            }),
+            ImpureCallable(v) => ImpureCallable(CallableType {
+                params: Type::apply_many_result(v.params.iter(), selector, f)?,
+                ret: Box::new(v.ret.apply_result(selector, f)?),
+            }),
+            Tuple(v) => Tuple(Type::apply_many_result(v.iter(), selector, f)?),
+            Var(v) => Var(*v),
+            Never => Never,
+            WildCard => WildCard,
+        };
+        Ok(Type { node })
     }
 }
 
@@ -645,47 +958,19 @@ impl<'s> Type<'s> {
         }
     }
 
-    pub fn apply_result<E>(
-        &self,
+    fn apply_many_result<'a, E>(
+        many: impl Iterator<Item = &'a Type<'s>>,
         selector: &impl Fn(&Type<'s>) -> bool,
         f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
-    ) -> Result<Type<'s>, E> {
-        use TypeNode::*;
-        fn apply_many<'a, 's, E>(
-            many: impl Iterator<Item = &'a Type<'s>>,
-            selector: &impl Fn(&Type<'s>) -> bool,
-            f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
-        ) -> Result<Vec<Type<'s>>, E>
-        where
-            's: 'a,
-        {
-            let mut r = vec![];
-            for x in many {
-                r.push(x.apply_result(selector, f)?);
-            }
-            Ok(r)
+    ) -> Result<Vec<Type<'s>>, E>
+    where
+        's: 'a,
+    {
+        let mut r = vec![];
+        for x in many {
+            r.push(x.apply_result(selector, f)?);
         }
-        if selector(self) {
-            return f(self);
-        }
-        let node = match &self.node {
-            Primitive(p) => Primitive(*p),
-            Unit => Unit,
-            Generic(template, args) => Generic(template, apply_many(args.iter(), selector, f)?),
-            Callable(v) => Callable(CallableType {
-                params: apply_many(v.params.iter(), selector, f)?,
-                ret: Box::new(v.ret.apply_result(selector, f)?),
-            }),
-            ImpureCallable(v) => ImpureCallable(CallableType {
-                params: apply_many(v.params.iter(), selector, f)?,
-                ret: Box::new(v.ret.apply_result(selector, f)?),
-            }),
-            Tuple(v) => Tuple(apply_many(v.iter(), selector, f)?),
-            Var(v) => Var(*v),
-            Never => Never,
-            WildCard => WildCard,
-        };
-        Ok(Type { node })
+        Ok(r)
     }
 
     pub fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {
@@ -757,6 +1042,15 @@ impl<'s> std::fmt::Debug for Type<'s> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BuiltinFunctionName<'s>(pub &'s str);
+
+impl<'s> std::fmt::Display for BuiltinFunctionName<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub struct BuiltinFunction<'s> {
     pub var_cnt: usize,
     pub type_: CallableType<'s>,
@@ -764,53 +1058,72 @@ pub struct BuiltinFunction<'s> {
     pub pure: bool,
 }
 
+pub struct InstanceTable<'s>(HashMap<RelationName<'s>, Vec<Instance<'s>>>);
+
+impl<'s> InstanceTable<'s> {
+    pub fn get<'a, 'b>(&'a self, id: &'b InstanceId<'s>) -> Option<&'a Instance<'s>> {
+        let v = self.0.get(&id.rel_name)?;
+        v.get(id.n)
+    }
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+    pub fn of_rel(&self, rel_name: &RelationName<'s>) -> &[Instance<'s>] {
+        &self.0[rel_name]
+    }
+    pub fn insert(&mut self, rel_name: RelationName<'s>, instance: Instance<'s>) -> InstanceId<'s> {
+        if self.0.contains_key(&rel_name) {
+            let n = self.0.get(&rel_name).unwrap().len();
+            self.0.get_mut(&rel_name).unwrap().push(instance);
+            InstanceId { rel_name, n }
+        } else {
+            self.0.insert(rel_name, vec![instance]);
+            InstanceId { rel_name, n: 0 }
+        }
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (InstanceId<'s>, &Instance<'s>)> {
+        self.0
+            .iter()
+            .map(|(name, v)| {
+                v.iter()
+                    .enumerate()
+                    .map(|(n, ins)| (InstanceId { rel_name: *name, n }, ins))
+            })
+            .flatten()
+    }
+}
+
 pub struct Symbols_<'s, F> {
-    pub(crate) functions: HashMap<FunctionId, F>,
-    pub(crate) constructors: HashMap<&'s str, Constructor<'s>>,
-    pub(crate) datas: HashMap<&'s str, Data<'s>>,
-    pub(crate) builtins: HashMap<&'s str, BuiltinFunction<'s>>,
+    pub functions: HashMap<FunctionId<'s>, F>,
+    pub constructors: HashMap<ConstructorName<'s>, Constructor<'s>>,
+    pub datas: HashMap<DataName<'s>, Data<'s>>,
+    pub builtins: HashMap<BuiltinFunctionName<'s>, BuiltinFunction<'s>>,
+    pub relations: HashMap<RelationName<'s>, Relation<'s>>,
+    pub instances: InstanceTable<'s>,
+    pub methods: HashMap<FunctionName<'s>, RelationName<'s>>,
 }
 
 pub type Symbols<'s> = Symbols_<'s, Function<'s>>;
 
 impl<'s, F> Symbols_<'s, F> {
-    pub fn function_names(&self) -> impl Iterator<Item = &str> {
-        self.functions.keys().map(|x| &x[..])
-    }
-    pub fn get_constructor(&self, name: &str) -> Option<&Constructor<'s>> {
-        self.constructors.get(name)
-    }
-    pub fn constructor(&self, name: &str) -> &Constructor<'s> {
-        self.constructors.get(name).unwrap()
-    }
-    pub fn get_data(&self, name: &str) -> Option<&Data<'s>> {
-        self.datas.get(name)
-    }
-    pub fn data(&self, name: &str) -> &Data<'s> {
-        self.datas.get(name).unwrap()
-    }
-    pub fn function(&self, name: &str) -> &F {
-        self.functions.get(name).unwrap()
-    }
-    pub fn get_function(&self, name: &str) -> Option<&F> {
-        self.functions.get(name)
-    }
-
     pub fn validate_type(&self, type_: &Type<'s>, meta: &Meta) -> Result<(), miette::Report> {
         use crate::errors;
         use TypeNode::*;
         match &type_.node {
             Generic(template, args) => {
-                if let None = self.get_data(&template) {
-                    return Err(miette::Report::new(errors::ConstructorNotFound::new(
-                        &template, meta,
+                if let None = self.datas.get(&template) {
+                    return Err(miette::Report::new(errors::DataNotFound::new(
+                        *template, meta,
                     )));
                 }
-                if args.len() != self.data(&template).kind_arity {
+                if args.len() != self.datas.get(&template).unwrap().kind_arity {
                     return Err(miette::Report::new(errors::WrongNumberOfArgs::new(
-                        self.data(&template).kind_arity,
+                        self.datas.get(&template).unwrap().kind_arity,
                         meta,
                     )));
+                }
+                for t in args {
+                    self.validate_type(t, meta)?;
                 }
                 Ok(())
             }
@@ -837,6 +1150,25 @@ impl<'s, F> Symbols_<'s, F> {
             Primitive(_) | Var(_) | Unit | Never | WildCard => Ok(()),
         }
     }
+    pub fn validate_constrain(&self, c: &Constrain<'s>) -> Result<(), miette::Report> {
+        use crate::errors;
+        if !self.relations.contains_key(&c.rel_name) {
+            return Err(miette::Report::new(errors::RelationNonExists::new(&c.meta)));
+        }
+
+        let rel_arity = self.relations[&c.rel_name].arity;
+        if rel_arity != c.args.len() {
+            return Err(miette::Report::new(errors::RelationArityWrong::new(
+                &c.meta, rel_arity,
+            )));
+        }
+
+        for t in c.args.iter() {
+            self.validate_type(t, &c.meta)?;
+        }
+
+        Ok(())
+    }
     pub fn validate_callable_type(
         &self,
         type_: &CallableType<'s>,
@@ -847,10 +1179,6 @@ impl<'s, F> Symbols_<'s, F> {
         }
         self.validate_type(&type_.ret, meta)
     }
-
-    pub fn get_builtin(&self, name: &str) -> Option<&BuiltinFunction<'s>> {
-        self.builtins.get(name)
-    }
 }
 
 impl<'s, F> Symbols_<'s, F> {
@@ -860,19 +1188,10 @@ impl<'s, F> Symbols_<'s, F> {
             constructors: HashMap::new(),
             datas: HashMap::new(),
             builtins: HashMap::new(),
+            relations: HashMap::new(),
+            instances: InstanceTable::new(),
+            methods: HashMap::new(),
         }
-    }
-    pub fn add_function(&mut self, name: FunctionId, f: F) {
-        self.functions.insert(name, f);
-    }
-    pub fn add_constructor(&mut self, name: &'s str, c: Constructor<'s>) {
-        self.constructors.insert(name, c);
-    }
-    pub fn add_data(&mut self, name: &'s str, d: Data<'s>) {
-        self.datas.insert(name, d);
-    }
-    pub fn add_builtin(&mut self, name: &'s str, f: BuiltinFunction<'s>) {
-        self.builtins.insert(name, f);
     }
 }
 

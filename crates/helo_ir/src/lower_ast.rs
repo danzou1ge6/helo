@@ -1,6 +1,11 @@
 use crate::ir;
 use helo_parse::ast;
+use helo_parse::constrain;
+use helo_parse::errors::ManyError;
+use helo_parse::inferer;
 use helo_parse::typed;
+
+use inferer::Inferer;
 
 pub struct Context {
     /// Count of ir locals, NOT ast locals
@@ -35,17 +40,40 @@ impl Context {
 }
 
 pub fn lower_function<'s>(
-    fid: &ast::FunctionId,
+    fid: &ast::FunctionId<'s>,
+    inferer: &Inferer<'s>,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
-) -> ir::Function {
+    e: &mut ManyError,
+) -> ir::FunctionId<'s> {
+    let ir_fid = ir::FunctionId {
+        ast_id: fid.clone(),
+        type_args: inferer.export_var_store(),
+    };
+
+    if function_table.reserved(&ir_fid) {
+        return ir_fid;
+    }
+    function_table.reserve(ir_fid.clone());
+
     let f = symbols.function(fid);
     let mut lower_ctx = Context::new();
-    let f_name_id = str_table.add(fid.clone());
-    lower_ctx.with_new_function(f.local_cnt, f.captures.len(), |lower_ctx| {
-        let body = lower_expr(f.body, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let f_name_id = str_table.add(fid.to_string(&symbols.instances));
+    let ir_f = lower_ctx.with_new_function(f.local_cnt, f.captures.len(), |lower_ctx| {
+        let body = lower_expr(
+            f.body,
+            inferer,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+            e,
+        );
         ir::Function {
             local_cnt: lower_ctx.local_cnt,
             arity: f.type_.params.len() + f.type_.captures.len(),
@@ -54,21 +82,47 @@ pub fn lower_function<'s>(
             name: f_name_id,
             has_return: !f.type_.ret.node.is_unit(),
         }
-    })
+    });
+    
+    function_table.insert(ir_fid.clone(), ir_f);
+    ir_fid
 }
 
 fn lower_stmt<'s>(
     stmt: &typed::Stmt,
+    inferer: &Inferer<'s>,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
     match &stmt.node {
         typed::StmtNode::If { test, then } => {
-            let test = lower_expr(*test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-            let then = lower_expr(*then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let test = lower_expr(
+                *test,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
+            let then = lower_expr(
+                *then,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             ir_nodes.push(ir::Expr::new(
                 ir::ExprNode::While { test, then },
                 (&stmt.meta).into(),
@@ -76,15 +130,45 @@ fn lower_stmt<'s>(
         }
 
         typed::StmtNode::While { test, then } => {
-            let test = lower_expr(*test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-            let then = lower_expr(*then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let test = lower_expr(
+                *test,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
+            let then = lower_expr(
+                *then,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             ir_nodes.push(ir::Expr::new(
                 ir::ExprNode::While { test, then },
                 (&stmt.meta).into(),
             ))
         }
         typed::StmtNode::Expr(expr) => {
-            let expr = lower_expr(*expr, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let expr = lower_expr(
+                *expr,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             expr
         }
     }
@@ -92,31 +176,59 @@ fn lower_stmt<'s>(
 
 fn lower_seq<'s>(
     stmts: &[typed::Stmt],
+    inferer: &Inferer<'s>,
     result: &Option<typed::ExprId>,
     meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
     let stmts = stmts
         .iter()
-        .map(|stmt| lower_stmt(stmt, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
+        .map(|stmt| {
+            lower_stmt(
+                stmt,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            )
+        })
         .collect();
-    let result = result
-        .as_ref()
-        .map(|r| lower_expr(*r, symbols, typed_nodes, ir_nodes, str_table, lower_ctx));
+    let result = result.as_ref().map(|r| {
+        lower_expr(
+            *r,
+            inferer,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+            e,
+        )
+    });
     ir_nodes.push(ir::Expr::new(ir::ExprNode::Seq(stmts, result), meta.into()))
 }
 
 fn lower_expr<'s>(
     id: typed::ExprId,
+    inferer: &Inferer<'s>,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
     let expr = &typed_nodes[id];
     use typed::ExprNode::*;
@@ -124,78 +236,145 @@ fn lower_expr<'s>(
         Apply { callee, args } => lower_apply(
             *callee,
             &args[..],
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         IfElse { test, then, else_ } => lower_if_else(
             *test,
             *then,
             *else_,
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         Case { operand, arms } => lower_case(
             *operand,
             &arms[..],
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         LetIn { bind, value, in_ } => lower_let_bind(
             *bind,
             *value,
             *in_,
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         LetPatIn { bind, value, in_ } => lower_let_pat(
             *value,
             bind,
             *in_,
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
-        MakeClosure(fid) => lower_make_closure(fid, &expr.meta, symbols, ir_nodes, &lower_ctx),
+        MakeClosure(fid, type_) => lower_make_closure(
+            fid,
+            inferer,
+            type_,
+            &expr.meta,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            &lower_ctx,
+            e,
+        ),
         Constructor(name) => {
-            let tag = symbols.tag_for(&name);
+            let tag = symbols.tag_for(*name);
             let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
             ir_nodes.push(expr)
         }
-        UserFunction(fid) => lower_user_function(fid, &expr.meta, ir_nodes),
-        Builtin(name) => lower_builtin(&name, &expr.meta, ir_nodes),
-        Tuple(elem) => lower_tuple(
-            &elem[..],
+        UserFunction(fid) => lower_user_function(
+            fid,
+            &expr.type_,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            e,
+        ),
+        UnresolvedMethod {
+            f_name,
+            primary_constrain,
+            ..
+        } => lower_unresolved_method(
+            *f_name,
+            primary_constrain,
+            inferer,
+            &expr.type_,
+            &expr.meta,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            e,
+        ),
+        Builtin(name) => lower_builtin(name.clone(), &expr.meta, ir_nodes),
+        Tuple(elem) => lower_tuple(
+            &elem[..],
+            inferer,
+            &expr.meta,
+            symbols,
+            typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         Captured { id, is_self } => lower_captured(*id, *is_self, &expr.meta, ir_nodes),
         Constant(c) => lower_constant(c.clone(), &expr.meta, ir_nodes, str_table),
         Local(id) => lower_local(*id, &expr.meta, ir_nodes, lower_ctx),
         AssignLocal(local, value) => {
-            let value = lower_expr(*value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let value = lower_expr(
+                *value,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             let r = ir::Expr::new(
                 ir::ExprNode::Assign(map_local(*local, &lower_ctx), value),
                 (&expr.meta).into(),
@@ -203,7 +382,17 @@ fn lower_expr<'s>(
             ir_nodes.push(r)
         }
         AssignCaptured(captured, value) => {
-            let value = lower_expr(*value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let value = lower_expr(
+                *value,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             let r = ir::Expr::new(
                 ir::ExprNode::Assign(map_captured(*captured, &lower_ctx), value),
                 (&expr.meta).into(),
@@ -212,13 +401,16 @@ fn lower_expr<'s>(
         }
         Seq(stmts, result) => lower_seq(
             &stmts,
+            inferer,
             result,
             &expr.meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         ),
         Never => panic!("Typed AST with Never nodes can not be lowered to IR"),
     }
@@ -303,9 +495,11 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::Expr<'s> {
         let mut cases = Vec::new();
 
@@ -340,9 +534,11 @@ mod lower_case {
                     switch_meta,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 );
                 cases.push((first_immediate, switch_for_branch));
             } else {
@@ -356,9 +552,11 @@ mod lower_case {
             switch_meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         );
 
         ir::Expr::new(
@@ -374,9 +572,11 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::Expr<'s> {
         let mut cases = Vec::new();
         let local_for_operand = lower_ctx.new_local();
@@ -430,9 +630,11 @@ mod lower_case {
                     switch_meta,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 );
                 let let_in_for_branch = ir::Expr::new(
                     ir::ExprNode::LetBind {
@@ -456,9 +658,11 @@ mod lower_case {
             switch_meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         );
 
         ir::Expr::new(
@@ -474,9 +678,11 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::Expr<'s> {
         let tuple_width = rows
             .iter()
@@ -513,9 +719,11 @@ mod lower_case {
             switch_meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         );
 
         let let_in_for_tuple = ir::Expr::new(
@@ -598,9 +806,11 @@ mod lower_case {
         switch_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::ExprId {
         // no row: panic
         if rows.len() == 0 {
@@ -629,9 +839,11 @@ mod lower_case {
                     switch_meta,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 ),
                 Pattern::Literal(_, _) => build_primitive_switch(
                     operand,
@@ -640,9 +852,11 @@ mod lower_case {
                     switch_meta,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 ),
                 Pattern::Tuple(_, _) => build_tuple_deconstruct(
                     operand,
@@ -651,9 +865,11 @@ mod lower_case {
                     switch_meta,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 ),
                 _ => unreachable!(),
             };
@@ -665,9 +881,11 @@ mod lower_case {
                 switch_meta,
                 symbols,
                 typed_nodes,
+                function_table,
                 ir_nodes,
                 str_table,
                 lower_ctx,
+                e,
             )
         }
     }
@@ -675,20 +893,26 @@ mod lower_case {
     pub fn lower_case<'s>(
         operand: typed::ExprId,
         amrs: &[typed::CaseArm<'s>],
+        inferer: &Inferer<'s>,
         case_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::ExprId {
         let operand = lower_expr(
             operand,
+            inferer,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         );
         let header = VecDeque::from([operand]);
 
@@ -698,16 +922,29 @@ mod lower_case {
                 patterns: VecDeque::from([Some(arm.pattern.clone())]),
                 result: lower_expr(
                     arm.result,
+                    inferer,
                     symbols,
                     typed_nodes,
+                    function_table,
                     ir_nodes,
                     str_table,
                     lower_ctx,
+                    e,
                 ),
                 binds: vec![],
-                guard: arm
-                    .guard
-                    .map(|g| lower_expr(g, symbols, typed_nodes, ir_nodes, str_table, lower_ctx)),
+                guard: arm.guard.map(|g| {
+                    lower_expr(
+                        g,
+                        inferer,
+                        symbols,
+                        typed_nodes,
+                        function_table,
+                        ir_nodes,
+                        str_table,
+                        lower_ctx,
+                        e,
+                    )
+                }),
             })
             .collect();
 
@@ -717,9 +954,11 @@ mod lower_case {
             case_meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         )
     }
 
@@ -727,20 +966,26 @@ mod lower_case {
         operand: typed::ExprId,
         pattern: &ast::Pattern<'s>,
         in_: typed::ExprId,
+        inferer: &Inferer<'s>,
         case_meta: &ast::Meta,
         symbols: &typed::Symbols<'s>,
         typed_nodes: &typed::ExprHeap<'s>,
+        function_table: &mut ir::FunctionTable<'s>,
         ir_nodes: &mut ir::ExprHeap<'s>,
         str_table: &mut ir::StrTable,
         lower_ctx: &mut Context,
+        e: &mut ManyError,
     ) -> ir::ExprId {
         let operand = lower_expr(
             operand,
+            inferer,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         );
         let header = VecDeque::from([operand]);
 
@@ -748,7 +993,17 @@ mod lower_case {
             patterns: VecDeque::from([Some(pattern.clone())]),
             guard: None,
             binds: vec![],
-            result: lower_expr(in_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx),
+            result: lower_expr(
+                in_,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            ),
         }];
 
         lower_table(
@@ -757,9 +1012,11 @@ mod lower_case {
             case_meta,
             symbols,
             typed_nodes,
+            function_table,
             ir_nodes,
             str_table,
             lower_ctx,
+            e,
         )
     }
 }
@@ -770,15 +1027,38 @@ fn lower_let_bind<'s>(
     local: ast::LocalId,
     value: typed::ExprId,
     in_: typed::ExprId,
+    inferer: &Inferer<'s>,
     let_meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
-    let value = lower_expr(value, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-    let in_ = lower_expr(in_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let value = lower_expr(
+        value,
+        inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
+    let in_ = lower_expr(
+        in_,
+        inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
 
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::LetBind {
@@ -794,16 +1074,49 @@ fn lower_if_else<'s>(
     test: typed::ExprId,
     then: typed::ExprId,
     else_: typed::ExprId,
+    inferer: &Inferer<'s>,
     if_else_meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
-    let test = lower_expr(test, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-    let then = lower_expr(then, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
-    let else_ = lower_expr(else_, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+    let test = lower_expr(
+        test,
+        inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
+    let then = lower_expr(
+        then,
+        inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
+    let else_ = lower_expr(
+        else_,
+        inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
 
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::IfElse { test, then, else_ },
@@ -813,16 +1126,31 @@ fn lower_if_else<'s>(
 
 fn lower_tuple<'s>(
     elems: &[typed::ExprId],
+    inferer: &Inferer<'s>,
     tuple_meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
     let elems: Vec<_> = elems
         .iter()
-        .map(|id| lower_expr(*id, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
+        .map(|id| {
+            lower_expr(
+                *id,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            )
+        })
         .collect();
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::MakeTuple(elems),
@@ -833,14 +1161,20 @@ fn lower_tuple<'s>(
 fn lower_apply<'s>(
     callee: typed::ExprId,
     args: &[typed::ExprId],
+    inferer: &Inferer<'s>,
     call_meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
     lower_ctx: &mut Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
-    if matches!(&typed_nodes[callee].node, typed::ExprNode::Builtin("panic")) {
+    if matches!(
+        &typed_nodes[callee].node,
+        typed::ExprNode::Builtin(ast::BuiltinFunctionName("panic"))
+    ) {
         match &typed_nodes[args[0]].node {
             typed::ExprNode::Constant(c) => match c {
                 ast::Constant::Str(msg) => {
@@ -854,17 +1188,39 @@ fn lower_apply<'s>(
 
     let args: Vec<_> = args
         .iter()
-        .map(|arg| lower_expr(*arg, symbols, typed_nodes, ir_nodes, str_table, lower_ctx))
+        .map(|arg| {
+            lower_expr(
+                *arg,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            )
+        })
         .collect();
 
     let expr = match &typed_nodes[callee].node {
         typed::ExprNode::Constructor(constructor) => {
-            let tag = symbols.tag_for(*&constructor);
+            let tag = symbols.tag_for(*constructor);
             ir::Expr::new(ir::ExprNode::MakeTagged(tag, args), call_meta.into())
         }
         _ => {
             let callee_impure = typed_nodes[callee].type_.node.impure();
-            let callee = lower_expr(callee, symbols, typed_nodes, ir_nodes, str_table, lower_ctx);
+            let callee = lower_expr(
+                callee,
+                inferer,
+                symbols,
+                typed_nodes,
+                function_table,
+                ir_nodes,
+                str_table,
+                lower_ctx,
+                e,
+            );
             ir::Expr::new(
                 ir::ExprNode::Apply {
                     callee,
@@ -893,7 +1249,7 @@ fn lower_panic<'s>(
 }
 
 fn lower_builtin<'s>(
-    name: &'s str,
+    name: ast::BuiltinFunctionName<'s>,
     builtin_meta: &ast::Meta,
     ir_nodes: &mut ir::ExprHeap<'s>,
 ) -> ir::ExprId {
@@ -904,12 +1260,41 @@ fn lower_builtin<'s>(
 }
 
 fn lower_user_function<'s>(
-    name: &'s str,
+    id: &ast::FunctionId<'s>,
+    type_: &ast::Type<'s>,
     global_meta: &ast::Meta,
-    ir_nodes: &mut ir::ExprHeap,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+    e: &mut ManyError,
 ) -> ir::ExprId {
+    let f_type = match &type_.node {
+        ast::TypeNode::Callable(t) | ast::TypeNode::ImpureCallable(t) => t,
+        _ => panic!("UserFunction nodes must have callable types"),
+    };
+    let f = symbols.function(id);
+    let inferer = unify_simple(&f.type_, &f_type.clone().into(), f.var_cnt).unwrap_or_else(|_| {
+        panic!(
+            "cannot compute type parameters of {} from {}",
+            f.type_, f_type
+        )
+    });
+
+    let ir_fid = lower_function(
+        id,
+        &inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        e,
+    );
+
     ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::UserFunction(name.to_string()),
+        ir::ExprNode::UserFunction(ir_fid),
         global_meta.into(),
     ))
 }
@@ -964,17 +1349,62 @@ fn lower_local<'s>(
     ))
 }
 
+fn unify_simple<'s>(
+    template: &ast::FunctionType<'s>,
+    instance: &ast::FunctionType<'s>,
+    var_cnt: usize,
+) -> Result<Inferer<'s>, ()> {
+    let mut inferer = Inferer::new();
+    let _ = inferer.alloc_vars(var_cnt);
+    inferer
+        .unify_list_no_rollback_lock::<true>(instance.captures.iter(), template.captures.iter())?;
+    inferer.unify_callable_no_rallback_lock::<true>(
+        &instance.params,
+        &instance.ret,
+        &template.params,
+        &template.ret,
+    )?;
+    Ok(inferer)
+}
+
 fn lower_make_closure<'s>(
-    fid: &ast::FunctionId,
+    fid: &ast::FunctionId<'s>,
+    inferer: &Inferer<'s>,
+    type_: &ast::FunctionType<'s>,
     closure_meta: &ast::Meta,
-    symbols: &typed::Symbols,
-    ir_nodes: &mut ir::ExprHeap,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
     lower_ctx: &Context,
+    e: &mut ManyError,
 ) -> ir::ExprId {
     let f = symbols.function(fid);
+
+    let mut inferer = inferer.clone();
+    let type_ = inferer.resolve(type_, closure_meta).unwrap();
+    let inferer_sub = unify_simple(&f.type_, &type_, f.var_cnt).unwrap_or_else(|_| {
+        panic!(
+            "cannot compute type parameters of {} from {}",
+            f.type_, type_
+        )
+    });
+
+    let ir_fid = lower_function(
+        fid,
+        &inferer_sub,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        e,
+    );
+
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::MakeClosure(
-            fid.clone(),
+            ir_fid,
             f.captures
                 .iter()
                 .copied()
@@ -983,4 +1413,50 @@ fn lower_make_closure<'s>(
         ),
         closure_meta.into(),
     ))
+}
+
+fn lower_unresolved_method<'s>(
+    f_name: ast::FunctionName<'s>,
+    primary_constrain: &ast::Constrain<'s>,
+    inferer: &Inferer<'s>,
+    type_: &ast::Type<'s>,
+    meta: &ast::Meta,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+    e: &mut ManyError,
+) -> ir::ExprId {
+
+    match constrain::Assumptions::empty().which_instance_no_dependent(
+        inferer.clone(),
+        primary_constrain,
+        &symbols.instances,
+        &symbols.relations,
+    ) {
+        Ok((ins, _)) => lower_user_function(
+            &ast::FunctionId::of_method(ins, f_name),
+            &inferer.resolve(type_, meta).unwrap(),
+            meta,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            e,
+        ),
+        Err(constrain::Error::Fail) => panic!("shouldn't fail"),
+        Err(constrain::Error::Resolve(_)) => panic!("shouldn't resolve fail"),
+        Err(constrain::Error::TooManyHit(hits)) => {
+            let instance_metas = hits
+                .iter()
+                .map(|id| symbols.instances.get(id).unwrap().meta.clone());
+            e.push(helo_parse::errors::TooManyHitMatchingInstance::new(
+                instance_metas,
+                &primary_constrain,
+            ));
+            ir_nodes.push(ir::Expr::new(ir::ExprNode::Never, meta.into()))
+        }
+    }
 }

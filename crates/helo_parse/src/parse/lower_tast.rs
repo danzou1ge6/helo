@@ -1,11 +1,126 @@
+use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use super::tast;
 use crate::ast;
+use crate::ast::TypeApply;
+use crate::constrain::Assumptions;
 use crate::errors;
+use crate::inferer;
 use ast::Meta;
 
 use super::context::Resolver;
+
+fn validate_method_sig<'s>(
+    ins_id: &ast::InstanceId<'s>,
+    f_name: ast::FunctionName<'s>,
+    f: &mut tast::Function<'s>,
+    instances: &ast::InstanceTable<'s>,
+    relations: &HashMap<ast::RelationName<'s>, ast::Relation<'s>>,
+) -> Result<(), errors::MethodTypeAnnotationNotSupported> {
+    let rel = &relations[&ins_id.rel_name];
+    let ins = instances.get(ins_id).unwrap();
+
+    // Signature that the method should have
+    let f_sig = rel.f_sigs[&f_name].substitute_vars(|id| ins.rel.args.get(id.0).cloned()
+        .unwrap_or_else(|| ast::Type::new_var(id)));
+
+    // Programmer provided type
+    if f.type_.is_some() {
+        Err(errors::MethodTypeAnnotationNotSupported::new(&f.meta))
+    } else {
+        f.type_ = Some(f_sig.type_);
+        f.constrains = f_sig.constrains;
+        f.var_cnt = f_sig.var_cnt;
+        Ok(())
+    }
+}
+
+fn check_symbols<'s>(tast_symbols: &tast::Symbols<'s>, e: &mut errors::ManyError) {
+    // Check types and relations written in relations are valid
+    tast_symbols.relations.iter().for_each(|(_, rel)| {
+        for c in rel.constrains.iter() {
+            let _ = tast_symbols
+                .validate_constrain(c)
+                .map_err(|err| e.push_boxed(err));
+        }
+        for (_, sig) in rel.f_sigs.iter() {
+            let _ = tast_symbols
+                .validate_callable_type(&sig.type_, &sig.meta)
+                .map_err(|err| e.push_boxed(err));
+            for c in sig.constrains.iter() {
+                let _ = tast_symbols
+                    .validate_constrain(c)
+                    .map_err(|err| e.push_boxed(err));
+            }
+        }
+    });
+
+    // Check types written in instances are valid
+    tast_symbols.instances.iter().for_each(|(_, ins)| {
+        for c in ins.constrains.iter() {
+            let _ = tast_symbols
+                .validate_constrain(c)
+                .map_err(|err| e.push_boxed(err));
+        }
+        let _ = tast_symbols
+            .validate_constrain(&ins.rel)
+            .map_err(|err| e.push_boxed(err));
+    });
+
+    // Check method has been implemented 
+    tast_symbols.instances.iter().for_each(|(ins_id, ins)| {
+        if let Some(rel) = &tast_symbols.relations.get(&ins.rel_name()) {
+            rel.f_sigs.keys().for_each(|f_name| {
+                let f_id = ast::FunctionId::of_method(ins_id.clone(), *f_name);
+
+                if !tast_symbols.functions.contains_key(&f_id) {
+                    e.push(errors::MethodNotImplemented::new(*f_name, &ins.meta))
+                }
+            });
+        }
+    });
+
+    // Check relation constrain requirements
+    tast_symbols.instances.iter().for_each(|(_, ins)| {
+        if let Some(rel) = tast_symbols.relations.get(&ins.rel_name()) {
+            let mut inferer = inferer::Inferer::new();
+            let _ = inferer.alloc_vars(ins.var_cnt);
+            let rel_constrains = rel
+                .constrains
+                .iter()
+                .map(|c| c.substitute_vars(|id| ins.rel.args[id.0].clone()));
+
+            let assumptions: Assumptions = ins.constrains.iter().cloned().collect();
+
+            rel_constrains.for_each(|c| {
+                match assumptions.which_instance(
+                    inferer.clone(),
+                    &c,
+                    &tast_symbols.instances,
+                    &tast_symbols.relations,
+                ) {
+                    Ok(_) => (),
+                    Err(_) => e.push(errors::RelationConstrainUnsatisfied::new(&c, &ins.meta)),
+                }
+            });
+        }
+    });
+
+    // Check function type annotations and constrains
+    tast_symbols.functions.iter().for_each(|(_, f)| {
+        if let Some(type_) = &f.type_ {
+            let _ = tast_symbols
+                .validate_callable_type(type_, &f.meta)
+                .map_err(|err| e.push_boxed(err));
+        }
+        for c in f.constrains.iter() {
+            let _ = tast_symbols
+                .validate_constrain(c)
+                .map_err(|err| e.push_boxed(err));
+        }
+    });
+}
 
 pub fn lower_symbols<'s>(
     tast_symbols: tast::Symbols<'s>,
@@ -13,9 +128,36 @@ pub fn lower_symbols<'s>(
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) {
-    for (fid, f) in tast_symbols.functions.into_iter() {
+    check_symbols(&tast_symbols, e);
+
+    // Lower each function
+    for (fid, mut f) in tast_symbols.functions.into_iter() {
+        // Some checks for methods
+        if let ast::FunctionId::Method(ref ins_id, ref f_name) = fid {
+            // Check if method exists
+            if let Some(rel) = tast_symbols.relations.get(&ins_id.rel_name) {
+                if !rel.f_sigs.contains_key(&ast::FunctionName(f_name)) {
+                    e.push(errors::UndeclaredMethod::new(&f.meta));
+                    continue;
+                }
+            }
+
+            // Check metdho type and constrain correct
+            if let Err(err) = validate_method_sig(
+                &ins_id,
+                ast::FunctionName(&f_name),
+                &mut f,
+                &tast_symbols.instances,
+                &tast_symbols.relations,
+            ) {
+                e.push(err);
+                continue;
+            }
+        }
+
+        // Good to lower
         let ast_f = lower_function(f, symbols, ast_heap, e);
-        symbols.add_function(fid, ast_f);
+        symbols.functions.insert(fid, ast_f);
     }
 
     for (data_name, data) in tast_symbols.datas.into_iter() {
@@ -25,20 +167,24 @@ pub fn lower_symbols<'s>(
                 data.constructors.len(),
             ))
         }
-        symbols.add_data(data_name, data);
+        symbols.datas.insert(data_name, data);
     }
 
     for (constructor_name, constructor) in tast_symbols.constructors.into_iter() {
-        if !constructor_name.chars().next().unwrap().is_uppercase() {
+        if !constructor_name.0.chars().next().unwrap().is_uppercase() {
             e.push(errors::ConstructorNameNotUppercase::new(&constructor.meta));
         }
-        symbols.add_constructor(constructor_name, constructor);
+        symbols.constructors.insert(constructor_name, constructor);
     }
+
+    symbols.instances = tast_symbols.instances;
+    symbols.methods = tast_symbols.methods;
+    symbols.relations = tast_symbols.relations;
 }
 
 fn lower_function<'s>(
     f: tast::Function<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::Function<'s> {
@@ -67,6 +213,7 @@ fn lower_function<'s>(
         captures: Vec::new(),
         captures_meta: Vec::new(),
         pure: f.pure,
+        constrains: f.constrains,
     };
     ast_f
 }
@@ -96,7 +243,7 @@ fn lower_constant<'s>(
 fn lower_expr<'s>(
     expr: tast::Expr<'s>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -148,7 +295,7 @@ fn lower_assign<'s>(
     from: tast::Expr<'s>,
     meta: Meta,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -161,7 +308,7 @@ fn lower_assign<'s>(
 fn lower_stmt<'s>(
     stmt: tast::Stmt<'s>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::Stmt {
@@ -190,7 +337,7 @@ fn lower_seq<'s>(
     result: Option<Box<tast::Expr<'s>>>,
     result_meta: ast::Meta,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -258,7 +405,7 @@ fn lower_apply<'s>(
     apply_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -285,7 +432,7 @@ fn lower_if_else<'s>(
     if_else_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -307,7 +454,7 @@ fn lower_pattern<'s>(
     use tast::Pattern::*;
     match pat {
         Construct(template, args, meta) => ast::Pattern::Construct(
-            &template,
+            ast::ConstructorName(template),
             args.into_iter()
                 .map(|p| lower_pattern(p, resolver, e))
                 .collect(),
@@ -331,7 +478,7 @@ fn lower_let_pat<'s>(
     let_pat_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -357,7 +504,7 @@ fn lower_case_of<'s>(
     case_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -393,7 +540,7 @@ fn lower_let_fn<'s>(
     let_fn_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -419,9 +566,10 @@ fn lower_let_fn<'s>(
             captures,
             captures_meta,
             pure: f.pure,
+            constrains: f.constrains,
         };
-        let closure_fid = f.meta.closure_id();
-        symbols.add_function(closure_fid.clone(), ast_f);
+        let closure_fid = ast::FunctionId::of_closure_at(&f.meta);
+        symbols.functions.insert(closure_fid.clone(), ast_f);
 
         let closure_expr = ast_heap.push(ast::Expr::new_untyped(
             ast::ExprNode::MakeClosure(closure_fid),
@@ -447,7 +595,7 @@ fn lower_tuple<'s>(
     tuple_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    symbols: &mut ast::Symbols,
+    symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
@@ -467,7 +615,7 @@ fn lower_identifier<'s>(
     id_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
     resolver: &mut Resolver<'s>,
-    _symbols: &mut ast::Symbols,
+    _symbols: &mut ast::Symbols<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     _e: &mut errors::ManyError,
 ) -> ast::ExprId {
