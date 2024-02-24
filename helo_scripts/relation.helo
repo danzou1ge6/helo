@@ -59,11 +59,16 @@ instance Eat Mickey,Rice,MickeyPoop
     end
 end
 
+
+/* test comment 1 */
+
 routine main =
     let neko = Neko "1" in
-    let rice = Rice "3" in
+    /* test comment 2 */
+    let rice = Rice "3" /* test comment 3 */ in
     let bacteria = Bacteria "4" in
     let mickey = Mickey "2" in begin
+        /* comment test 4 */
         let neko_poop = eat neko,mickey;
         let mickey_poop = eat mickey,rice;
         eat bacteria,neko_poop

@@ -815,6 +815,12 @@ fn expression_item<'s>(s: &'s str, ctx: &Source) -> EResult<'s> {
     )(s)
 }
 
+fn comments<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let (s, comment) = nbyte::take_until("*/")(s)?;
+    let (s, _) = trailing_space_tag("*/")(s)?;
+    Ok((s, comment))
+}
+
 fn expression_parenthesed<'s>(
     s: &'s str,
     ctx: &Source,
@@ -849,7 +855,10 @@ fn prefix_expression<'s>(
     generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     // Parenthesed
-    if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
+    if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("/*"))(s)? {
+        let (s2, _) = comments(s1)?;
+        prefix_expression(s2, ctx, precedence_table, generic_params)
+    } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
         let (s1, _) = empty(s1)?;
         expression_parenthesed(s1, ctx, precedence_table, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("if"))(s)? {
@@ -977,6 +986,13 @@ fn experssion_with_precedence<'s>(
         if let (_, Some(_)) = ncomb::opt(expression_boundary)(s)? {
             break;
         }
+        // Comments
+        if let (s1, Some(_)) = ncomb::opt(nbyte::tag("/*"))(s)? {
+            let (s1, _) = comments(s1)?;
+            s = s1;
+            continue;
+        }
+
         // Annotate `lhs` with some user provided type
         if let (s1, Some(_)) = ncomb::opt(nbyte::tag(":"))(s)? {
             let (s1, _) = empty(s1)?;
@@ -1100,7 +1116,10 @@ fn stmt<'s>(
     precedence_table: &PrecedenceTable<'s>,
     generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
-    if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("let"))(s)? {
+    if let (s1, Some(_)) = ncomb::opt(nbyte::tag("/*"))(s)? {
+        let (s1, _) = comments(s1)?;
+        stmt(s1, ctx, precedence_table, generic_params)
+    } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("let"))(s)? {
         decl_stmt(s1, ctx, precedence_table, generic_params)
     } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("if"))(s)? {
         if_stmt(s1, ctx, precedence_table, generic_params)
@@ -1423,6 +1442,12 @@ fn parse_ast_<'s>(
         let (mut s, _) = empty(s)?;
 
         while s.len() > 0 {
+            if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("/*"))(s)? {
+                let (s1, _) = comments(s1)?;
+                s = s1;
+                continue;
+            }
+
             if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("data"))(s)? {
                 let (s2, (data_name, data, constructors)) = data(s1, ctx)?;
                 symbols.datas.insert(ast::DataName(data_name), data);
