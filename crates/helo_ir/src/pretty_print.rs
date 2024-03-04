@@ -1,6 +1,5 @@
 use crate::{ir, lir::BlockTopology};
 use helo_parse::ast;
-use pretty::{self};
 
 pub fn pretty_ir_function<'s, 'b, D, A>(
     f: &ir::Function,
@@ -28,7 +27,7 @@ pub fn pretty_ir<'s, 'b, D, A>(
     id: ir::ExprId,
     nodes: &ir::ExprHeap<'s>,
     str_list: &ir::StrList,
-    instances: &ast::InstanceTable<'s>,
+    instances: &ast::InstanceIdTable<'s, ast::Instance<'s>>,
     allocator: &'b D,
 ) -> pretty::DocBuilder<'b, D, A>
 where
@@ -64,7 +63,7 @@ where
                         v.iter().map(|(tag, e)| {
                             allocator
                                 .text("| ")
-                                .append(allocator.text(tag.name().to_string()))
+                                .append(allocator.text(tag.name()))
                                 .append(" -> ")
                                 .append(pretty_ir(*e, nodes, str_list, instances, allocator))
                         }),
@@ -209,7 +208,7 @@ where
         MakeTagged(tag, elems) => allocator
             .text("(MAKE_TAGGED")
             .append(allocator.softline())
-            .append(allocator.text(tag.name().to_string()).indent(2))
+            .append(allocator.text(tag.name()).indent(2))
             .append(allocator.softline())
             .append(
                 allocator

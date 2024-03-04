@@ -83,7 +83,7 @@ pub fn lower_function<'s>(
             has_return: !f.type_.ret.node.is_unit(),
         }
     });
-    
+
     function_table.insert(ir_fid.clone(), ir_f);
     ir_fid
 }
@@ -315,7 +315,7 @@ fn lower_expr<'s>(
             e,
         ),
         Constructor(name) => {
-            let tag = symbols.tag_for(*name);
+            let tag = symbols.tag_for(name.clone());
             let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
             ir_nodes.push(expr)
         }
@@ -335,7 +335,7 @@ fn lower_expr<'s>(
             primary_constrain,
             ..
         } => lower_unresolved_method(
-            *f_name,
+            f_name.clone(),
             primary_constrain,
             inferer,
             &expr.type_,
@@ -1171,19 +1171,18 @@ fn lower_apply<'s>(
     lower_ctx: &mut Context,
     e: &mut ManyError,
 ) -> ir::ExprId {
-    if matches!(
-        &typed_nodes[callee].node,
-        typed::ExprNode::Builtin(ast::BuiltinFunctionName("panic"))
-    ) {
-        match &typed_nodes[args[0]].node {
-            typed::ExprNode::Constant(c) => match c {
-                ast::Constant::Str(msg) => {
-                    return lower_panic(*&msg, call_meta, ir_nodes, str_table);
-                }
+    if let typed::ExprNode::Builtin(bn) = &typed_nodes[callee].node {
+        if bn.in_module(["Prelude"]) && bn.id() == "panic" {
+            match &typed_nodes[args[0]].node {
+                typed::ExprNode::Constant(c) => match c {
+                    ast::Constant::Str(msg) => {
+                        return lower_panic(*&msg, call_meta, ir_nodes, str_table);
+                    }
+                    _ => unreachable!(),
+                },
                 _ => unreachable!(),
-            },
-            _ => unreachable!(),
-        };
+            };
+        }
     }
 
     let args: Vec<_> = args
@@ -1205,7 +1204,7 @@ fn lower_apply<'s>(
 
     let expr = match &typed_nodes[callee].node {
         typed::ExprNode::Constructor(constructor) => {
-            let tag = symbols.tag_for(*constructor);
+            let tag = symbols.tag_for(constructor.clone());
             ir::Expr::new(ir::ExprNode::MakeTagged(tag, args), call_meta.into())
         }
         _ => {
@@ -1382,7 +1381,7 @@ fn lower_make_closure<'s>(
 ) -> ir::ExprId {
     let f = symbols.function(fid);
 
-    let mut inferer = inferer.clone();
+    let inferer = inferer.clone();
     let type_ = inferer.resolve(type_, closure_meta).unwrap();
     let inferer_sub = unify_simple(&f.type_, &type_, f.var_cnt).unwrap_or_else(|_| {
         panic!(
@@ -1428,7 +1427,6 @@ fn lower_unresolved_method<'s>(
     str_table: &mut ir::StrTable,
     e: &mut ManyError,
 ) -> ir::ExprId {
-
     match constrain::Assumptions::empty().which_instance_no_dependent(
         inferer.clone(),
         primary_constrain,
@@ -1436,7 +1434,7 @@ fn lower_unresolved_method<'s>(
         &symbols.relations,
     ) {
         Ok((ins, _)) => lower_user_function(
-            &ast::FunctionId::of_method(ins, f_name),
+            &ast::FunctionId::of_method(ins, f_name.id()),
             &inferer.resolve(type_, meta).unwrap(),
             meta,
             symbols,

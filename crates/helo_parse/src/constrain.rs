@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use crate::ast::{self, Relation, RelationName};
+use crate::ast::{self, Relation, RelationName, Trie};
 use crate::errors::InfiniteType;
 use crate::inferer::Inferer;
-use ast::{Constrain, InstanceId, InstanceTable};
+use ast::{Constrain, InstanceId, InstanceIdTable};
 
 pub struct Assumptions<'s>(HashSet<Constrain<'s>>);
 
@@ -43,8 +43,8 @@ impl<'s> Assumptions<'s> {
         &self,
         mut inferer: Inferer<'s>,
         c: &Constrain<'s>,
-        instances: &InstanceTable<'s>,
-        relations: &HashMap<RelationName<'s>, Relation<'s>>,
+        instances: &InstanceIdTable<'s, ast::Instance<'s>>,
+        relations: &Trie<RelationName<'s>, Relation<'s>, &'s str>,
     ) -> Result<(Option<InstanceId<'s>>, Inferer<'s>), Error> {
         if self.contains(c, &mut inferer)? {
             return Ok((None, inferer));
@@ -100,7 +100,7 @@ impl<'s> Assumptions<'s> {
                             if let Ok(inferer1) = r {
                                 Some((
                                     InstanceId {
-                                        rel_name: c.rel_name,
+                                        rel_name: c.rel_name.clone(),
                                         n: i,
                                     },
                                     inferer1,
@@ -133,8 +133,8 @@ impl<'s> Assumptions<'s> {
         &self,
         inferer: Inferer<'s>,
         c: &Constrain<'s>,
-        instances: &InstanceTable<'s>,
-        relations: &HashMap<RelationName<'s>, Relation<'s>>,
+        instances: &InstanceIdTable<'s, ast::Instance<'s>>,
+        relations: &Trie<RelationName<'s>, Relation<'s>, &'s str>,
     ) -> Result<(InstanceId<'s>, Inferer<'s>), Error> {
         let matches = instances
             .of_rel(&c.rel_name)
@@ -156,7 +156,7 @@ impl<'s> Assumptions<'s> {
                     if let Ok(inferer1) = r {
                         Some((
                             InstanceId {
-                                rel_name: c.rel_name,
+                                rel_name: c.rel_name.clone(),
                                 n: i,
                             },
                             inferer1,

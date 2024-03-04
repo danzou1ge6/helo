@@ -105,6 +105,36 @@ impl Immediate {
     }
 }
 
+use builtins::BUILTINS;
+use helo_runtime::builtins;
+pub use helo_runtime::builtins::BuiltinId;
+
+pub struct BuiltinTable<'s> {
+    tab: HashMap<ast::BuiltinFunctionName<'s>, BuiltinId>,
+}
+
+impl<'s> BuiltinTable<'s> {
+    pub fn new() -> Self {
+        let mut tab = HashMap::new();
+        for (i, (mod_str, ident, _)) in BUILTINS.iter().enumerate() {
+            let mod_path = ast::Path::parse_simple(&mod_str);
+            let path = mod_path.pushed(&ident);
+            tab.insert(
+                ast::BuiltinFunctionName(path),
+                BuiltinId(i as u16),
+            );
+        }
+        Self { tab }
+    }
+    pub fn id_by_name(&self, name: &ast::BuiltinFunctionName<'_>) -> BuiltinId {
+        *self.tab.get(name).unwrap()
+    }
+    pub fn arity_by_name(&self, name: &ast::BuiltinFunctionName<'_>) -> usize {
+        let id = self.tab.get(name).unwrap();
+        builtins::get_arity(*id)
+    }
+}
+
 pub struct StrTable {
     cnt: usize,
     tab: HashMap<String, StrId>,
@@ -200,9 +230,6 @@ impl<'s> FunctionId<'s> {
             ast_id: id,
             type_args: inferer::TypeVarStore::empty(),
         }
-    }
-    pub fn main() -> Self {
-        Self::of_non_generic(ast::FunctionId::main())
     }
 }
 

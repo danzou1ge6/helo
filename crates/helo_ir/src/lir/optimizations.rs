@@ -51,7 +51,7 @@ mod dead_code_elimination {
 
     use super::Site;
     pub fn run(blocks: &mut ssa::SsaBlockHeap, temp_cnt: usize) {
-        let (_,  defs) = collect_uses_defs(blocks, temp_cnt);
+        let (_, defs) = collect_uses_defs(blocks, temp_cnt);
 
         let mut phi_markers: lir::BlockIdVec<Vec<bool>> = blocks
             .iter_id()
@@ -121,7 +121,14 @@ mod dead_code_elimination {
         for block_id in blocks.iter_id() {
             for (inst_idx, inst) in blocks[block_id].body.iter().enumerate() {
                 if !inst.functional() {
-                    mark_inst(block_id, inst_idx, &defs, &mut inst_markers, &mut phi_markers, blocks)
+                    mark_inst(
+                        block_id,
+                        inst_idx,
+                        &defs,
+                        &mut inst_markers,
+                        &mut phi_markers,
+                        blocks,
+                    )
                 }
             }
             if let Some(u) = blocks[block_id].exit.uses() {
@@ -498,20 +505,20 @@ mod constant_propagation {
                     };
 
                 use std::ops::{Add, BitAnd, BitOr, Div, Mul, Sub};
-                match builtins::name(*builtin) {
-                    "+" => int_airth(i64::add, values, temps_worklist),
-                    "-" => int_airth(i64::sub, values, temps_worklist),
-                    "*" => int_airth(i64::mul, values, temps_worklist),
-                    "/" => int_airth(i64::div, values, temps_worklist),
-                    "==" => int_relation(i64::eq, values, temps_worklist),
-                    "/=" => int_relation(i64::ne, values, temps_worklist),
-                    ">=" => int_relation(i64::ge, values, temps_worklist),
-                    "<=" => int_relation(i64::le, values, temps_worklist),
-                    ">" => int_relation(i64::gt, values, temps_worklist),
-                    "<" => int_relation(i64::lt, values, temps_worklist),
-                    "mod" => int_airth(i64::rem_euclid, values, temps_worklist),
-                    "&&" => bool_arith(bool::bitand, values, temps_worklist),
-                    "||" => bool_arith(bool::bitor, values, temps_worklist),
+                match (builtins::module_str(*builtin), builtins::ident(*builtin)) {
+                    ("Arith.Int", "+") => int_airth(i64::add, values, temps_worklist),
+                    ("Arith.Int", "-") => int_airth(i64::sub, values, temps_worklist),
+                    ("Arith.Int", "*") => int_airth(i64::mul, values, temps_worklist),
+                    ("Arith.Int", "/") => int_airth(i64::div, values, temps_worklist),
+                    ("Arith.Int", "==") => int_relation(i64::eq, values, temps_worklist),
+                    ("Arith.Int", "/=") => int_relation(i64::ne, values, temps_worklist),
+                    ("Arith.Int", ">=") => int_relation(i64::ge, values, temps_worklist),
+                    ("Arith.Int", "<=") => int_relation(i64::le, values, temps_worklist),
+                    ("Arith.Int", ">") => int_relation(i64::gt, values, temps_worklist),
+                    ("Arith.Int", "<") => int_relation(i64::lt, values, temps_worklist),
+                    ("Arith.Int", "mod") => int_airth(i64::rem_euclid, values, temps_worklist),
+                    ("Arith.Bool", "&&") => bool_arith(bool::bitand, values, temps_worklist),
+                    ("Arith.Bool", "||") => bool_arith(bool::bitor, values, temps_worklist),
                     _ => default_case_for_inst(inst, values, temps_worklist),
                 }
             }
@@ -521,7 +528,7 @@ mod constant_propagation {
                 use helo_runtime::builtins;
                 use Value::*;
 
-                match builtins::name(*builtin) {
+                match builtins::ident(*builtin) {
                     "not" => {
                         if let CBool(a) = values[a] {
                             set_value(*ret, CBool(!a), values, temps_worklist);

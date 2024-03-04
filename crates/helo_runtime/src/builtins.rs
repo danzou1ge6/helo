@@ -1,15 +1,10 @@
 use crate::{errors, mem, vm};
 use mem::ValueSafe;
-use std::collections::HashMap;
 
 use errors::RunTimeError;
 
-pub struct BuiltinTable {
-    tab: HashMap<&'static str, BuiltinId>,
-}
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct BuiltinId(pub(crate) u16);
+pub struct BuiltinId(pub u16);
 
 type BuiltinFunc<const N: usize> = for<'p> fn(
     [ValueSafe<'p>; N],
@@ -95,11 +90,15 @@ pub fn name_by_id(id: BuiltinId) -> &'static str {
 }
 
 pub fn get(id: BuiltinId) -> Builtin {
-    BUILTINS[id.0 as usize].1
+    BUILTINS[id.0 as usize].2
 }
 
-pub fn name(id: BuiltinId) -> &'static str {
+pub fn module_str(id: BuiltinId) -> &'static str {
     BUILTINS[id.0 as usize].0
+}
+
+pub fn ident(id: BuiltinId) -> &'static str {
+    BUILTINS[id.0 as usize].1
 }
 
 pub fn get_arity(id: BuiltinId) -> usize {
@@ -136,79 +135,62 @@ pub fn call_adapted<'p>(
     }
 }
 
-impl BuiltinTable {
-    pub fn new() -> Self {
-        let mut tab = HashMap::new();
-        for (i, (name, _)) in BUILTINS.iter().enumerate() {
-            tab.insert(*name, BuiltinId(i as u16));
-        }
-        Self { tab }
-    }
-    pub fn id_by_name(&self, name: &str) -> BuiltinId {
-        *self.tab.get(name).unwrap()
-    }
-    pub fn arity_by_name(&self, name: &str) -> usize {
-        let id = self.tab.get(name).unwrap();
-        get_arity(*id)
-    }
-}
-
 use functions::*;
-const BUILTINS: [(&'static str, Builtin); 46] = [
+pub const BUILTINS: [(&'static str, &'static str, Builtin); 46] = [
     // Int arithmatics
-    ("+", B2(int_add)),
-    ("-", B2(int_subtract)),
-    ("*", B2(int_mul)),
-    ("**", B2(int_pow)),
-    ("/", B2(int_div)),
-    ("mod", B2(int_mod)),
+    ("arith.int", "+", B2(int_add)),
+    ("arith.int", "-", B2(int_subtract)),
+    ("arith.int", "*", B2(int_mul)),
+    ("arith.int", "**", B2(int_pow)),
+    ("arith.int", "/", B2(int_div)),
+    ("arith.int", "mod", B2(int_mod)),
     // Int comparison
-    ("==", B2(int_eq)),
-    ("/=", B2(int_ne)),
-    (">=", B2(int_ge)),
-    ("<=", B2(int_le)),
-    (">", B2(int_gt)),
-    ("<", B2(int_lt)),
+    ("arith.int", "==", B2(int_eq)),
+    ("arith.int", "/=", B2(int_ne)),
+    ("arith.int", ">=", B2(int_ge)),
+    ("arith.int", "<=", B2(int_le)),
+    ("arith.int", ">", B2(int_gt)),
+    ("arith.int", "<", B2(int_lt)),
     // Float arithmatics
-    ("neg", B1(float_neg)),
-    ("+.", B2(float_add)),
-    ("-.", B2(float_subtract)),
-    ("*.", B2(float_mul)),
-    ("**.", B2(float_powi)),
-    ("**..", B2(float_powf)),
-    ("/.", B2(float_div)),
+    ("arith.float", "neg", B1(float_neg)),
+    ("arith.float", "+.", B2(float_add)),
+    ("arith.float", "-.", B2(float_subtract)),
+    ("arith.float", "*.", B2(float_mul)),
+    ("arith.float", "**.", B2(float_powi)),
+    ("arith.float", "**..", B2(float_powf)),
+    ("arith.float", "/.", B2(float_div)),
     // Float comparison
-    ("=.", B2(float_apr)),
-    ("/=.", B2(float_napr)),
-    (">=.", B2(float_ge)),
-    ("<=.", B2(float_le)),
-    (">.", B2(float_gt)),
-    ("<.", B2(float_lt)),
+    ("arith.float", "=.", B2(float_apr)),
+    ("arith.float", "/=.", B2(float_napr)),
+    ("arith.float", ">=.", B2(float_ge)),
+    ("arith.float", "<=.", B2(float_le)),
+    ("arith.float", ">.", B2(float_gt)),
+    ("arith.float", "<.", B2(float_lt)),
     // Float <-> Int
-    ("int_to_float", B1(int_to_float)),
-    ("floor_float", B1(floor_float)),
-    ("ceil_float", B1(ceil_float)),
-    ("round_float", B1(round_float)),
+    ("arith.float", "int_to_float", B1(int_to_float)),
+    ("arith.float", "floor_float", B1(floor_float)),
+    ("arith.float", "ceil_float", B1(ceil_float)),
+    ("arith.float", "round_float", B1(round_float)),
     // To Str
-    ("int_to_str", B1(int_to_str)),
-    ("float_to_str", B1(float_to_str)),
-    ("bool_to_str", B1(bool_to_string)),
-    ("char_to_str", B1(char_to_string)),
+    ("fmt", "int_to_str", B1(int_to_str)),
+    ("fmt", "float_to_str", B1(float_to_str)),
+    ("fmt", "bool_to_str", B1(bool_to_string)),
+    ("fmt", "char_to_str", B1(char_to_string)),
     // Bool arithmatic
-    ("and", B2(bool_and)),
-    ("or", B2(bool_or)),
-    ("not", B1(bool_not)),
+    ("arith.bool", "and", B2(bool_and)),
+    ("arith.bool", "or", B2(bool_or)),
+    ("arith.bool", "not", B1(bool_not)),
     // Char
-    ("char_eq", B2(char_eq)),
+    ("arith.char", "char_eq", B2(char_eq)),
     // String operations
-    ("str_cat", B2(str_concat)),
-    ("str_some", B1(string_some)),
-    ("str_len", B1(string_len)),
-    ("str_eq", B2(string_eq)),
-    ("str_head", B1(string_head)),
-    ("str_tail", B1(string_tail)),
+    ("str", "str_cat", B2(str_concat)),
+    ("str", "str_some", B1(string_some)),
+    ("str", "str_len", B1(string_len)),
+    ("str", "str_eq", B2(string_eq)),
+    ("str", "str_head", B1(string_head)),
+    ("str", "str_tail", B1(string_tail)),
     // Routines
-    ("println", B1(string_println)),
-    ("print", B1(string_print)),
-    ("readline", B0(read_line)),
+    ("io", "println", B1(string_println)),
+    ("io", "print", B1(string_print)),
+    ("io", "readline", B0(read_line)),
 ];

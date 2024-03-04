@@ -1,0 +1,25 @@
+data Input = SolidFood | Water | Air
+
+fn fmt_input inp =
+    case inp of
+    | SolidFood -> "SolidFood"
+    | Water -> "Water"
+    | Air -> "Air"
+    end
+
+
+module m
+    use super of SolidFood as S, Water as W, Air as A
+    routine swap inp = case inp of
+        | S -> W
+        | W -> A
+        | A -> S
+    end
+end
+
+
+routine main = 
+    let inp = m.swap Water in
+    let inp = m.swap inp in
+    animals.mickey_consume (animals.Mickey 1),inp
+    

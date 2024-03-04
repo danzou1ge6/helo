@@ -56,7 +56,7 @@ fn lower_expr_untied<'s>(
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -161,7 +161,7 @@ fn lower_expr_untied<'s>(
         .into(),
         MakeClosure(fid, captures) => lower_make_closure(
             to.unwrap_or_else(|| compiler.new_temp()),
-            fid.clone(),
+            fid,
             captures,
             ir_nodes,
             ir_functions,
@@ -190,7 +190,7 @@ fn lower_expr_untied<'s>(
         .into(),
         UserFunction(fid) => lower_user_function(
             to.unwrap_or_else(|| compiler.new_temp()),
-            fid.clone(),
+            fid,
             ir_nodes,
             ir_functions,
             builtins,
@@ -201,7 +201,7 @@ fn lower_expr_untied<'s>(
         .into(),
         Builtin(fid) => lower_builtin(
             to.unwrap_or_else(|| compiler.new_temp()),
-            *fid,
+            fid,
             builtins,
             block,
             blocks,
@@ -300,7 +300,7 @@ fn lower_expr<'s>(
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -336,7 +336,7 @@ fn lower_function_body<'s>(
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -370,13 +370,13 @@ fn lower_function_body<'s>(
 }
 
 pub fn lower_function<'s>(
-    fid: ir::FunctionId<'s>,
+    fid: &ir::FunctionId<'s>,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
 ) -> lir::FunctionId {
-    if let Some(id) = functions.get(&fid) {
+    if let Some(id) = functions.get(fid) {
         return id;
     }
 
@@ -419,7 +419,7 @@ fn lower_expr_new_block<'s>(
     id: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
     compiler: &mut Compiler,
@@ -444,7 +444,7 @@ fn lower_assign<'s>(
     value: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -475,7 +475,7 @@ fn lower_seq<'s>(
     result: Option<ir::ExprId>,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -518,7 +518,7 @@ fn lower_if<'s>(
     then: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -561,7 +561,7 @@ fn lower_while<'s>(
     then: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -612,7 +612,7 @@ fn lower_let_bind<'s>(
     in_: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -651,7 +651,7 @@ fn lower_switch_tag<'s>(
     default: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -721,7 +721,7 @@ fn lower_switch<'s>(
     default: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -830,7 +830,7 @@ fn lower_cond<'s>(
     default: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -896,7 +896,7 @@ fn lower_if_else<'s>(
     else_: ir::ExprId,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -951,7 +951,7 @@ fn lower_apply<'s>(
     args: &[ir::ExprId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -984,7 +984,7 @@ fn lower_apply<'s>(
     match &ir_nodes[callee].node() {
         // Optimization: we don't load a builtin and then apply arguments to it when we have enough arguments
         // Instead, we call the builtin directly.
-        ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name.0) => {
+        ir::ExprNode::Builtin(name) if args.len() == builtins.arity_by_name(name) => {
             let block = emit_arguments!(block);
 
             let inst = if callee_impure {
@@ -993,14 +993,14 @@ fn lower_apply<'s>(
                 CallBuiltin
             };
 
-            blocks[block].push(inst(to, builtins.id_by_name(name.0), args_temp));
+            blocks[block].push(inst(to, builtins.id_by_name(name), args_temp));
             block
         }
         // Optimization: we don't load a user function and then apply arguments to it if we have enough arguments.
         // Instead, we call this user function directly
         ir::ExprNode::UserFunction(f_id) if args.len() == ir_functions.get(f_id).unwrap().arity => {
             let block = emit_arguments!(block);
-            let lir_fid = lower_function(f_id.clone(), ir_nodes, ir_functions, builtins, functions);
+            let lir_fid = lower_function(f_id, ir_nodes, ir_functions, builtins, functions);
 
             let inst = if callee_impure { CallImpure } else { Call };
 
@@ -1067,11 +1067,11 @@ fn lower_immediate<'s>(
 
 fn lower_make_closure<'s>(
     to: lir::TempId,
-    fid: ir::FunctionId<'s>,
+    fid: &ir::FunctionId<'s>,
     captures: &[ir::LocalId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -1102,10 +1102,10 @@ fn lower_local<'s>(
 
 fn lower_user_function<'s>(
     to: lir::TempId,
-    fid: ir::FunctionId<'s>,
+    fid: &ir::FunctionId<'s>,
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,
@@ -1117,12 +1117,12 @@ fn lower_user_function<'s>(
 
 fn lower_builtin<'s>(
     to: lir::TempId,
-    name: BuiltinFunctionName,
-    builtins: &lir::BuiltinTable,
+    name: &BuiltinFunctionName,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
 ) -> lir::BlockId {
-    let builtin_id = builtins.id_by_name(name.0);
+    let builtin_id = builtins.id_by_name(name);
     blocks[block].push(lir::Instruction::Buitltin(to, builtin_id));
     block
 }
@@ -1149,7 +1149,7 @@ fn lower_make_tagged<'s>(
     fields: &[ir::ExprId],
     ir_nodes: &ir::ExprHeap<'s>,
     ir_functions: &ir::FunctionTable,
-    builtins: &lir::BuiltinTable,
+    builtins: &ir::BuiltinTable<'s>,
     block: lir::BlockId,
     blocks: &mut lir::BlockHeap,
     functions: &mut lir::FunctionTable<'s, lir::Function>,

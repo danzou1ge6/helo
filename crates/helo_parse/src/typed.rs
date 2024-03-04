@@ -126,6 +126,16 @@ impl<'s> std::ops::Index<ExprId> for ExprHeap<'s> {
     }
 }
 
+impl<'s> Expr<'s> {
+    pub fn new_never(meta: &ast::Meta) -> Self {
+        Expr {
+            node: ExprNode::Never,
+            type_: ast::Type::new_never(),
+            meta: meta.clone(),
+        }
+    }
+}
+
 impl<'s> ExprHeap<'s> {
     pub fn push(&mut self, node: Expr<'s>) -> ExprId {
         let id = self.0.len();
@@ -237,14 +247,16 @@ impl<'s> FunctionTable<'s> {
     }
 }
 
+use ast::Trie;
+
 pub struct Symbols<'s> {
     pub functions: FunctionTable<'s>,
-    pub constructors: HashMap<ConstructorName<'s>, ast::Constructor<'s>>,
-    pub datas: HashMap<DataName<'s>, ast::Data<'s>>,
-    pub builtins: HashMap<BuiltinFunctionName<'s>, ast::BuiltinFunction<'s>>,
-    pub relations: HashMap<RelationName<'s>, ast::Relation<'s>>,
-    pub instances: ast::InstanceTable<'s>,
-    pub methods: HashMap<FunctionName<'s>, RelationName<'s>>,
+    pub constructors: Trie<ConstructorName<'s>, ast::Constructor<'s>, &'s str>,
+    pub datas: Trie<DataName<'s>, ast::Data<'s>, &'s str>,
+    pub builtins: Trie<BuiltinFunctionName<'s>, ast::BuiltinFunction<'s>, &'s str>,
+    pub relations: Trie<RelationName<'s>, ast::Relation<'s>, &'s str>,
+    pub instances: ast::InstanceIdTable<'s, ast::Instance<'s>>,
+    pub methods: Trie<FunctionName<'s>, RelationName<'s>, &'s str>,
 }
 
 #[derive(Debug, Clone)]
@@ -257,8 +269,8 @@ impl<'s> std::hash::Hash for Tag<'s> {
 }
 
 impl<'s> Tag<'s> {
-    pub fn name(&self) -> &'s str {
-        self.2 .0
+    pub fn name(&self) -> String {
+        self.2.to_string()
     }
     pub fn code(&self) -> u8 {
         self.0
@@ -284,8 +296,8 @@ impl<'s> Symbols<'s> {
         }
     }
     pub fn tag_for(&self, constructor: ConstructorName<'s>) -> Tag<'s> {
-        let data_name = self.constructors.get(&constructor).unwrap().belongs_to;
-        let data = &self.datas[&data_name];
+        let data_name = &self.constructors.get(&constructor).unwrap().belongs_to;
+        let data = self.datas.get(&data_name).unwrap();
         Tag(
             data.constructors
                 .iter()

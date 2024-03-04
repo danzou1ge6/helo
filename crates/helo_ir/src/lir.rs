@@ -70,9 +70,7 @@ impl std::fmt::Display for BlockId {
     }
 }
 
-pub use helo_runtime::builtins::{BuiltinId, BuiltinTable};
-
-use ir::StrId;
+pub use ir::{BuiltinId, StrId};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Instruction {

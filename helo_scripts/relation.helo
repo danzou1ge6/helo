@@ -1,8 +1,9 @@
 relation Bigger 'a,'b end
 
-
-relation Eat 'a,'b,'c -> 'c where Bigger 'a,'b
-    routine eat a,b : ['a,'b] -> 'c
+module eat_rel
+    relation Eat 'a,'b,'c -> 'c where super.Bigger 'a,'b
+        routine eat a,b : ['a,'b] -> 'c
+    end
 end
 
 relation Carnivorous 'a,'c -> 'c
@@ -15,11 +16,11 @@ relation PoopEating 'a,'c -> 'c
     routine eat_poop 'b a,b: ['a,'b] -> 'c where Poop 'b
 end
 
-instance 'a,'b,'c Eat 'a,'b,'c where PoopEating 'a,'c + Poop 'b + Bigger 'a,'b
+instance 'a,'b,'c eat_rel.Eat 'a,'b,'c where PoopEating 'a,'c + Poop 'b + Bigger 'a,'b
     routine eat a,b = eat_poop a,b
 end
 
-instance 'a,'b,'c Eat 'a,'b,'c where Carnivorous 'a,'c + Bigger 'a,'b
+instance 'a,'b,'c eat_rel.Eat 'a,'b,'c where Carnivorous 'a,'c + Bigger 'a,'b
     routine eat a,b = car_eat a,b
 end
 
@@ -37,7 +38,7 @@ instance 'p Bigger Bacteria,'p where Poop 'p end
 
 instance PoopEating Bacteria,CO2
     routine eat_poop a,b = begin
-        println "Bacteria eat poop";
+        io.println "Bacteria eat poop";
         CO2 1
     end
 end
@@ -47,14 +48,14 @@ instance Bigger Mickey,Rice end
 
 instance Carnivorous Neko,NekoPoop
     routine car_eat a,b = begin
-        println "Neko eat";
+        io.println "Neko eat";
         NekoPoop 1
     end
 end
 
-instance Eat Mickey,Rice,MickeyPoop
+instance eat_rel.Eat Mickey,Rice,MickeyPoop
     routine eat a,b = begin
-        println "Mickey eats rice";
+        io.println "Mickey eats rice";
         MickeyPoop 1
     end
 end
@@ -63,6 +64,7 @@ end
 /* test comment 1 */
 
 routine main =
+    use eat_rel of eat in
     let neko = Neko "1" in
     /* test comment 2 */
     let rice = Rice "3" /* test comment 3 */ in

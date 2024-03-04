@@ -1,6 +1,6 @@
 use helo_ir::pretty_print;
 use helo_ir::{artifect, ir, lir, lir::ssa};
-use helo_parse::{ast, errors};
+use helo_parse::{ast, errors, source_tree};
 use helo_runtime::{disassembler, executable, vm};
 
 use miette::{Context, IntoDiagnostic};
@@ -8,7 +8,6 @@ use miette::{Context, IntoDiagnostic};
 use std::env;
 use std::fs;
 use std::io::Read;
-use std::sync::Arc;
 
 fn pretty_ir_functions<'s>(
     ir_functions: &ir::FunctionTable<'s>,
@@ -106,13 +105,10 @@ fn print_ssa_blocks(
     println!("{doc}");
 }
 
-fn compile(src: String, file_name: String) -> miette::Result<executable::Executable> {
-    let src = Arc::new(src);
-    let file_name = Arc::new(file_name);
-    let s = &src.clone()[..];
-
+fn compile(file: std::path::PathBuf) -> miette::Result<executable::Executable> {
     // Parse
-    let (ast_symbols, ast_nodes) = artifect::parse(s, src, file_name)?;
+    let src_tree = source_tree::SourceTree::new(file)?;
+    let (ast_symbols, ast_nodes) = artifect::parse(&src_tree)?;
 
     // Type inference and lower to IR
     let mut e = errors::ManyError::new();
@@ -123,7 +119,8 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
         println!("{}: {}", name.to_string(&typed_symbols.instances), f.type_);
     }
 
-    let main = ast::FunctionId::main();
+    // Check existence and type of main
+    let main = ast::FunctionId::Standard(ast::Path::new(["main"]));
     if let Some(f) = typed_symbols.functions.get(&main) {
         let ast::FunctionType {
             params, captures, ..
@@ -136,8 +133,9 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
     }
     let mut e = e.emit()?;
 
+    // Lower to IR
     let (ir_functions, ir_nodes, str_list, _) =
-        artifect::compiler_ir([main].iter(), &typed_symbols, typed_nodes, &mut e);
+        artifect::compiler_ir([main.clone()].iter(), &typed_symbols, typed_nodes, &mut e);
     let _ = e.emit()?;
 
     println!("IR:");
@@ -150,7 +148,9 @@ fn compile(src: String, file_name: String) -> miette::Result<executable::Executa
 
     // Lower to LIR
     let lir_functions = artifect::compile_lir(ir_functions, ir_nodes);
-    let main_fid = lir_functions.get(&ir::FunctionId::main()).unwrap();
+    let main_fid = lir_functions
+        .get(&ir::FunctionId::of_non_generic(main))
+        .unwrap();
     let lir_functions = lir_functions.to_list();
     let function_names = lir_functions.function_name_list();
     println!("Before optimization:");
@@ -248,15 +248,15 @@ pub fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_compile_ir <file_name>"))
     //     .clone();
-    let file_name = "helo_scripts/relation.helo".to_string();
-    let mut file = fs::File::open(&file_name)
+    let file_path = std::path::PathBuf::from("helo_scripts/relation.helo");
+    let mut file = fs::File::open(&file_path)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;
     let mut src = String::new();
     file.read_to_string(&mut src)
         .into_diagnostic()
         .wrap_err("Read source file failed")?;
-    let executable = compile(src, file_name)?;
+    let executable = compile(file_path)?;
     run(&executable);
     Ok(())
 }

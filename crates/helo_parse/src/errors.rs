@@ -1,7 +1,7 @@
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 use thiserror::Error;
 
-use crate::ast;
+use crate::{ast, parse::tast};
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Can only assign to local mutable variable")]
@@ -426,27 +426,6 @@ impl TestNotBool {
 }
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Global {} not found", name)]
-#[diagnostic()]
-pub struct GlobalNotFound {
-    pub name: String,
-    #[source_code]
-    pub src: NamedSource,
-    #[label("Referenced here")]
-    pub span: SourceSpan,
-}
-
-impl GlobalNotFound {
-    pub fn new(name: &str, meta: &ast::Meta) -> Self {
-        Self {
-            src: meta.named_source(),
-            span: meta.span(),
-            name: name.to_string(),
-        }
-    }
-}
-
-#[derive(Diagnostic, Debug, Error)]
 #[error(
     "Circular reference met when infering type of function {}",
     referenced_name
@@ -751,9 +730,9 @@ pub struct MethodNotImplemented {
 }
 
 impl MethodNotImplemented {
-    pub fn new(method_name: ast::FunctionName, ins_meta: &ast::Meta) -> Self {
+    pub fn new(method_name: &str, ins_meta: &ast::Meta) -> Self {
         Self {
-            method_name: method_name.0.to_string(),
+            method_name: method_name.to_string(),
             src: ins_meta.named_source(),
             span: ins_meta.span(),
         }
@@ -870,6 +849,107 @@ impl MethodTypeAnnotationNotSupported {
         Self {
             src: meta.named_source(),
             span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Identifier path beyond root")]
+pub struct ModulePathBeyondRoot {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Identifier path `{}` here goes beyond root", path)]
+    pub span: SourceSpan,
+    pub path: String,
+}
+
+impl ModulePathBeyondRoot {
+    pub fn new(meta: &ast::Meta, path: &tast::Path<'_>) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            path: path.to_string(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Bad access operands. Only identifiers are expected.")]
+pub struct BadAccessOperands {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Operands to dot operator here are incorrect")]
+    pub span: SourceSpan,
+}
+
+impl BadAccessOperands {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Ambiguity in resolving identifier path")]
+pub struct AmbiguityResolvingSymbol {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Identifier path `{}` resolves to `{}`", path, hits)]
+    pub span: SourceSpan,
+    pub hits: String,
+    pub path: String,
+}
+
+impl AmbiguityResolvingSymbol {
+    pub fn new<'s>(meta: &ast::Meta, hits: &[ast::Path<'s>], path: &tast::Path<'s>) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            hits: ast::paths_to_string(hits),
+            path: path.to_string(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Identifier path {} not found", name)]
+#[diagnostic()]
+pub struct IdentifierPathNotFound {
+    pub name: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced here")]
+    pub span: SourceSpan,
+}
+
+impl IdentifierPathNotFound {
+    pub fn new(name: &tast::Path<'_>, meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            name: name.to_string(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Function {} not found", name)]
+pub struct FunctionNotFound {
+    pub name: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced here")]
+    pub span: SourceSpan,
+}
+
+impl FunctionNotFound {
+    pub fn new(name: &ast::FunctionName<'_>, meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            name: name.to_string(),
         }
     }
 }

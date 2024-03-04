@@ -107,8 +107,30 @@ fn infer_expr<'s>(
             assumptions,
             e,
         ),
-        ExprNode::Global(global) => infer_global(
-            &global,
+        ExprNode::UserFunction(name) => infer_user_function(
+            name,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            assumptions,
+            e,
+        ),
+        ExprNode::Constructor(name) => infer_constructor(
+            name,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
+            assumptions,
+            e,
+        ),
+        ExprNode::Builtin(name) => infer_builtin(
+            name,
             &expr.meta,
             symbols,
             ast_nodes,
@@ -163,6 +185,7 @@ fn infer_expr<'s>(
                 meta: expr.meta.clone(),
             }
         }
+        ExprNode::Never => panic!("Never from untyped AST should not propagate to typed AST"),
     };
     if let Some((type_annotated, annotation_meta)) = &expr.type_ {
         let provided_type = inferer.instantiate_wildcard(type_annotated);
@@ -686,9 +709,9 @@ fn infer_let_pattern_in<'s>(
     }
 }
 
-fn infer_global<'s>(
-    name: &'s str,
-    global_meta: &ast::Meta,
+fn infer_user_function<'s>(
+    name: &ast::FunctionName<'s>,
+    meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
@@ -697,12 +720,11 @@ fn infer_global<'s>(
     _assumptions: &constrain::Assumptions<'s>,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
-    // Global is user-defined
-    let id = ast::FunctionId::assume_exists(name);
+    let id = ast::FunctionId::of_standard(name.clone());
     if let Some(f) = symbols.functions.get(&id) {
         if let Some(renamed_f_type) = infer_function_type_renamed(
             id.clone(),
-            global_meta,
+            meta,
             symbols,
             ast_nodes,
             typed_nodes,
@@ -721,64 +743,11 @@ fn infer_global<'s>(
                 type_: ast::Type {
                     node: type_constructor(renamed_f_type.into()),
                 },
-                meta: global_meta.clone(),
+                meta: meta.clone(),
             };
         }
-        // Fail to infer `name`'s signature, but that's not a error here
-        // So we fail with never type silently
-
-        // Global is builtin
-    } else if let Some(f) = symbols.builtins.get(&ast::BuiltinFunctionName(name)) {
-        let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
-
-        let type_constructor = if f.pure {
-            ast::TypeNode::Callable
-        } else {
-            ast::TypeNode::ImpureCallable
-        };
-
-        let r = typed::Expr {
-            node: typed::ExprNode::Builtin(ast::BuiltinFunctionName(name)),
-            type_: ast::Type {
-                node: type_constructor(renamed_type),
-            },
-            meta: global_meta.clone(),
-        };
-        return r;
-
-    // Global is constructor
-    } else if let Some(constructor) = symbols.constructors.get(&ast::ConstructorName(name)) {
-        let data = &symbols.datas[&constructor.belongs_to];
-        let ret_type = ast::Type {
-            node: ast::TypeNode::Generic(
-                constructor.belongs_to,
-                (0..data.kind_arity)
-                    .map(|i| ast::Type::new_var(i.into()))
-                    .collect(),
-            ),
-        };
-        let type_ = ast::CallableType {
-            params: constructor.params.clone(),
-            ret: Box::new(ret_type),
-        };
-        let type_ = inferer.rename_type_vars(&type_, data.kind_arity);
-
-        let type_ = if type_.params.len() == 0 {
-            *type_.ret
-        } else {
-            ast::Type {
-                node: ast::TypeNode::Callable(type_),
-            }
-        };
-        return typed::Expr {
-            node: typed::ExprNode::Constructor(ast::ConstructorName(name)),
-            type_,
-            meta: global_meta.clone(),
-        };
-
-    // Global is method
-    } else if let Some(rel_name) = symbols.methods.get(&ast::FunctionName(name)) {
-        let sig = symbols.relations[rel_name].method_sig(&ast::FunctionName(name));
+    } else if let Some(rel_name) = symbols.methods.get(name) {
+        let sig = symbols.relations.get(rel_name).unwrap().method_sig(name.id());
         let renamed_sig = inferer.rename_type_vars(sig, sig.var_cnt);
 
         let type_constructor = if sig.pure {
@@ -789,29 +758,91 @@ fn infer_global<'s>(
 
         let r = typed::Expr {
             node: typed::ExprNode::UnresolvedMethod {
-                rel_name: *rel_name,
-                f_name: ast::FunctionName(name),
+                rel_name: rel_name.clone(),
+                f_name: name.clone(),
                 constrains: renamed_sig.constrains.clone(),
                 primary_constrain: renamed_sig.primary_constrain.clone(),
             },
             type_: ast::Type {
                 node: type_constructor(renamed_sig.type_),
             },
-            meta: global_meta.clone(),
+            meta: meta.clone(),
         };
         return r;
+    }
+    e.push(errors::FunctionNotFound::new(name, meta));
+    typed::Expr::new_never(meta)
+}
 
-    // Fail: global doesn't exist
+fn infer_builtin<'s>(
+    name: &ast::BuiltinFunctionName<'s>,
+    meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    _ast_nodes: &ast::ExprHeap<'s>,
+    _typed_nodes: &mut typed::ExprHeap<'s>,
+    _typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    _assumptions: &constrain::Assumptions<'s>,
+    _e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    let f = symbols.builtins.get(name).unwrap();
+    let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
+
+    let type_constructor = if f.pure {
+        ast::TypeNode::Callable
     } else {
-        e.push(errors::GlobalNotFound::new(name, global_meta));
-    }
+        ast::TypeNode::ImpureCallable
+    };
 
-    // Fail: fallthrough
-    typed::Expr {
-        node: typed::ExprNode::Never,
-        type_: ast::Type::new_never(),
-        meta: global_meta.clone(),
-    }
+    let r = typed::Expr {
+        node: typed::ExprNode::Builtin(name.clone()),
+        type_: ast::Type {
+            node: type_constructor(renamed_type),
+        },
+        meta: meta.clone(),
+    };
+    return r;
+}
+
+fn infer_constructor<'s>(
+    name: &ast::ConstructorName<'s>,
+    meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    _ast_nodes: &ast::ExprHeap<'s>,
+    _typed_nodes: &mut typed::ExprHeap<'s>,
+    _typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    _assumptions: &constrain::Assumptions<'s>,
+    _e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    let constructor = symbols.constructors.get(name).unwrap();
+    let data = &symbols.datas.get(&constructor.belongs_to).unwrap();
+    let ret_type = ast::Type {
+        node: ast::TypeNode::Generic(
+            constructor.belongs_to.clone(),
+            (0..data.kind_arity)
+                .map(|i| ast::Type::new_var(i.into()))
+                .collect(),
+        ),
+    };
+    let type_ = ast::CallableType {
+        params: constructor.params.clone(),
+        ret: Box::new(ret_type),
+    };
+    let type_ = inferer.rename_type_vars(&type_, data.kind_arity);
+
+    let type_ = if type_.params.len() == 0 {
+        *type_.ret
+    } else {
+        ast::Type {
+            node: ast::TypeNode::Callable(type_),
+        }
+    };
+    return typed::Expr {
+        node: typed::ExprNode::Constructor(name.clone()),
+        type_,
+        meta: meta.clone(),
+    };
 }
 
 fn infer_if_else<'s>(
@@ -924,8 +955,8 @@ fn infer_make_closure<'s>(
     _assumptions: &constrain::Assumptions<'s>,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
-    if !symbols.functions[&closure_id].pure
-        && symbols.functions[typed_functions.currently_infering().unwrap()].pure
+    if !symbols.functions.get(&closure_id).unwrap().pure
+        && symbols.functions.get(typed_functions.currently_infering().unwrap()).unwrap().pure
     {
         e.push(errors::InpureClosureInPureFunction::new(closure_meta));
     }
@@ -947,7 +978,7 @@ fn infer_make_closure<'s>(
             meta: closure_meta.clone(),
         },
         |c| {
-            let f = &symbols.functions[closure_id];
+            let f = symbols.functions.get(closure_id).unwrap();
             let type_constructor = if f.pure {
                 ast::TypeNode::Callable
             } else {
@@ -1000,8 +1031,8 @@ fn infer_pattern_type<'s>(
                 .iter()
                 .map(|p| infer_pattern_type(p, symbols, inferer, e))
                 .collect();
-            let constructor = &symbols.constructors[constructor];
-            let data = &symbols.datas[&constructor.belongs_to];
+            let constructor = symbols.constructors.get(constructor).unwrap();
+            let data = symbols.datas.get(&constructor.belongs_to).unwrap();
 
             let type_var_zero = inferer.new_slots(data.kind_arity);
             let data_params = (0..data.kind_arity)
@@ -1025,7 +1056,7 @@ fn infer_pattern_type<'s>(
                 return ast::Type::new_never();
             }
             ast::Type {
-                node: ast::TypeNode::Generic(constructor.belongs_to, data_params),
+                node: ast::TypeNode::Generic(constructor.belongs_to.clone(), data_params),
             }
         }
         ast::Pattern::Tuple(v, _meta) => ast::Type {
@@ -1280,9 +1311,7 @@ fn infer_function_type_renamed<'s>(
 /// return value of the function
 fn init_inferer_for_function_inference<'s>(
     f: &ast::Function<'s>,
-    symbols: &ast::Symbols<'s>,
     inferer: &mut inferer::Inferer<'s>,
-    e: &mut errors::ManyError,
 ) -> ast::Type<'s> {
     // allocate type-vars for locals and return-value and captures
     let _ = inferer.alloc_vars(f.local_cnt + 1 + f.captures.len());
@@ -1291,11 +1320,6 @@ fn init_inferer_for_function_inference<'s>(
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
-        // Validate user provided function signature
-        if let Err(err) = symbols.validate_callable_type(f_type, &f.meta) {
-            e.push_boxed(err);
-            return ret_type;
-        }
         // Allocate type-vars for those in user provided function signature and rename
         let f_type = inferer.rename_type_vars(f_type, f.var_cnt);
         // Unify parameters
@@ -1392,7 +1416,7 @@ fn check_and_resolve_constrains<'s>(
                 Ok((Some(ins_id), inferer1)) => {
                     // A single hit tells us which instance method implementation
                     expr.node =
-                        typed::ExprNode::UserFunction(ast::FunctionId::Method(ins_id, f_name.0));
+                        typed::ExprNode::UserFunction(ast::FunctionId::Method(ins_id, f_name.id()));
                     *inferer = inferer1;
                 }
                 // The relation is proved to hold, but which instance it is
@@ -1465,7 +1489,7 @@ pub fn infer_function<'s>(
 
     let mut inferer = inferer::Inferer::new();
 
-    let ret_type = init_inferer_for_function_inference(f, symbols, &mut inferer, e);
+    let ret_type = init_inferer_for_function_inference(f, &mut inferer);
     let assumptions = match &id {
         ast::FunctionId::Method(ins_id, _) => {
             let ins = symbols.instances.get(ins_id).unwrap();

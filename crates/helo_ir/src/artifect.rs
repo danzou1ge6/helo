@@ -1,4 +1,3 @@
-use helo_runtime::builtins as rt_builtins;
 use helo_runtime::{byte_code, executable};
 
 use crate::{ir, lir, lir::ssa};
@@ -6,35 +5,25 @@ use crate::{lower_ast, lower_ir, lower_lir};
 
 use helo_parse::builtins;
 use helo_parse::errors;
+use helo_parse::source_tree;
 use helo_parse::{ast, typed};
 use helo_parse::{infer, parse};
 
-use std::sync::Arc;
-
 pub fn parse<'s>(
-    src_str: &'s str,
-    src: Arc<String>,
-    file_name: Arc<String>,
+    src_tree: &'s source_tree::SourceTree,
 ) -> miette::Result<(ast::Symbols<'s>, ast::ExprHeap<'s>)> {
-    let mut symbbols = ast::Symbols::new();
     let mut ast_nodes = ast::ExprHeap::new();
     let mut e = errors::ManyError::new();
-    let mut ptable = parse::PrecedenceTable::new();
-
-    builtins::add_builtins_to(&mut symbbols, &mut ptable);
-
     let mut tast_symbols = parse::tast::Symbols::new();
-    parse::parse_ast(
-        src_str,
-        src.clone(),
-        file_name,
-        &mut tast_symbols,
-        &mut ptable,
-    )?;
-    parse::lower_symbols(tast_symbols, &mut symbbols, &mut ast_nodes, &mut e);
-    e.emit()?;
 
-    Ok((symbbols, ast_nodes))
+    builtins::add_builtins_to(&mut tast_symbols)?;
+    src_tree.walk(&mut tast_symbols, &mut e);
+    let mut e = e.emit()?;
+
+    let ast_symbols = parse::lower_symbols(tast_symbols, &mut ast_nodes, &mut e);
+    let _ = e.emit()?;
+
+    Ok((ast_symbols, ast_nodes))
 }
 
 pub fn infer_type<'s>(
@@ -110,10 +99,10 @@ pub fn compile_lir<'s>(
     ir_nodes: ir::ExprHeap<'s>,
 ) -> lir::FunctionTable<'s, lir::Function> {
     let mut lir_functions = lir::FunctionTable::new();
-    let rt_builtins = rt_builtins::BuiltinTable::new();
+    let rt_builtins = ir::BuiltinTable::new();
     for fid in ir_functions.function_ids() {
         lower_ir::lower_function(
-            fid.clone(),
+            fid,
             &ir_nodes,
             &ir_functions,
             &rt_builtins,
