@@ -1,4 +1,0 @@
-let fn filter predicate,xs =
-    case xs of Con y,ys if predicate y -> Con y,(filter predicate,ys)
-             | Con y,ys                -> filter predicate,ys
-             | Nil                     -> Nil

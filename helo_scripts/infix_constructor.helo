@@ -1,0 +1,19 @@
+data List2['a] = :: 'a, List2['a]
+               | []
+            
+infix :: 10 9
+
+fn head xs = case xs of
+    | x::xs -> option.Some x
+    | [] -> option.None
+end
+
+routine main =
+    let xs = 1::2::3:: [] in
+    let x = head xs in
+    case x of
+    | option.Some x ->
+      io.println (fmt.int_to_str x)
+    | option.None -> panic.panic "impossible"
+    end
+

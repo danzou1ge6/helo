@@ -574,24 +574,6 @@ impl InfiniteType {
 }
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Constructor name must be uppercase")]
-pub struct ConstructorNameNotUppercase {
-    #[source_code]
-    pub src: NamedSource,
-    #[label("Constructor here")]
-    pub span: SourceSpan,
-}
-
-impl ConstructorNameNotUppercase {
-    pub fn new(constructor_meta: &ast::Meta) -> Self {
-        Self {
-            src: constructor_meta.named_source(),
-            span: constructor_meta.span(),
-        }
-    }
-}
-
-#[derive(Diagnostic, Debug, Error)]
 #[error("Refutable pattern not allowed here")]
 pub struct RefutablePattern {
     #[source_code]
@@ -950,6 +932,65 @@ impl FunctionNotFound {
             src: meta.named_source(),
             span: meta.span(),
             name: name.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("Expect a constructor here, but not a binding, literal, application or tuple")]
+pub struct ExpectedConstructor {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("In pattern application here")]
+    pub span: SourceSpan,
+}
+
+impl ExpectedConstructor {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error(
+    "Constructor `{}` does not exist, but neither does this look like a local variable binding",
+    name
+)]
+pub struct NeitherConstructorNorBinding {
+    pub name: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced here")]
+    pub span: SourceSpan,
+}
+
+impl NeitherConstructorNorBinding {
+    pub fn new(name: &tast::Path<'_>, meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
+            name: name.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("Expect a local variable binding here, but got a path")]
+pub struct ExpectBindingGotPath {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced here")]
+    pub span: SourceSpan,
+}
+
+impl ExpectBindingGotPath {
+    pub fn new(meta: &ast::Meta) -> Self {
+        Self {
+            src: meta.named_source(),
+            span: meta.span(),
         }
     }
 }

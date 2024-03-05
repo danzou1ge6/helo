@@ -26,3 +26,6 @@
 [x] Module
 [x] Comments
 [x] Ad-hoc polymorphism
+[x] Infix constructor
+[ ] Inline optimization
+[ ] Relation methods for arithmatics

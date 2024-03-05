@@ -77,7 +77,7 @@ const BUILTIN_SIGS: &'static str = r#"
     end
 
     module panic
-        builtin fn panic 'a     msg   : [Str] -> Char        = ..
+        builtin fn panic 'a     msg   : [Str] -> 'a          = ..
     end
 
     module option

@@ -272,8 +272,9 @@ pub use ast::Meta;
 
 #[derive(Clone, Debug)]
 pub enum Pattern<'s> {
-    Construct(Path<'s>, Vec<Pattern<'s>>, Meta),
-    Bind(&'s str, bool, Meta),
+    Apply(Box<Pattern<'s>>, Vec<Pattern<'s>>, Meta),
+    Identifier(Path<'s>),
+    MutableBind(&'s str, Meta),
     Literal(Constant<'s>, Meta),
     Tuple(Vec<Pattern<'s>>, Meta),
 }

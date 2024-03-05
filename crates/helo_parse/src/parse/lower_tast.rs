@@ -336,7 +336,7 @@ pub fn lower_symbols<'s>(
         .iter()
         .filter_map(|(id, _)| match id {
             tast::FunctionId::Standard(p) => Some((ast::FunctionName::from(p.clone()), ())),
-            _ => None
+            _ => None,
         })
         .collect::<Trie<_, _, _>>();
 
@@ -586,13 +586,9 @@ fn lower_in_namespace<'s, 'sy, B, F, C, R: tast::RelationArity>(
 ) -> ast::ExprId {
     let ns_old = resolver.global.clone();
     ns_ops.into_iter().for_each(|op| {
-        resolver.global.apply(
-            op,
-            &|p| {
-                resolver.symbols.contains(p.iter())
-            },
-            e,
-        )
+        resolver
+            .global
+            .apply(op, &|p| resolver.symbols.contains(p.iter()), e)
     });
     let expr_id = lower_expr(expr, resolver, functions, ast_heap, e);
     resolver.global = ns_old;
@@ -811,11 +807,55 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
 ) -> Result<ast::Pattern<'s>, ()> {
     use tast::Pattern::*;
     let r = match pat {
-        Construct(template, args, meta) => ast::Pattern::Construct(
-            resolver
+        Apply(template, args, meta) => match *template {
+            Identifier(p) => {
+                if let Ok(cn) = resolver
+                    .global
+                    .resolve_to_name(p.clone(), resolver.symbols.constructors)
+                {
+                    let mut args_lowred = Vec::new();
+                    for arg in args.into_iter() {
+                        args_lowred.push(lower_pattern(arg, resolver, e)?);
+                    }
+                    Ok(ast::Pattern::Construct(cn, args_lowred, meta))
+                } else {
+                    if let Some(id) = p.only_one() {
+                        Ok(ast::Pattern::Bind(resolver.define_local(id, false), meta))
+                    } else {
+                        e.push(errors::NeitherConstructorNorBinding::new(&p, &meta));
+                        Err(())
+                    }
+                }
+            }
+            _ => {
+                e.push(errors::ExpectedConstructor::new(&meta));
+                Err(())
+            }
+        },
+        // If the identifier is used as a constructor, the case would have been handled
+        // in previous branch. So here we only consider the case that it is a immutable
+        // binding.
+        Identifier(p) => {
+            if let Ok(cn) = resolver
                 .global
-                .resolve_to_name(template.clone(), resolver.symbols.constructors)
-                .map_err(|err| err.commit(&template, e))?,
+                .resolve_to_name(p.clone(), resolver.symbols.constructors)
+            {
+                Ok(ast::Pattern::Construct(cn, Vec::new(), p.meta))
+            } else {
+                if let Some(id) = p.only_one() {
+                    Ok(ast::Pattern::Bind(resolver.define_local(id, false), p.meta))
+                } else {
+                    e.push(errors::NeitherConstructorNorBinding::new(&p, &p.meta));
+                    Err(())
+                }
+            }
+        }
+        MutableBind(id, meta) => Ok(ast::Pattern::Bind(resolver.define_local(id, true), meta)),
+        Literal(constant, meta) => Ok(ast::Pattern::Literal(
+            lower_constant(&constant, &meta, e),
+            meta,
+        )),
+        Tuple(args, meta) => Ok(ast::Pattern::Tuple(
             {
                 let mut args_lowered = Vec::new();
                 for arg in args.into_iter() {
@@ -824,21 +864,9 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 args_lowered
             },
             meta,
-        ),
-        Bind(id, mutable, meta) => ast::Pattern::Bind(resolver.define_local(id, mutable), meta),
-        Literal(constant, meta) => ast::Pattern::Literal(lower_constant(&constant, &meta, e), meta),
-        Tuple(args, meta) => ast::Pattern::Tuple(
-            {
-                let mut args_lowered = Vec::new();
-                for arg in args.into_iter() {
-                    args_lowered.push(lower_pattern(arg, resolver, e)?);
-                }
-                args_lowered
-            },
-            meta,
-        ),
+        )),
     };
-    Ok(r)
+    r
 }
 
 fn lower_let_pat<'s, 'sy, B, F, C, R: tast::RelationArity>(

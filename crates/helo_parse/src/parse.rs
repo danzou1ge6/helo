@@ -80,22 +80,42 @@ fn trailing_space1_tag<'a>(tag: &'a str) -> impl FnMut(&'a str) -> PResult<'a, &
 }
 
 // const symbolic_keywords: [&'static str; 3] = ["|", ")", ","];
-const ALPHABETICAL_KEYWORDS: [&'static str; 12] =
-    ["then", "else", "of", "case", "let", "fn", "data", "relation",
-    "module", "end", "instance", "routine"];
+const ALPHABETICAL_KEYWORDS: [&'static str; 12] = [
+    "then", "else", "of", "case", "let", "fn", "data", "relation", "module", "end", "instance",
+    "routine",
+];
+
+const SYMBOLIC_KEYWORDS: [&'static str; 3] = ["->", "|", "="];
 
 /// An identifier that is made purely of a set of symbols. NOTE that the `_a` suffix means trailing spaces
 /// are not consumed
 fn symbolic_identifier_str_a<'s>(s: &'s str) -> PResult<'s, &'s str> {
     let parse = |s| {
-        let (s1, id) = nbyte::is_a("~!@#$%^&*<>=|[]+-./")(s)?;
-        Ok((s1, id))
+        let (s1, id) = nbyte::is_a("~!@#$%^&*<>=:|[]+-./")(s)?;
+
+        if SYMBOLIC_KEYWORDS.contains(&id) {
+            Err(nom::Err::Error(nom::error::VerboseError {
+                errors: vec![(
+                    s,
+                    nom::error::VerboseErrorKind::Nom(nom::error::ErrorKind::Alpha),
+                )],
+            }))
+        } else {
+            Ok((s1, id))
+        }
     };
     nom_context("symbolic identifier", parse)(s)
 }
 
 fn symbolic_identifier_str<'s>(s: &'s str) -> PResult<'s, &'s str> {
     trailing_space(symbolic_identifier_str_a)(s)
+}
+
+fn parenthesed_symbolic_identifier_str<'s>(s: &'s str) -> PResult<'s, &'s str> {
+    let (s, _) = nbyte::tag("(")(s)?;
+    let (s, id) = nbyte::take_until(")")(s)?;
+    let (s, _) = trailing_space_tag(")")(s)?;
+    Ok((s, id))
 }
 
 /// An identifier that is not started with a number, and doesn't contain any symbol
@@ -304,20 +324,6 @@ fn if_expr<'s>(
     nom_context("if-expression", parse)(s)
 }
 
-/// A constructor pattern, like `Some 1`
-fn pattern_construct<'s>(
-    s: &'s str,
-    begin: &'s str,
-    constructor: tast::Path<'s>,
-    ctx: &Context<'s>,
-) -> PResult<'s, tast::Pattern<'s>> {
-    let (s1, args) = nmulti::separated_list0(trailing_space_tag(","), |s| pattern(s, ctx))(s)?;
-    Ok((
-        s1,
-        tast::Pattern::Construct(constructor, args, ctx.meta(begin, s1)),
-    ))
-}
-
 /// A literal pattern
 fn pattern_literal<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Pattern<'s>> {
     let parse = |s| {
@@ -336,8 +342,11 @@ fn parenthesed_pattern<'s>(
     s: &'s str,
     begin: &'s str,
     ctx: &Context<'s>,
+    precedence_table: &PrecedenceTable<'s>,
 ) -> PResult<'s, tast::Pattern<'s>> {
-    let (s1, mut pats) = nmulti::separated_list1(trailing_space_tag(","), |s| pattern(s, ctx))(s)?;
+    let (s1, mut pats) = nmulti::separated_list1(trailing_space_tag(","), |s| {
+        pattern(s, ctx, precedence_table)
+    })(s)?;
     let (s2, _) = nbyte::tag(")")(s1)?;
     let (s3, _) = empty(s2)?;
 
@@ -349,25 +358,113 @@ fn parenthesed_pattern<'s>(
 }
 
 /// A pattern
-fn pattern<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Pattern<'s>> {
+fn pattern<'s>(
+    s: &'s str,
+    ctx: &Context<'s>,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let parse = |s| pattern_with_precedence(s, ctx, PrecedenceTable::DEFAULT, precedence_table);
+    nom_context("pattern", parse)(s)
+}
+
+fn prefix_pattern<'s>(
+    s: &'s str,
+    ctx: &Context<'s>,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, tast::Pattern<'s>> {
     let parse = |s| {
         if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("("))(s)? {
-            parenthesed_pattern(s1, s, ctx)
+            parenthesed_pattern(s1, s, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("mut"))(s)? {
             let (s2, id) = alphabetic_identifier_str(s1)?;
-            Ok((s2, tast::Pattern::Bind(id, true, ctx.meta(s, s2))))
-        } else if let (s1, Some(constructor)) = ncomb::opt(|s| alphabetic_path(s, ctx))(s)? {
-            if let Some(only) = constructor.only_one() {
-                if !only.chars().next().unwrap().is_uppercase() {
-                    return Ok((s1, tast::Pattern::Bind(only, false, ctx.meta(s, s1))));
-                }
-            }
-            pattern_construct(s1, s, constructor, ctx)
+            Ok((s2, tast::Pattern::MutableBind(id, ctx.meta(s, s2))))
+        } else if let (s1, Some(id)) = ncomb::opt(|s| path(s, ctx))(s)? {
+            Ok((s1, tast::Pattern::Identifier(id)))
+        } else if let (s1, Some(id)) = ncomb::opt(symbolic_identifier_str)(s)? {
+            Ok((
+                s1,
+                tast::Pattern::Identifier(tast::Path::skeleton(id, ctx.meta(s, s1))),
+            ))
         } else {
             pattern_literal(s, ctx)
         }
     };
-    nom_context("pattern", parse)(s)
+    nom_context("prefix pattern", parse)(s)
+}
+
+fn build_infix_pattern<'s>(
+    lhs: tast::Pattern<'s>,
+    op_id: &'s str,
+    op_meta: ast::Meta,
+    ctx: &Context<'s>,
+    rest: &'s str,
+    lhs_begin: &'s str,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let p_right = precedence_table.priority_left(op_id);
+    let (s1, rhs) = pattern_with_precedence(rest, ctx, p_right, precedence_table)?;
+    let callee = tast::Pattern::Identifier(tast::Path::skeleton(op_id, op_meta.clone()));
+
+    Ok((
+        s1,
+        tast::Pattern::Apply(Box::new(callee), vec![lhs, rhs], ctx.meta(lhs_begin, s1)),
+    ))
+}
+
+fn build_application_pattern<'s>(
+    lhs: tast::Pattern<'s>,
+    ctx: &Context<'s>,
+    rest: &'s str,
+    app_begin: &'s str,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let (s1, args) = nmulti::separated_list1(trailing_space_tag(","), |s| {
+        pattern(s, ctx, precedence_table)
+    })(rest)?;
+    Ok((
+        s1,
+        tast::Pattern::Apply(Box::new(lhs), args, ctx.meta(app_begin, s1)),
+    ))
+}
+
+fn pattern_with_precedence<'s>(
+    s: &'s str,
+    ctx: &Context<'s>,
+    prec: OpPriority,
+    precedence_table: &PrecedenceTable<'s>,
+) -> PResult<'s, tast::Pattern<'s>> {
+    let lhs_begin = s;
+    let (mut s, mut lhs) = prefix_pattern(s, ctx, precedence_table)?;
+    while s.len() > 0 {
+        if let (_, Some(_)) = ncomb::opt(expression_boundary)(s)? {
+            break;
+        }
+
+        let (s1, r) = ncomb::opt(infix_identifier_str)(s)?;
+        if let Some(op_id) = r {
+            if precedence_table.priority_left(op_id) < prec {
+                break;
+            }
+            (s, lhs) = build_infix_pattern(
+                lhs,
+                op_id,
+                ctx.meta(s, s1),
+                ctx,
+                s1,
+                lhs_begin,
+                precedence_table,
+            )?;
+            continue;
+        }
+
+        if prec > precedence_table.priority_left("<apply>") {
+            break;
+        }
+
+        (s, lhs) = build_application_pattern(lhs, ctx, s1, lhs_begin, precedence_table)?;
+    }
+
+    Ok((s, lhs))
 }
 
 fn case_arm<'s>(
@@ -377,7 +474,7 @@ fn case_arm<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::CaseArm<'s>> {
     let parse = |s| {
-        let (s1, pat) = pattern(s, ctx)?;
+        let (s1, pat) = pattern(s, ctx, precedence_table)?;
 
         let (s2, guard) = if let (s2, Some(_)) = ncomb::opt(trailing_space1_tag("if"))(s1)? {
             let (s3, guard) = expression(s2, ctx, precedence_table, generic_params)?;
@@ -440,7 +537,7 @@ fn let_in_bind_expr<'s>(
     generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
-        let (s1, pattern) = pattern(s, ctx)?;
+        let (s1, pattern) = pattern(s, ctx, precedence_table)?;
 
         let (s1, _) = trailing_space_tag("=")(s1)?;
 
@@ -565,7 +662,7 @@ fn type_generic<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
-        let (s1, path) = alphabetic_path(s, ctx)?;
+        let (s1, path) = path(s, ctx)?;
 
         macro_rules! return_constant {
             ($ty:ident) => {
@@ -761,7 +858,7 @@ fn constructor<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Constructor<'s>> {
     let parse = |s| {
-        let (s1, name) = alphabetic_identifier_str(s)?;
+        let (s1, name) = nbr::alt((alphabetic_identifier_str, symbolic_identifier_str))(s)?;
 
         let (s2, params) =
             nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
@@ -1032,6 +1129,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         trailing_space1_tag("builtin"),
         trailing_space1_tag("module"),
         trailing_space_tag("->"),
+        trailing_space_tag("="),
         trailing_space_tag(")"),
         trailing_space_tag(","),
     ))(s)
@@ -1058,8 +1156,7 @@ fn experssion_with_precedence<'s>(
         }
 
         // Annotate `lhs` with some user provided type
-        if let (s1, Some(_)) = ncomb::opt(nbyte::tag(":"))(s)? {
-            let (s1, _) = empty(s1)?;
+        if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag(":"))(s)? {
             (s, lhs) = add_type(lhs, ctx, s1, generic_params)?;
             continue;
         }
@@ -1117,7 +1214,7 @@ fn decl_stmt<'s>(
     generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
     let parse = |s| {
-        let (s2, pat) = pattern(s, ctx)?;
+        let (s2, pat) = pattern(s, ctx, precedence_table)?;
         let (s3, _) = trailing_space_tag("=")(s2)?;
         let (s4, value) = expression(s3, ctx, precedence_table, generic_params)?;
         Ok((
@@ -1247,7 +1344,7 @@ fn constrain<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Constrain<'s>> {
     let parse = |s| {
-        let (s1, rel_name) = alphabetic_path(s, ctx)?;
+        let (s1, rel_name) = path(s, ctx)?;
         let (s2, args) =
             nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
                 s1,
@@ -1468,7 +1565,7 @@ fn instance<'s>(
 ) -> PResult<'s, (tast::Instance<'s>, Vec<(&'s str, tast::Function<'s>)>)> {
     let parse = |s| {
         let (s1, (generic_params, _)) = generic_params_decl(s, ctx)?;
-        let (s2, rel_name) = alphabetic_path(s1, ctx)?;
+        let (s2, rel_name) = path(s1, ctx)?;
         let (s3, args) =
             nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, &generic_params))(
                 s2,
@@ -1501,9 +1598,16 @@ fn instance<'s>(
     nom_context("instance", parse)(s)
 }
 
-fn alphabetic_path<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Path<'s>> {
+/// Path in which symbolic identifiers must be surrounded by ()
+fn path<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Path<'s>> {
     let s0 = s;
-    let (s, path) = nmulti::separated_list1(trailing_space_tag("."), alphabetic_identifier_str)(s)?;
+    let (s, path) = nmulti::separated_list1(
+        trailing_space_tag("."),
+        nbr::alt((
+            parenthesed_symbolic_identifier_str,
+            alphabetic_identifier_str,
+        )),
+    )(s)?;
     let s1 = s;
 
     Ok((
@@ -1516,11 +1620,16 @@ fn alphabetic_path<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Path<
 }
 
 fn use_item<'s>(s: &'s str) -> PResult<'s, (&'s str, &'s str)> {
-    let (s, id1) = nbr::alt((symbolic_identifier_str_a, alphabetic_identifier_str_a))(s)?;
-    let (s, _) = empty(s)?;
+    let (s, id1) = nbr::alt((
+        parenthesed_symbolic_identifier_str,
+        alphabetic_identifier_str,
+    ))(s)?;
 
     if let (s, Some(_)) = ncomb::opt(trailing_space1_tag("as"))(s)? {
-        let (s, id2) = nbr::alt((symbolic_identifier_str_a, alphabetic_identifier_str_a))(s)?;
+        let (s, id2) = nbr::alt((
+            parenthesed_symbolic_identifier_str,
+            alphabetic_identifier_str,
+        ))(s)?;
         Ok((s, (id1, id2)))
     } else {
         Ok((s, (id1, id1)))
@@ -1528,7 +1637,7 @@ fn use_item<'s>(s: &'s str) -> PResult<'s, (&'s str, &'s str)> {
 }
 
 fn use_decl<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, Vec<tast::NameSpaceOp<'s>>> {
-    let (s, mp) = alphabetic_path(s, ctx)?;
+    let (s, mp) = path(s, ctx)?;
 
     if let (s, Some(_)) = ncomb::opt(trailing_space1_tag("of"))(s)? {
         let (s, items) = nmulti::separated_list1(trailing_space_tag(","), use_item)(s)?;
@@ -1554,7 +1663,7 @@ fn inline_module<'s>(
     precedence_table: &PrecedenceTable<'s>,
     symbols: &mut tast::Symbols<'s>,
 ) -> PResult<'s, ()> {
-    let (s, relative_mp) = alphabetic_path(s, ctx)?;
+    let (s, relative_mp) = path(s, ctx)?;
     let mut ctx_sub = ctx.clone();
     ctx_sub.path.push_many(&ast::Path::from_raw(relative_mp));
 

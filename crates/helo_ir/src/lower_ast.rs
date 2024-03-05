@@ -1172,7 +1172,7 @@ fn lower_apply<'s>(
     e: &mut ManyError,
 ) -> ir::ExprId {
     if let typed::ExprNode::Builtin(bn) = &typed_nodes[callee].node {
-        if bn.in_module(["Prelude"]) && bn.id() == "panic" {
+        if bn.in_module(["panic"]) && bn.id() == "panic" {
             match &typed_nodes[args[0]].node {
                 typed::ExprNode::Constant(c) => match c {
                     ast::Constant::Str(msg) => {

@@ -114,7 +114,7 @@ macro_rules! path_instance {
             }
 
             pub fn in_module<const N: usize>(&self, p: [&'s str; N]) -> bool {
-                self.0 .0.len() == N && self.0 .0.iter().zip(p.iter()).all(|(a, b)| a == b)
+                self.0 .0.len() == N + 1 && self.0 .0.iter().zip(p.iter()).all(|(a, b)| a == b)
             }
         }
 
