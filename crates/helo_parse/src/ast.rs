@@ -193,7 +193,7 @@ impl From<LocalId> for usize {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapturedId(pub usize);
 
 impl From<usize> for CapturedId {
@@ -219,6 +219,12 @@ impl<'s> FunctionId<'s> {
     pub fn of_standard(n: FunctionName<'s>) -> Self {
         Self::Standard(Path::from(n))
     }
+    pub fn is_closure(&self) -> bool {
+        match self {
+            Self::Closure(_) => true,
+            _ => false,
+        }
+    }
     pub fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -226,10 +232,10 @@ impl<'s> FunctionId<'s> {
     ) -> std::fmt::Result {
         match self {
             Self::Method(ins, name) => {
-                write!(f, "{}<", ins.rel_name)?;
+                write!(f, "{}[", ins.rel_name)?;
                 let ins = ins_tab.get(ins).unwrap();
                 str_join_vec(f, ", ", &ins.rel.args)?;
-                write!(f, ">::{}", name)
+                write!(f, "].{}", name)
             }
             Self::Standard(name) => write!(f, "{}", name),
             Self::Closure(cid) => write!(f, "closure@{}:{}-{}", cid.file, cid.span.0, cid.span.1),
@@ -256,6 +262,31 @@ impl<'s> FunctionId<'s> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Capture {
+    Local(LocalId, Meta),
+    Capture(CapturedId, Meta),
+}
+
+impl PartialEq for Capture {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Local(a, _), Self::Local(b, _)) => a == b,
+            (Self::Capture(a, _), Self::Capture(b, _)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Capture {
+    pub fn meta(&self) -> &Meta {
+        match self {
+            Self::Local(_, m) => m,
+            Self::Capture(_, m) => m,
+        }
+    }
+}
+
 use crate::parse::tast;
 
 #[derive(Debug, Clone)]
@@ -273,17 +304,22 @@ pub enum ExprNode<'s> {
         operand: ExprId,
         arms: Vec<CaseArm<'s>>,
     },
-    LetIn {
-        bind: LocalId,
-        value: ExprId,
-        in_: ExprId,
-    },
+    // LetIn {
+    //     bind: LocalId,
+    //     value: ExprId,
+    //     in_: ExprId,
+    // },
     LetPatIn {
         bind: Pattern<'s>,
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure(FunctionId<'s>),
+    MakeClosure {
+        at: LocalId,
+        f: FunctionId<'s>,
+        captures: Vec<Capture>,
+        then: ExprId,
+    },
     Constructor(ConstructorName<'s>),
     Builtin(BuiltinFunctionName<'s>),
     UserFunction(FunctionName<'s>),
@@ -379,8 +415,7 @@ pub struct Function<'s> {
     pub body: ExprId,
     pub meta: Meta,
     pub param_metas: Vec<Meta>,
-    pub captures: Vec<LocalId>,
-    pub captures_meta: Vec<Meta>,
+    pub capture_cnt: usize,
     pub pure: bool,
     pub constrains: Vec<Constrain<'s>>,
 }
@@ -463,32 +498,6 @@ impl<'s> Pattern<'s> {
         }
     }
 
-    pub fn validate(&self, symbols: &Symbols<'s>) -> Result<(), miette::Report> {
-        use crate::errors;
-        match self {
-            Pattern::Bind(_, _) => Ok(()),
-            Pattern::Literal(_, _) => Ok(()),
-            Pattern::Construct(constructor, args, m) => {
-                if let Some(_) = symbols.constructors.get(&constructor) {
-                    for a in args {
-                        a.validate(symbols)?;
-                    }
-                    Ok(())
-                } else {
-                    Err(miette::Report::new(errors::ConstructorNotFound::new(
-                        constructor.clone(),
-                        m,
-                    )))
-                }
-            }
-            Pattern::Tuple(v, _) => {
-                for elem in v {
-                    elem.validate(symbols)?;
-                }
-                Ok(())
-            }
-        }
-    }
     /// Check if this pattern is refutable. WARNING: Pattern must be validated before hand
     pub fn inrefutable(&self, symbols: &Symbols<'s>) -> bool {
         match self {
@@ -629,11 +638,17 @@ pub struct Relation<'s> {
     pub meta: Meta,
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Hash)]
 pub struct Constrain<'s> {
     pub rel_name: RelationName<'s>,
     pub args: Vec<Type<'s>>,
     pub meta: Meta,
+}
+
+impl<'s> std::fmt::Debug for Constrain<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
 }
 
 impl<'s> std::fmt::Display for Constrain<'s> {
@@ -695,6 +710,7 @@ pub struct Instance<'s> {
     pub rel: Constrain<'s>,
     pub constrains: Vec<Constrain<'s>>,
     pub meta: Meta,
+    pub module: Path<'s>,
 }
 
 impl<'s> Instance<'s> {
@@ -951,6 +967,57 @@ pub struct Type<'s> {
     pub node: TypeNode<'s>,
 }
 
+pub trait TypeWalk<'s> {
+    fn walk(&self, f: &mut impl FnMut(&Type<'s>));
+}
+
+impl<'s> TypeWalk<'s> for Type<'s> {
+    fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {
+        f(self);
+        use TypeNode::*;
+        match &self.node {
+            Generic(_, args) => {
+                for a in args {
+                    a.walk(f);
+                }
+            }
+            Tuple(v) => {
+                for elem in v {
+                    elem.walk(f);
+                }
+            }
+            Callable(c) | ImpureCallable(c) => {
+                for p in &c.params {
+                    p.walk(f);
+                }
+                c.ret.walk(f);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl<'s> TypeWalk<'s> for CallableType<'s> {
+    fn walk(&self, f: &mut impl FnMut(&Type<'s>)) {
+        self.params.iter().for_each(|t| t.walk(f));
+        self.ret.walk(f);
+    }
+}
+
+impl<'s> TypeWalk<'s> for FunctionType<'s> {
+    fn walk(&self, f: &mut impl FnMut(&Type<'s>)) {
+        self.params.iter().for_each(|t| t.walk(f));
+        self.captures.iter().for_each(|t| t.walk(f));
+        self.ret.walk(f);
+    }
+}
+
+impl<'s> TypeWalk<'s> for Vec<Type<'s>> {
+    fn walk(&self, f: &mut impl FnMut(&Type<'s>)) {
+        self.iter().for_each(|t| t.walk(f))
+    }
+}
+
 pub trait TypeApply<'s> {
     fn apply(
         &self,
@@ -1146,30 +1213,6 @@ impl<'s> Type<'s> {
         Ok(r)
     }
 
-    pub fn walk(&self, f: &mut impl FnMut(&Type<'s>) -> ()) {
-        f(self);
-        use TypeNode::*;
-        match &self.node {
-            Generic(_, args) => {
-                for a in args {
-                    a.walk(f);
-                }
-            }
-            Tuple(v) => {
-                for elem in v {
-                    elem.walk(f);
-                }
-            }
-            Callable(c) | ImpureCallable(c) => {
-                for p in &c.params {
-                    p.walk(f);
-                }
-                c.ret.walk(f);
-            }
-            _ => {}
-        }
-    }
-
     pub fn collect_vars(&self, vars: &mut HashSet<TypeVarId>) {
         self.walk(&mut |t| match &t.node {
             TypeNode::Var(v) => {
@@ -1251,9 +1294,6 @@ impl<'s, I> InstanceIdTable<'s, I> {
     }
 }
 impl<'s> InstanceIdTable<'s, Instance<'s>> {
-    pub fn module_for<'a>(&'a self, id: &InstanceId<'s>) -> PathRef<'a, 's> {
-        self.get(id).unwrap().rel_name().module_path()
-    }
     pub fn iter(&self) -> impl Iterator<Item = (InstanceId<'s>, &Instance<'s>)> {
         self.0
             .iter()
@@ -1714,10 +1754,7 @@ where
         self.iter_with_path(K::empty())
     }
 
-    pub fn iter_mut_with_path<'a>(
-        &'a mut self,
-        p: K,
-    ) -> Box<dyn Iterator<Item = (K, &mut V)> + 'a>
+    pub fn iter_mut_with_path<'a>(&'a mut self, p: K) -> Box<dyn Iterator<Item = (K, &mut V)> + 'a>
     where
         NK: Clone,
         K: ConstructTriePath<NK>,

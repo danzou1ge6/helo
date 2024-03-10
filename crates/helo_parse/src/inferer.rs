@@ -77,8 +77,10 @@ impl<'s> UnionFind<'s> {
     /// Find without path compression
     pub fn find_immutable(&self, addr: ast::TypeVarId) -> ast::TypeVarId {
         let same_as = match &self.get(addr) {
-            Slot::Value(ast::Type {node: ast::TypeNode::Var(var_id)}) => *var_id,
-            _ => return addr
+            Slot::Value(ast::Type {
+                node: ast::TypeNode::Var(var_id),
+            }) => *var_id,
+            _ => return addr,
         };
         self.find_immutable(same_as)
     }
@@ -304,37 +306,30 @@ impl<'s> Inferer<'s> {
         b: &ast::Type<'s>,
     ) -> Result<(), ()> {
         use ast::TypeNode::*;
-        let r = match (&a.node, &b.node) {
-            (Unit, Unit) => Ok(()),
-            (Var(a_id), _) => Ok(self.update_var_no_rollback_left_lock::<LOCK>(*a_id, b)?),
-            (_, Var(b_id)) => Ok(self.update_var_no_rollback_right_lock::<LOCK>(*b_id, a)?),
-            (Never, _) => Ok(()),
-            (_, Never) => Ok(()),
-            (Tuple(a_list, ..), Tuple(b_list, ..)) => Ok(self
-                .unify_list_no_rollback_lock::<LOCK>(a_list.iter(), b_list.iter())
-                .map_err(|_| ())?),
-            (Generic(a_template, a_args), Generic(b_template, b_args))
-                if a_template == b_template =>
-            {
-                Ok(self
-                    .unify_list_no_rollback_lock::<LOCK>(a_args.iter(), b_args.iter())
-                    .map_err(|_| ())?)
-            }
-            (Callable(a), Callable(b)) => self.unify_callable_no_rallback_lock::<LOCK>(
-                &a.params,
-                &a.ret,
-                &b.params,
-                &b.ret,
-            ),
-            (ImpureCallable(a), ImpureCallable(b)) => self.unify_callable_no_rallback_lock::<LOCK>(
-                &a.params,
-                &a.ret,
-                &b.params,
-                &b.ret,
-            ),
-            (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
-            _ => Err(()),
-        };
+        let r =
+            match (&a.node, &b.node) {
+                (Unit, Unit) => Ok(()),
+                (Var(a_id), _) => Ok(self.update_var_no_rollback_left_lock::<LOCK>(*a_id, b)?),
+                (_, Var(b_id)) => Ok(self.update_var_no_rollback_right_lock::<LOCK>(*b_id, a)?),
+                (Never, _) => Ok(()),
+                (_, Never) => Ok(()),
+                (Tuple(a_list, ..), Tuple(b_list, ..)) => Ok(self
+                    .unify_list_no_rollback_lock::<LOCK>(a_list.iter(), b_list.iter())
+                    .map_err(|_| ())?),
+                (Generic(a_template, a_args), Generic(b_template, b_args))
+                    if a_template == b_template =>
+                {
+                    Ok(self
+                        .unify_list_no_rollback_lock::<LOCK>(a_args.iter(), b_args.iter())
+                        .map_err(|_| ())?)
+                }
+                (Callable(a), Callable(b)) => self
+                    .unify_callable_no_rallback_lock::<LOCK>(&a.params, &a.ret, &b.params, &b.ret),
+                (ImpureCallable(a), ImpureCallable(b)) => self
+                    .unify_callable_no_rallback_lock::<LOCK>(&a.params, &a.ret, &b.params, &b.ret),
+                (Primitive(pa), Primitive(pb)) if pa == pb => Ok(()),
+                _ => Err(()),
+            };
         r
     }
 
@@ -416,79 +411,60 @@ impl<'s> Inferer<'s> {
         self.resolve_descdent(type_, meta, &mut Vec::new())
     }
 
-    fn discretization_walk(
-        &mut self,
-        type_: &ast::Type<'s>,
-        map: &mut HashMap<ast::TypeVarId, ast::TypeVarId>,
-        counter: &mut usize,
-    ) {
-        use ast::TypeNode::*;
-        match &type_.node {
-            Var(v) => {
-                let root_var_id = self.uf.find(*v);
-                match &self.uf.get(root_var_id).clone() {
-                    Slot::Value(v) => {
-                        self.discretization_walk(v, map, counter);
-                    }
-                    Slot::Empty => {
-                        map.entry(root_var_id).or_insert_with(|| {
-                            let x = *counter;
-                            *counter += 1;
-                            ast::TypeVarId::from(x)
-                        });
-                    }
-                }
-            }
-            Callable(ca) => {
-                ca.params
-                    .iter()
-                    .for_each(|t| self.discretization_walk(t, map, counter));
-                self.discretization_walk(&ca.ret, map, counter);
-            }
-            Tuple(v) => {
-                v.iter()
-                    .for_each(|t| self.discretization_walk(t, map, counter));
-            }
-            Generic(_, args) => args
-                .iter()
-                .for_each(|a| self.discretization_walk(a, map, counter)),
-            _ => {}
-        }
-    }
-
     /// Walk `type_` and for each variable that hasn't been deternimed, map them to a continuous range
     /// of integers, starting from zero.
     ///
     /// For example, `[1, 4, [1] -> 3] -> 3` is mapped to `[0, 1, [0] -> 2] -> 2` by the returned HashMap
-    pub fn discretization(
+    pub fn discretization<T>(
         &mut self,
-        type_: &ast::Type<'s>,
-    ) -> (HashMap<ast::TypeVarId, ast::TypeVarId>, usize) {
+        type_: &T,
+    ) -> (HashMap<ast::TypeVarId, ast::TypeVarId>, usize)
+    where
+        T: ast::TypeWalk<'s>,
+    {
         let mut map = HashMap::new();
         let mut counter = 0;
 
-        self.discretization_walk(type_, &mut map, &mut counter);
+        fn walk_f<'s>(
+            inferer: &mut Inferer<'s>,
+            map: &mut HashMap<ast::TypeVarId, ast::TypeVarId>,
+            counter: &mut usize,
+            type_: &ast::Type<'s>,
+        ) {
+            use ast::TypeNode::*;
+            match &type_.node {
+                Var(v) => {
+                    let root_var_id = inferer.uf.find(*v);
+                    match &inferer.uf.get(root_var_id).clone() {
+                        Slot::Value(v) => {
+                            walk_f(inferer, map, counter, v);
+                        }
+                        Slot::Empty => {
+                            map.entry(root_var_id).or_insert_with(|| {
+                                let x = *counter;
+                                *counter += 1;
+                                ast::TypeVarId::from(x)
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            };
+        }
+
+        type_.walk(&mut |type_| walk_f(self, &mut map, &mut counter, type_));
         (map, counter)
     }
 
-    /// Same as `discretization`, but for [`ast::CallableType`]
-    pub fn discretization_function(
-        &mut self,
-        type_: &ast::FunctionType<'s>,
-    ) -> (HashMap<ast::TypeVarId, ast::TypeVarId>, usize) {
-        let mut map = HashMap::new();
-        let mut counter = 0;
-
-        type_
-            .params
-            .iter()
-            .for_each(|type_| self.discretization_walk(type_, &mut map, &mut counter));
-        type_
-            .captures
-            .iter()
-            .for_each(|type_| self.discretization_walk(type_, &mut map, &mut counter));
-        self.discretization_walk(&type_.ret, &mut map, &mut counter);
-        (map, counter)
+    pub fn discretization_applied<T>(&mut self, type_: &T) -> (T, usize)
+    where
+        T: ast::TypeWalk<'s> + ast::TypeApply<'s>,
+    {
+        let (map, var_cnt) = self.discretization(type_);
+        (
+            type_.substitute_vars_with_nodes(&|id| ast::TypeNode::Var(map[&id])),
+            var_cnt,
+        )
     }
 
     pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {

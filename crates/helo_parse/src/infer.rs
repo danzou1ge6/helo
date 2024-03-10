@@ -5,8 +5,8 @@ use crate::errors;
 use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
-use std::collections::HashMap;
-use std::collections::HashSet;
+
+const DEBUG: bool = true;
 
 fn infer_expr<'s>(
     expr_id: ast::ExprId,
@@ -58,19 +58,6 @@ fn infer_expr<'s>(
             assumptions,
             e,
         ),
-        ExprNode::LetIn { bind, value, in_ } => infer_let_in(
-            *bind,
-            *value,
-            *in_,
-            &expr.meta,
-            symbols,
-            ast_nodes,
-            typed_nodes,
-            typed_functions,
-            inferer,
-            assumptions,
-            e,
-        ),
         ExprNode::LetPatIn { bind, value, in_ } => infer_let_pattern_in(
             bind,
             *value,
@@ -95,9 +82,19 @@ fn infer_expr<'s>(
             &expr.meta,
             symbols,
             typed_functions,
+            inferer,
+            e,
         ),
-        ExprNode::MakeClosure(closure) => infer_make_closure(
-            closure,
+        ExprNode::MakeClosure {
+            at,
+            f,
+            captures,
+            then,
+        } => infer_make_closure(
+            *at,
+            f,
+            captures,
+            *then,
             &expr.meta,
             symbols,
             ast_nodes,
@@ -198,6 +195,7 @@ fn infer_expr<'s>(
                     &typed_expr.type_,
                     &expr.meta,
                     &expr.meta,
+                    inferer,
                 )
             })
             .commit(e);
@@ -500,6 +498,7 @@ fn infer_call<'s>(
                         &args[i].type_,
                         &args[i].meta,
                         call_meta,
+                        &inferer,
                     )
                 })
                 .commit(e);
@@ -565,6 +564,7 @@ fn infer_call<'s>(
                         &callee.type_,
                         args.iter().map(|arg| &arg.type_),
                         call_meta,
+                        &inferer,
                     )
                 })
                 .commit(e);
@@ -588,7 +588,7 @@ fn infer_call<'s>(
     }
 }
 
-fn infer_let_in<'s>(
+fn _infer_let_in<'s>(
     bind: ast::LocalId,
     value: ast::ExprId,
     in_: ast::ExprId,
@@ -615,7 +615,13 @@ fn infer_let_in<'s>(
     inferer
         .update_var(type_var_id_for_local(bind), &value.type_)
         .map_err(|_| {
-            errors::LocalUnificationFailure::new(bind, &value.type_, &value.meta, let_in_meta)
+            errors::LocalUnificationFailure::new(
+                bind,
+                &value.type_,
+                &value.meta,
+                let_in_meta,
+                &inferer,
+            )
         })
         .commit(e);
 
@@ -681,6 +687,7 @@ fn infer_let_pattern_in<'s>(
                 &value.type_,
                 &value.meta,
                 let_in_meta,
+                inferer,
             )
         })
         .commit(e);
@@ -724,6 +731,7 @@ fn infer_user_function<'s>(
     if let Some(f) = symbols.functions.get(&id) {
         if let Some(renamed_f_type) = infer_function_type_renamed(
             id.clone(),
+            &CapturedTypeInfo::empty(),
             meta,
             symbols,
             ast_nodes,
@@ -747,7 +755,11 @@ fn infer_user_function<'s>(
             };
         }
     } else if let Some(rel_name) = symbols.methods.get(name) {
-        let sig = symbols.relations.get(rel_name).unwrap().method_sig(name.id());
+        let sig = symbols
+            .relations
+            .get(rel_name)
+            .unwrap()
+            .method_sig(name.id());
         let renamed_sig = inferer.rename_type_vars(sig, sig.var_cnt);
 
         let type_constructor = if sig.pure {
@@ -898,6 +910,7 @@ fn infer_if_else<'s>(
                 &else_.type_,
                 &else_.meta,
                 if_else_meta,
+                inferer,
             ));
             ast::Type::new_never()
         },
@@ -944,26 +957,92 @@ fn infer_constant<'s>(constant: &ast::Constant<'s>, constant_meta: &ast::Meta) -
     }
 }
 
+pub struct CapturedTypeInfo<'s> {
+    types: Vec<ast::Type<'s>>,
+    var_cnt: usize,
+    metas: Vec<ast::Meta>,
+}
+
+impl<'s> CapturedTypeInfo<'s> {
+    pub fn empty() -> Self {
+        Self {
+            types: Vec::new(),
+            var_cnt: 0,
+            metas: Vec::new(),
+        }
+    }
+}
+
 fn infer_make_closure<'s>(
-    closure_id: &ast::FunctionId<'s>,
-    closure_meta: &ast::Meta,
+    at: ast::LocalId,
+    f_id: &ast::FunctionId<'s>,
+    captures: &Vec<ast::Capture>,
+    then: ast::ExprId,
+    meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
-    _assumptions: &constrain::Assumptions<'s>,
+    assumptions: &constrain::Assumptions<'s>,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
-    if !symbols.functions.get(&closure_id).unwrap().pure
-        && symbols.functions.get(typed_functions.currently_infering().unwrap()).unwrap().pure
+    // Check purity
+    if !symbols.functions.get(&f_id).unwrap().pure
+        && symbols
+            .functions
+            .get(typed_functions.currently_infering().unwrap())
+            .unwrap()
+            .pure
     {
-        e.push(errors::InpureClosureInPureFunction::new(closure_meta));
+        e.push(errors::InpureClosureInPureFunction::new(&meta));
     }
 
+    let f = symbols.functions.get(f_id).unwrap();
+    let callable_constructor = if f.pure {
+        ast::TypeNode::Callable
+    } else {
+        ast::TypeNode::ImpureCallable
+    };
+
+    // Assign local bound to the closure a type, if any
+    if let Some(f_type) = &f.type_ {
+        let renamed_ftype = inferer.rename_type_vars(f_type, f.var_cnt);
+        inferer
+            .update_var(
+                type_var_id_for_local(at),
+                &ast::Type::new(callable_constructor(renamed_ftype)),
+            )
+            .expect("`at` should be a fresh type var, and updating it shouldn't go wrong");
+    }
+
+    let local_cnt = symbols.functions[typed_functions.currently_infering().unwrap()].local_cnt;
+
+    // Collect type of captures
+    let captured_types = captures
+        .iter()
+        .map(|c| {
+            inferer
+                .resolve_var(type_var_id_for_capture(local_cnt, c.clone()), c.meta())
+                .unwrap_or_else(|err| {
+                    e.push(err);
+                    ast::Type::new_never()
+                })
+        })
+        .collect::<Vec<_>>();
+    let (captured_types_dis, captured_types_var_cnt) =
+        inferer.discretization_applied(&captured_types);
+
+    let captured_type_info = CapturedTypeInfo {
+        types: captured_types_dis,
+        var_cnt: captured_types_var_cnt,
+        metas: captures.iter().map(|c| c.meta().clone()).collect(),
+    };
+
     infer_function_type_renamed(
-        closure_id.clone(),
-        closure_meta,
+        f_id.clone(),
+        &captured_type_info,
+        meta,
         symbols,
         ast_nodes,
         typed_nodes,
@@ -975,39 +1054,57 @@ fn infer_make_closure<'s>(
         || typed::Expr {
             node: typed::ExprNode::Never,
             type_: ast::Type::new_never(),
-            meta: closure_meta.clone(),
+            meta: meta.clone(),
         },
         |c| {
-            let f = symbols.functions.get(closure_id).unwrap();
-            let type_constructor = if f.pure {
-                ast::TypeNode::Callable
-            } else {
-                ast::TypeNode::ImpureCallable
-            };
             c.captures
                 .iter()
-                .zip(f.captures.iter())
-                .zip(f.captures_meta.iter())
-                .for_each(|((ctype, local_id), local_meta)| {
+                .zip(captures.iter())
+                .for_each(|(ctype, cap)| {
                     inferer
-                        .update_var(type_var_id_for_local(*local_id), ctype)
+                        .update_var(type_var_id_for_capture(local_cnt, cap.clone()), ctype)
                         .map_err(|_| {
-                            errors::LocalUnificationFailure::new(
-                                *local_id,
-                                &ctype,
-                                &local_meta,
-                                closure_meta,
-                            )
+                            errors::CaptureUnificationFailure::new(&ctype, cap.meta(), &inferer)
                         })
                         .commit(e);
                 });
-            let type_ = ast::Type {
-                node: type_constructor(c.clone().into()),
+            let closure_type = ast::Type {
+                node: callable_constructor(c.clone().into()),
             };
+
+            inferer
+                .update_var(type_var_id_for_local(at), &closure_type)
+                .unwrap_or_else(|_| {
+                    e.push(errors::BodyTypeMismatchAnnotation::new(
+                        &closure_type,
+                        &f.meta,
+                        &inferer,
+                    ))
+                });
+
+            let then = infer_expr(
+                then,
+                symbols,
+                ast_nodes,
+                typed_nodes,
+                typed_functions,
+                inferer,
+                assumptions,
+                e,
+            );
+            let then_type = then.type_.clone();
+            let then_id = typed_nodes.push(then);
+
             typed::Expr {
-                node: typed::ExprNode::MakeClosure(closure_id.clone(), c),
-                type_,
-                meta: closure_meta.clone(),
+                node: typed::ExprNode::MakeClosure {
+                    f: f_id.clone(),
+                    fty: c,
+                    captures: captures.clone(),
+                    at,
+                    then: then_id,
+                },
+                type_: then_type,
+                meta: meta.clone(),
             }
         },
     )
@@ -1052,6 +1149,7 @@ fn infer_pattern_type<'s>(
                     err_i,
                     args[err_i].meta(),
                     meta,
+                    inferer,
                 ));
                 return ast::Type::new_never();
             }
@@ -1136,18 +1234,14 @@ fn infer_case<'s>(
             inferer
                 .unify(&ret_type, &result.type_)
                 .map_err(|_| {
-                    errors::ArmTypeUnificationFailure::new(&result.type_, &result.meta, case_meta)
+                    errors::ArmTypeUnificationFailure::new(
+                        &result.type_,
+                        &result.meta,
+                        case_meta,
+                        inferer,
+                    )
                 })
                 .commit(e);
-
-            if let Err(err) = arm.pattern.validate(symbols) {
-                e.push_boxed(err);
-                return typed::CaseArm {
-                    pattern: arm.pattern.clone(),
-                    guard,
-                    result: typed_nodes.push(result),
-                };
-            }
 
             // Infer type of pattern
             let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
@@ -1161,6 +1255,7 @@ fn infer_case<'s>(
                         &pat_type,
                         arm.pattern.meta(),
                         case_meta,
+                        &inferer,
                     )
                 })
                 .commit(e);
@@ -1197,18 +1292,39 @@ fn infer_captured<'s>(
     id_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
-) -> typed::Expr<'static> {
+    _inferer: &mut inferer::Inferer<'s>,
+    _e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
     let local_cnt = symbols.functions[typed_functions.currently_infering().unwrap()].local_cnt;
+    let type_ = { ast::Type::new_var(type_var_id_for_captured(local_cnt, id)) };
+
     typed::Expr {
         node: typed::ExprNode::Captured { id, is_self },
-        type_: ast::Type::new_var(type_var_id_for_captured(local_cnt, id)),
+        type_,
         meta: id_meta.clone(),
     }
+}
+
+fn current_inferred_renamed<'s>(
+    f: &ast::Function<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    captured_types: &CapturedTypeInfo<'s>,
+    e: &mut errors::ManyError,
+) -> (ast::FunctionType<'s>, bool) {
+    let currently_infered = construct_function_type(f, inferer, captured_types, e);
+    // Discretize type of function such that variables are the first few unsigned integers
+    // e.g. from 2, 3 -> 4 to 0, 1 -> 2
+    let (map, _var_cnt) = inferer.discretization(&currently_infered);
+    (
+        currently_infered.substitute_vars_with_nodes(|i| ast::TypeNode::Var(map[&i])),
+        f.pure,
+    )
 }
 
 /// Infer type of a function and return its signature renamed
 fn infer_function_type_renamed<'s>(
     id: ast::FunctionId<'s>,
+    captured_types: &CapturedTypeInfo<'s>,
     name_meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
@@ -1223,16 +1339,20 @@ fn infer_function_type_renamed<'s>(
         return Some(renamed_type);
     }
 
-    // Type annotated by programmer
+    // Type annotated by programmer, but is not a closure.
+    // This is because a closure must be typed at a `MakeClosure` node, so that we get types for captures
     let f = &symbols.functions[&id];
     if let Some(f_type) = &f.type_ {
-        return Some(inferer.rename_type_vars(&f_type.clone().into(), f.var_cnt));
+        if !id.is_closure() {
+            return Some(inferer.rename_type_vars(&f_type.clone().into(), f.var_cnt));
+        }
     }
 
     // Not in infering tree
     if !typed_functions.is_infering(&id) {
         if let Some(infered_f) = infer_function(
             id.clone(),
+            captured_types,
             symbols,
             ast_nodes,
             typed_nodes,
@@ -1247,50 +1367,7 @@ fn infer_function_type_renamed<'s>(
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
     if *typed_functions.currently_infering().unwrap() == id {
-        let currently_infered = ast::FunctionType {
-            params: (0..f.arity)
-                .map(|i| {
-                    inferer
-                        .resolve_var(type_var_id_for_local(i.into()), &f.param_metas[i])
-                        .unwrap_or_else(|err| {
-                            e.push(err);
-                            ast::Type::new_never()
-                        })
-                })
-                .collect(),
-            captures: (0..f.captures.len())
-                .map(|i| {
-                    inferer
-                        .resolve_var(
-                            type_var_id_for_captured(f.local_cnt, i.into()),
-                            &f.param_metas[i],
-                        )
-                        .unwrap_or_else(|err| {
-                            e.push(err);
-                            ast::Type::new_never()
-                        })
-                })
-                .collect(),
-            ret: Box::new(
-                inferer
-                    .resolve_var(type_var_id_for_ret(f.local_cnt), &f.meta)
-                    .unwrap_or_else(|err| {
-                        e.push(err);
-                        ast::Type::new_never()
-                    }),
-            ),
-        };
-
-        let mut vars = HashSet::new();
-        currently_infered.collect_vars(&mut vars);
-        let new_vars = inferer.alloc_vars(vars.len());
-        let var_subs: HashMap<_, _> = vars
-            .into_iter()
-            .zip(new_vars)
-            .map(|(from, to)| (from, ast::Type::new_var(to)))
-            .collect();
-
-        currently_infered.substitute_vars(&|id| var_subs[&id].clone());
+        let (currently_infered, _) = current_inferred_renamed(f, inferer, &captured_types, e);
 
         return Some(currently_infered);
     }
@@ -1312,11 +1389,22 @@ fn infer_function_type_renamed<'s>(
 fn init_inferer_for_function_inference<'s>(
     f: &ast::Function<'s>,
     inferer: &mut inferer::Inferer<'s>,
+    captured_types: &CapturedTypeInfo<'s>,
 ) -> ast::Type<'s> {
     // allocate type-vars for locals and return-value and captures
-    let _ = inferer.alloc_vars(f.local_cnt + 1 + f.captures.len());
+    let _ = inferer.alloc_vars(f.local_cnt + 1 + f.capture_cnt);
 
     let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt));
+
+    // Assign types to captures
+
+    if f.capture_cnt != 0 {
+        let renamed = inferer.rename_type_vars(&captured_types.types, captured_types.var_cnt);
+
+        renamed.iter().enumerate().for_each(|(i, t)| {
+            let _ = inferer.update_var(type_var_id_for_captured(f.local_cnt, i.into()), &t);
+        });
+    }
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
@@ -1336,6 +1424,13 @@ fn init_inferer_for_function_inference<'s>(
     ret_type
 }
 
+fn type_var_id_for_capture(local_cnt: usize, capture: ast::Capture) -> ast::TypeVarId {
+    match capture {
+        ast::Capture::Local(id, _) => type_var_id_for_local(id),
+        ast::Capture::Capture(id, _) => type_var_id_for_captured(local_cnt, id),
+    }
+}
+
 fn type_var_id_for_local(local: ast::LocalId) -> ast::TypeVarId {
     ast::TypeVarId::from(local.0)
 }
@@ -1348,30 +1443,29 @@ fn type_var_id_for_captured(local_cnt: usize, captured: ast::CapturedId) -> ast:
     ast::TypeVarId::from(captured.0 + local_cnt + 1)
 }
 
-fn construct_function_type<'s>(
+fn construct_function_type<'s, 'a>(
     f: &ast::Function<'s>,
     inferer: &mut inferer::Inferer<'s>,
+    captured_types: &CapturedTypeInfo<'s>,
     e: &mut errors::ManyError,
-    body_expr: &typed::Expr<'s>,
 ) -> ast::FunctionType<'s> {
     ast::FunctionType {
         params: (0..f.arity)
-            .zip(f.param_metas.iter())
-            .map(|(i, m)| {
+            .map(|i| {
                 inferer
-                    .resolve_var(type_var_id_for_local(i.into()), m)
+                    .resolve_var(type_var_id_for_local(i.into()), &f.param_metas[i])
                     .unwrap_or_else(|err| {
                         e.push(err);
                         ast::Type::new_never()
                     })
             })
             .collect(),
-        captures: (0..f.captures.len())
+        captures: (0..f.capture_cnt)
             .map(|i| {
                 inferer
                     .resolve_var(
                         type_var_id_for_captured(f.local_cnt, i.into()),
-                        &f.captures_meta[i],
+                        &captured_types.metas[i],
                     )
                     .unwrap_or_else(|err| {
                         e.push(err);
@@ -1381,7 +1475,7 @@ fn construct_function_type<'s>(
             .collect(),
         ret: Box::new(
             inferer
-                .resolve(&body_expr.type_, &body_expr.meta)
+                .resolve_var(type_var_id_for_ret(f.local_cnt), &f.meta)
                 .unwrap_or_else(|err| {
                     e.push(err);
                     ast::Type::new_never()
@@ -1475,6 +1569,7 @@ fn check_and_resolve_constrains<'s>(
 /// Infer the type a normal function.
 pub fn infer_function<'s>(
     id: ast::FunctionId<'s>,
+    captured_types: &CapturedTypeInfo<'s>,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
@@ -1489,7 +1584,7 @@ pub fn infer_function<'s>(
 
     let mut inferer = inferer::Inferer::new();
 
-    let ret_type = init_inferer_for_function_inference(f, &mut inferer);
+    let ret_type = init_inferer_for_function_inference(f, &mut inferer, &captured_types);
     let assumptions = match &id {
         ast::FunctionId::Method(ins_id, _) => {
             let ins = symbols.instances.get(ins_id).unwrap();
@@ -1517,31 +1612,25 @@ pub fn infer_function<'s>(
 
     inferer
         .unify(&ret_type, &body_expr.type_)
-        .map_err(|_| errors::BodyTypeMismatchAnnotation::new(&body_expr.type_, &body_expr.meta))
+        .map_err(|_| {
+            errors::BodyTypeMismatchAnnotation::new(&body_expr.type_, &body_expr.meta, &inferer)
+        })
         .commit(e);
 
     let body = typed_nodes.push(body_expr);
 
     check_and_resolve_constrains(body, symbols, typed_nodes, &mut inferer, &assumptions, e);
 
-    typed_functions.finish_infering();
-
     // Construct type of function
-    let f_type = construct_function_type(f, &mut inferer, e, &typed_nodes[body]);
-
+    let f_type = construct_function_type(f, &mut inferer, &captured_types, e);
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
-    let (map, var_cnt) = inferer.discretization_function(&f_type);
+    let (map, var_cnt) = inferer.discretization(&f_type);
     let f_type = f_type.substitute_vars_with_nodes(|i| ast::TypeNode::Var(map[&i]));
 
-    typed_nodes.walk(body, &mut |expr| {
-        let resolved = inferer
-            .resolve(&expr.type_, &expr.meta)
-            .unwrap_or_else(|err| {
-                e.push(err);
-                ast::Type::new_never()
-            });
+    typed_functions.finish_infering();
 
+    typed_nodes.walk(body, &mut |expr| {
         macro_rules! get_subst {
             () => {
                 |i| {
@@ -1556,7 +1645,28 @@ pub fn infer_function<'s>(
             };
         }
 
-        expr.type_ = resolved.substitute_vars_with_nodes(get_subst!());
+        let resolved = inferer
+            .resolve(&expr.type_, &expr.meta)
+            .unwrap_or_else(|err| {
+                e.push(err);
+                ast::Type::new_never()
+            });
+
+        let substed_type = resolved.substitute_vars_with_nodes(get_subst!());
+
+        if DEBUG {
+            let report = miette::miette!(
+                labels = vec![miette::LabeledSpan::at(
+                    expr.meta.span(),
+                    format!("{} = {}", &expr.type_, substed_type)
+                ),],
+                ""
+            )
+            .with_source_code(expr.meta.named_source());
+            println!("{:?}", report)
+        }
+
+        expr.type_ = substed_type;
 
         match &mut expr.node {
             typed::ExprNode::UnresolvedMethod {
@@ -1579,7 +1689,7 @@ pub fn infer_function<'s>(
         body,
         meta: f.meta.clone(),
         type_: f_type,
-        captures: f.captures.clone(),
+        capture_cnt: f.capture_cnt,
         local_cnt: f.local_cnt,
     })
 }

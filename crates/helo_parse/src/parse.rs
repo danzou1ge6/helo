@@ -582,19 +582,23 @@ fn let_in_closure_expr<'s>(
     generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
-        let (s1, id) = alphabetic_identifier_str(s)?;
+        let (s1, (id, id_meta)) = alphabetic_identifier_str_with_meta(s, ctx)?;
 
         let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| {
             alphabetic_identifier_str_with_meta(s, ctx)
         })(s1)?;
         let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
 
-        let (s3, _) = trailing_space_tag("=")(s2)?;
+        let (s3, type_) = ncomb::opt(nseq::preceded(trailing_space_tag(":"), |s| {
+            type_callable_type(s, ctx, generic_params)
+        }))(s2)?;
+
+        let (s3, _) = trailing_space_tag("=")(s3)?;
 
         let (s4, body) = expression(s3, ctx, precedence_table, generic_params)?;
 
         let f = tast::Function {
-            type_: None,
+            type_,
             var_cnt: 0,
             body: Box::new(body),
             meta: ctx.meta(s, s4),
@@ -610,6 +614,7 @@ fn let_in_closure_expr<'s>(
         let closure_expr = tast::Expr::new_untyped(
             tast::ExprNode::LetFnIn {
                 identifier: id,
+                identifier_meta: id_meta,
                 f,
                 in_: Box::new(in_),
             },
@@ -1129,7 +1134,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         trailing_space1_tag("builtin"),
         trailing_space1_tag("module"),
         trailing_space_tag("->"),
-        trailing_space_tag("="),
+        trailing_space1_tag("="),
         trailing_space_tag(")"),
         trailing_space_tag(","),
     ))(s)

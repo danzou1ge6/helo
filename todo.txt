@@ -28,4 +28,6 @@
 [x] Ad-hoc polymorphism
 [x] Infix constructor
 [ ] Inline optimization
-[ ] Relation methods for arithmatics
+[x] Relation methods for arithmatics
+[ ] Anonymous closure
+[ ] Fix bug in closure tailcall in virtual machine

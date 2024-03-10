@@ -85,8 +85,11 @@ impl Builtin {
     }
 }
 
-pub fn name_by_id(id: BuiltinId) -> &'static str {
-    BUILTINS[id.0 as usize].0
+pub fn name_by_id(id: BuiltinId) -> String {
+    format!(
+        "{}.{}",
+        BUILTINS[id.0 as usize].0, BUILTINS[id.0 as usize].1
+    )
 }
 
 pub fn get(id: BuiltinId) -> Builtin {

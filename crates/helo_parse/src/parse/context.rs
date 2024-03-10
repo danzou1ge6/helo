@@ -42,7 +42,7 @@ impl<'s> PrecedenceTable<'s> {
                 ("<=", Precedence(31, 30)),
                 (">", Precedence(31, 30)),
                 ("<", Precedence(31, 30)),
-                ("<apply>", Precedence(0, 0))
+                ("<apply>", Precedence(0, 0)),
             ]
             .into_iter()
             .collect(),
@@ -60,21 +60,75 @@ impl<'s> PrecedenceTable<'s> {
     pub const DEFAULT: u32 = 0;
 
     pub fn priority_left(&self, id: &str) -> OpPriority {
-        self.get(id).map(|p| p.left()).map_or_else(|| Self::DEFAULT , |x| x)
+        self.get(id)
+            .map(|p| p.left())
+            .map_or_else(|| Self::DEFAULT, |x| x)
     }
     pub fn priority_right(&self, id: &str) -> OpPriority {
-        self.get(id).map(|p| p.right()).map_or_else(|| Self::DEFAULT, |x| x)
+        self.get(id)
+            .map(|p| p.right())
+            .map_or_else(|| Self::DEFAULT, |x| x)
     }
 }
 
 /// .2 indicates mutable
-type ResolutionEntry<'s> = (&'s str, ast::LocalId, bool);
+type ResolutionEntry<'s> = (&'s str, ast::LocalId, bool, ast::Meta);
 
 #[derive(Default)]
 pub struct FunctionResolutionEnv<'s> {
     locals: Vec<ResolutionEntry<'s>>,
     scope_cnt: Vec<usize>,
     id_cnt: ast::LocalId,
+}
+
+pub struct ClosureResolutionEnv<'s> {
+    env: FunctionResolutionEnv<'s>,
+    captures: Vec<(ast::Capture, bool)>,
+    this_name: &'s str,
+    /// Indicates if this closure or its child closures capture this closure.
+    /// Type inference become tricky under such circumstance, so we need this information
+    /// to force type annotation.
+    recursive: Option<ast::Meta>,
+}
+
+pub struct ClosureInfo {
+    pub captures: Vec<ast::Capture>,
+    pub local_cnt: usize,
+    pub recursive: Option<ast::Meta>,
+}
+
+impl<'s> From<ClosureResolutionEnv<'s>> for ClosureInfo {
+    fn from(value: ClosureResolutionEnv<'s>) -> Self {
+        Self {
+            captures: value.captures.into_iter().map(|(c, _)| c).collect(),
+            local_cnt: value.env.local_cnt(),
+            recursive: value.recursive,
+        }
+    }
+}
+
+impl<'s> ClosureResolutionEnv<'s> {
+    pub fn capture(&mut self, cap: ast::Capture, mutable: bool) -> ast::CapturedId {
+        if let Some((i, _)) = self
+            .captures
+            .iter()
+            .enumerate()
+            .find(|(_, (x, _))| *x == cap)
+        {
+            return ast::CapturedId(i);
+        }
+        let id = ast::CapturedId(self.captures.len());
+        self.captures.push((cap, mutable));
+        id
+    }
+    pub fn new(name: &'s str) -> Self {
+        Self {
+            env: FunctionResolutionEnv::new(),
+            captures: Vec::new(),
+            this_name: name,
+            recursive: None,
+        }
+    }
 }
 
 impl<'s> FunctionResolutionEnv<'s> {
@@ -88,24 +142,44 @@ impl<'s> FunctionResolutionEnv<'s> {
     fn local_cnt(&self) -> usize {
         self.id_cnt.into()
     }
+    pub fn define_local(&mut self, name: &'s str, mutable: bool, meta: ast::Meta) -> ast::LocalId {
+        let id = self.id_cnt;
+        self.locals.push((name, id, mutable, meta));
+        *self.scope_cnt.last_mut().unwrap() += 1;
+        self.id_cnt = id + 1;
+        id
+    }
+    pub fn lookup_local(&self, name: &'s str) -> Option<ResolutionEntry<'s>> {
+        self.locals
+            .iter()
+            .rev()
+            .find(|(sid, _, _, _)| *sid == name)
+            .cloned()
+    }
 }
 
-pub enum ResolutionEnv<'s> {
-    Normal(FunctionResolutionEnv<'s>),
-    InClosure {
-        parent: FunctionResolutionEnv<'s>,
-        current: FunctionResolutionEnv<'s>,
-        captures: Vec<ast::LocalId>,
-        caputures_meta: Vec<ast::Meta>,
-        this_name: &'s str,
-    },
+pub struct ResolutionEnv<'s> {
+    base: FunctionResolutionEnv<'s>,
+    closures: Vec<ClosureResolutionEnv<'s>>,
 }
 
 impl<'s> ResolutionEnv<'s> {
+    fn new() -> Self {
+        Self {
+            base: FunctionResolutionEnv::new(),
+            closures: Vec::new(),
+        }
+    }
+    fn enter_closure(&mut self, name: &'s str) {
+        self.closures.push(ClosureResolutionEnv::new(name))
+    }
+    fn exit_closure(&mut self) -> ClosureInfo {
+        self.closures.pop().unwrap().into()
+    }
     fn current(&mut self) -> &mut FunctionResolutionEnv<'s> {
-        match self {
-            ResolutionEnv::Normal(current) => current,
-            ResolutionEnv::InClosure { current, .. } => current,
+        match self.closures.last_mut() {
+            Some(c) => &mut c.env,
+            None => &mut self.base,
         }
     }
     fn pop(&mut self, cnt: usize) {
@@ -127,25 +201,25 @@ pub struct GlobalSymbols<'s, 'sy, B, F, C, D, R> {
     pub datas: &'sy Trie<ast::DataName<'s>, D, &'s str>,
     pub relations: &'sy Trie<ast::RelationName<'s>, R, &'s str>,
     pub modules: &'sy Trie<ast::Path<'s>, tast::NameSpace<'s>, &'s str>,
-    pub methods: &'sy Trie<ast::FunctionName<'s>, ast::RelationName<'s>, &'s str>
+    pub methods: &'sy Trie<ast::FunctionName<'s>, ast::RelationName<'s>, &'s str>,
 }
 
 impl<'s, 'sy, B, F, C, D, R> GlobalSymbols<'s, 'sy, B, F, C, D, R> {
     pub fn contains(&self, p: ast::PathRefIter<'_, 's>) -> bool {
         self.builtins.contains_path(p)
-        || self.constructors.contains_path(p)
-        || self.datas.contains_path(p)
-        || self.functions.contains_path(p)
-        || self.relations.contains_path(p)
-        || self.methods.contains_path(p)
-        || self.modules.contains_path(p)
+            || self.constructors.contains_path(p)
+            || self.datas.contains_path(p)
+            || self.functions.contains_path(p)
+            || self.relations.contains_path(p)
+            || self.methods.contains_path(p)
+            || self.modules.contains_path(p)
     }
 }
 
 pub struct Resolver<'s, 'sy, B, F, C, D, R> {
     local: ResolutionEnv<'s>,
     pub global: NameSpace<'s>,
-    pub symbols: GlobalSymbols<'s, 'sy, B, F, C, D, R>
+    pub symbols: GlobalSymbols<'s, 'sy, B, F, C, D, R>,
 }
 
 impl<'s, 'sy, B, F, C, D, R> Resolver<'s, 'sy, B, F, C, D, R> {
@@ -159,7 +233,10 @@ impl<'s, 'sy, B, F, C, D, R> Resolver<'s, 'sy, B, F, C, D, R> {
         use tast::IdentifierResolveError::*;
         let mut found = false;
         let mut paths = Vec::new();
-        let r = match self.global.resolve_to_name(path.clone(), self.symbols.builtins) {
+        let r = match self
+            .global
+            .resolve_to_name(path.clone(), self.symbols.builtins)
+        {
             Ok(bn) => {
                 found = true;
                 paths.push(ast::Path::from(bn.clone()));
@@ -237,82 +314,71 @@ impl<'s, 'sy, B, F, C, D, R> Resolver<'s, 'sy, B, F, C, D, R> {
     }
 
     pub fn resolve(&mut self, name: &str, meta: &ast::Meta) -> Option<ast::Expr<'s>> {
-        match self {
-            Self {
-                local: ResolutionEnv::Normal(f_res),
-                ..
-            } => f_res
-                .locals
-                .iter()
-                .rfind(|(n, _, _)| *n == name)
-                .map(|(_, id, mutable)| {
-                    ast::Expr::new_untyped(ast::ExprNode::Local(*id, *mutable), meta.clone())
-                }),
+        if let Some((_, id, mutable, _)) = self.local.current().lookup_local(name) {
+            return Some(ast::Expr::new_untyped(
+                ast::ExprNode::Local(id, mutable),
+                meta.clone(),
+            ));
+        }
 
-            // See documentation on [`ast::Closure_`] for how locals are laid out
-            Self {
-                local:
-                    ResolutionEnv::InClosure {
-                        parent,
-                        current,
-                        captures,
-                        caputures_meta,
-                        this_name,
-                    },
-                ..
-            } => {
-                current
-                    .locals
-                    .iter()
-                    .rfind(|(n, _, _)| *n == name)
-                    .map_or_else(
-                        // Identifier not found as local, look in parent namespace, that is the function body surrounding the closure
-                        || {
-                            parent.locals.iter().rfind(|(n, _, _)| *n == name).map_or(
-                                None,
-                                |(_, id, mutable)| {
-                                    // Found in parent namespace
-                                    if let Some(i) = captures.iter().position(|i| *i == *id) {
-                                        Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured {
-                                                id: i.into(),
-                                                is_self: *this_name == name,
-                                                mutable: *mutable,
-                                            },
-                                            meta.clone(),
-                                        ))
-                                    } else {
-                                        captures.push(*id);
-                                        caputures_meta.push(meta.clone());
-                                        Some(ast::Expr::new_untyped(
-                                            ast::ExprNode::Captured {
-                                                id: (captures.len() - 1).into(),
-                                                is_self: *this_name == name,
-                                                mutable: *mutable,
-                                            },
-                                            meta.clone(),
-                                        ))
-                                    }
-                                },
-                            )
-                        },
-                        // Local
-                        |(_, id, mutable)| {
-                            Some(ast::Expr::new_untyped(
-                                ast::ExprNode::Local(*id, *mutable),
-                                meta.clone(),
-                            ))
-                        },
-                    )
+        if self.local.closures.len() == 0 {
+            return None;
+        }
+
+        let (cap_id, mutable, _) =
+            self.resolve_capture_at_level(self.local.closures.len() - 1, name)?;
+        let is_self = self.local.closures.last().unwrap().this_name == name;
+        Some(ast::Expr::new_untyped(
+            ast::ExprNode::Captured {
+                id: cap_id,
+                is_self,
+                mutable,
+            },
+            meta.clone(),
+        ))
+    }
+
+    /// Look for identifier, starting at `level`. Level 0 is first enclosing closure.
+    fn resolve_capture_at_level(
+        &mut self,
+        level: usize,
+        name: &str,
+    ) -> Option<(ast::CapturedId, bool, ast::Meta)> {
+        if level == 0 {
+            if let Some((_, id, m, meta)) = self.local.base.lookup_local(name) {
+                if self.local.closures[0].this_name == name {
+                    self.local.closures[0].recursive = Some(meta.clone());
+                }
+                return Some((
+                    self.local.closures[0].capture(ast::Capture::Local(id, meta.clone()), m),
+                    m,
+                    meta,
+                ));
             }
+            None
+        } else {
+            if let Some((_, id, m, meta)) = self.local.closures[level - 1].env.lookup_local(name) {
+                if self.local.closures[level].this_name == name {
+                    self.local.closures[level].recursive = Some(meta.clone());
+                }
+                return Some((
+                    self.local.closures[level].capture(ast::Capture::Local(id, meta.clone()), m),
+                    m,
+                    meta,
+                ));
+            }
+            if let Some((cap, m, meta)) = self.resolve_capture_at_level(level - 1, name) {
+                return Some((
+                    self.local.closures[level].capture(ast::Capture::Capture(cap, meta.clone()), m),
+                    m,
+                    meta,
+                ));
+            }
+            None
         }
     }
-    pub fn define_local(&mut self, name: &'s str, mutable: bool) -> ast::LocalId {
-        let id = self.local.current().id_cnt;
-        self.local.current().locals.push((name, id, mutable));
-        *self.local.current().scope_cnt.last_mut().unwrap() += 1;
-        self.local.current().id_cnt = id + 1;
-        id
+    pub fn define_local(&mut self, name: &'s str, mutable: bool, meta: ast::Meta) -> ast::LocalId {
+        self.local.current().define_local(name, mutable, meta)
     }
 
     // Returns local count of the function, along with result of `f`
@@ -320,7 +386,7 @@ impl<'s, 'sy, B, F, C, D, R> Resolver<'s, 'sy, B, F, C, D, R> {
         &mut self,
         f: impl FnOnce(&mut Resolver<'s, 'sy, B, F, C, D, R>) -> R1,
     ) -> (usize, R1) {
-        self.local = ResolutionEnv::Normal(FunctionResolutionEnv::new());
+        self.local = ResolutionEnv::new();
         let r = f(self);
         (self.local.current().local_cnt(), r)
     }
@@ -339,52 +405,25 @@ impl<'s, 'sy, B, F, C, D, R> Resolver<'s, 'sy, B, F, C, D, R> {
 
     /// Set current status to "in-closure", that is , identifiers are resolved further in surrunding namespace
     /// if they are not found in local namespace.
-    /// Return (captures, number of locals, result of `f`)
+    /// Return (captures, number of locals, recursive, result of `f`)
     pub fn with_closure_scope<R1>(
         &mut self,
         this_name: &'s str,
         f: impl FnOnce(&mut Resolver<'s, 'sy, B, F, C, D, R>) -> R1,
-    ) -> (Vec<ast::LocalId>, Vec<ast::Meta>, usize, R1) {
-        let parent = match &mut self.local {
-            ResolutionEnv::Normal(p) => std::mem::take(p),
-            _ => unreachable!(),
-        };
-        self.local = ResolutionEnv::InClosure {
-            parent,
-            current: FunctionResolutionEnv::new(),
-            captures: Vec::new(),
-            caputures_meta: Vec::new(),
-            this_name,
-        };
+    ) -> (ClosureInfo, R1) {
+        self.local.enter_closure(this_name);
 
         let r = f(self);
 
-        let (parent, captures, captures_meta, locals_cnt) = match &mut self.local {
-            ResolutionEnv::InClosure {
-                parent,
-                captures,
-                current,
-                caputures_meta,
-                ..
-            } => (
-                std::mem::take(parent),
-                std::mem::take(captures),
-                std::mem::take(caputures_meta),
-                current.local_cnt(),
-            ),
-            _ => unreachable!(),
-        };
-        self.local = ResolutionEnv::Normal(parent);
-        (captures, captures_meta, locals_cnt, r)
+        let info = self.local.exit_closure();
+
+        (info, r)
     }
-    pub fn new(
-        ns: NameSpace<'s>,
-        sy: GlobalSymbols<'s, 'sy, B, F, C, D, R>
-    ) -> Self {
+    pub fn new(ns: NameSpace<'s>, sy: GlobalSymbols<'s, 'sy, B, F, C, D, R>) -> Self {
         Self {
-            local: ResolutionEnv::Normal(FunctionResolutionEnv::new()),
+            local: ResolutionEnv::new(),
             global: ns,
-            symbols: sy
+            symbols: sy,
         }
     }
 }

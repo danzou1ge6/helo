@@ -62,7 +62,7 @@ pub fn lower_function<'s>(
     let f = symbols.function(fid);
     let mut lower_ctx = Context::new();
     let f_name_id = str_table.add(fid.to_string(&symbols.instances));
-    let ir_f = lower_ctx.with_new_function(f.local_cnt, f.captures.len(), |lower_ctx| {
+    let ir_f = lower_ctx.with_new_function(f.local_cnt, f.capture_cnt, |lower_ctx| {
         let body = lower_expr(
             f.body,
             inferer,
@@ -301,17 +301,26 @@ fn lower_expr<'s>(
             lower_ctx,
             e,
         ),
-        MakeClosure(fid, type_) => lower_make_closure(
-            fid,
+        MakeClosure {
+            f,
+            fty,
+            captures,
+            at,
+            then,
+        } => lower_make_closure(
+            f,
+            captures,
+            *at,
+            *then,
             inferer,
-            type_,
+            fty,
             &expr.meta,
             symbols,
             typed_nodes,
             function_table,
             ir_nodes,
             str_table,
-            &lower_ctx,
+            lower_ctx,
             e,
         ),
         Constructor(name) => {
@@ -1328,6 +1337,13 @@ fn lower_captured<'s>(
     ir_nodes.push(ir::Expr::new(node, captured_meta.into()))
 }
 
+fn map_capture(cap: &ast::Capture, lower_ctx: &Context) -> ir::LocalId {
+    match cap {
+        ast::Capture::Local(id, _) => map_local(*id, lower_ctx),
+        ast::Capture::Capture(id, _) => map_captured(*id, lower_ctx),
+    }
+}
+
 fn map_local(id: ast::LocalId, lower_ctx: &Context) -> ir::LocalId {
     ir::LocalId::from(id.0 + lower_ctx.captured_cnt)
 }
@@ -1368,6 +1384,9 @@ fn unify_simple<'s>(
 
 fn lower_make_closure<'s>(
     fid: &ast::FunctionId<'s>,
+    captures: &Vec<ast::Capture>,
+    at: ast::LocalId,
+    then: typed::ExprId,
     inferer: &Inferer<'s>,
     type_: &ast::FunctionType<'s>,
     closure_meta: &ast::Meta,
@@ -1376,12 +1395,11 @@ fn lower_make_closure<'s>(
     function_table: &mut ir::FunctionTable<'s>,
     ir_nodes: &mut ir::ExprHeap<'s>,
     str_table: &mut ir::StrTable,
-    lower_ctx: &Context,
+    lower_ctx: &mut Context,
     e: &mut ManyError,
 ) -> ir::ExprId {
     let f = symbols.function(fid);
 
-    let inferer = inferer.clone();
     let type_ = inferer.resolve(type_, closure_meta).unwrap();
     let inferer_sub = unify_simple(&f.type_, &type_, f.var_cnt).unwrap_or_else(|_| {
         panic!(
@@ -1401,15 +1419,32 @@ fn lower_make_closure<'s>(
         e,
     );
 
-    ir_nodes.push(ir::Expr::new(
+    let then = lower_expr(
+        then,
+        &inferer,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
+
+    let mk_closure = ir_nodes.push(ir::Expr::new(
         ir::ExprNode::MakeClosure(
             ir_fid,
-            f.captures
-                .iter()
-                .copied()
-                .map(|i| map_local(i, lower_ctx))
-                .collect(),
+            captures.iter().map(|c| map_capture(c, lower_ctx)).collect(),
         ),
+        closure_meta.into(),
+    ));
+
+    ir_nodes.push(ir::Expr::new(
+        ir::ExprNode::LetBind {
+            local: map_local(at, &lower_ctx),
+            value: mk_closure,
+            in_: then,
+        },
         closure_meta.into(),
     ))
 }

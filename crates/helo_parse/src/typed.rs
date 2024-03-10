@@ -32,7 +32,13 @@ pub enum ExprNode<'s> {
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure(FunctionId<'s>, ast::FunctionType<'s>),
+    MakeClosure {
+        f: FunctionId<'s>,
+        fty: ast::FunctionType<'s>,
+        captures: Vec<ast::Capture>,
+        at: LocalId,
+        then: ExprId,
+    },
     Constructor(ConstructorName<'s>),
     UserFunction(FunctionId<'s>),
     UnresolvedMethod {
@@ -97,7 +103,7 @@ pub struct Function<'s> {
     pub type_: ast::FunctionType<'s>,
     pub body: ExprId,
     pub meta: ast::Meta,
-    pub captures: Vec<LocalId>,
+    pub capture_cnt: usize,
     pub local_cnt: usize,
 }
 
@@ -163,8 +169,8 @@ impl<'s> ExprHeap<'s> {
         let node = self.get(root).unwrap().node.clone();
         match node {
             Apply { callee, args } => {
-                self.walk(callee, f);
                 args.iter().for_each(|id| self.walk(*id, f));
+                self.walk(callee, f);
             }
             IfElse { test, then, else_ } => {
                 self.walk(test, f);
@@ -173,11 +179,15 @@ impl<'s> ExprHeap<'s> {
             }
             Case { operand, arms } => {
                 self.walk(operand, f);
-                arms.iter().for_each(|arm| self.walk(arm.result, f));
+                arms.iter()
+                    .for_each(|arm| self.walk(arm.result, f));
             }
             LetIn { value, in_, .. } => {
                 self.walk(value, f);
                 self.walk(in_, f);
+            }
+            MakeClosure { then, .. } => {
+                self.walk(then, f);
             }
             LetPatIn { value, in_, .. } => {
                 self.walk(value, f);

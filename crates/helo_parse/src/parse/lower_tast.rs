@@ -229,6 +229,7 @@ fn lower_relation<'s, R: tast::RelationArity>(
 
 fn lower_instance<'s, R: tast::RelationArity>(
     ins: tast::Instance<'s>,
+    module: ast::Path<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
     datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
@@ -245,6 +246,7 @@ fn lower_instance<'s, R: tast::RelationArity>(
         rel,
         constrains,
         meta: ins.meta,
+        module,
     })
 }
 
@@ -346,7 +348,7 @@ pub fn lower_symbols<'s>(
         |mut tab, (p, i, ins)| {
             let ns = module_namespaces.get_by_path(p.iter()).unwrap();
             if let Ok(ins) =
-                lower_instance(ins, ns, e, &tast_symbols.datas, &tast_symbols.relations)
+                lower_instance(ins, p, ns, e, &tast_symbols.datas, &tast_symbols.relations)
             {
                 let rel_name = ins.rel_name();
                 let ins_id = tab.insert(rel_name.clone(), ins);
@@ -374,7 +376,7 @@ pub fn lower_symbols<'s>(
             }
             let ns = match &fid {
                 ast::FunctionId::Method(ins_id, _) => module_namespaces
-                    .get_by_path(instances.module_for(ins_id).iter())
+                    .get_by_path(instances.get(&ins_id).unwrap().module.iter())
                     .unwrap(),
                 ast::FunctionId::Standard(p) => {
                     module_namespaces.get_by_path(p.head().iter()).unwrap()
@@ -451,9 +453,12 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
 
     let (local_cnt, body) = resolver.with_function_scope(|resolver| {
         resolver.with_scope(|resolver| {
-            f.params.into_iter().for_each(|p| {
-                resolver.define_local(p, !f.pure);
-            });
+            f.params
+                .into_iter()
+                .zip(f.param_metas.iter())
+                .for_each(|(p, m)| {
+                    resolver.define_local(p, !f.pure, m.clone());
+                });
             let body = lower_expr(*f.body, resolver, functions, ast_heap, e);
             body
         })
@@ -486,8 +491,7 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
         body,
         meta: f.meta,
         param_metas: f.param_metas,
-        captures: Vec::new(),
-        captures_meta: Vec::new(),
+        capture_cnt: 0,
         pure: f.pure,
         constrains,
     };
@@ -543,8 +547,22 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
         LetPatIn { bind, value, in_ } => lower_let_pat(
             bind, *value, *in_, expr.meta, type_, resolver, functions, ast_heap, e,
         ),
-        LetFnIn { identifier, f, in_ } => lower_let_fn(
-            identifier, f, *in_, expr.meta, type_, resolver, functions, ast_heap, e,
+        LetFnIn {
+            identifier,
+            identifier_meta,
+            f,
+            in_,
+        } => lower_let_fn(
+            identifier,
+            identifier_meta,
+            f,
+            *in_,
+            expr.meta,
+            type_,
+            resolver,
+            functions,
+            ast_heap,
+            e,
         ),
         Tuple(args) => lower_tuple(args, expr.meta, type_, resolver, functions, ast_heap, e),
         Constant(c) => {
@@ -820,7 +838,10 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
                     Ok(ast::Pattern::Construct(cn, args_lowred, meta))
                 } else {
                     if let Some(id) = p.only_one() {
-                        Ok(ast::Pattern::Bind(resolver.define_local(id, false), meta))
+                        Ok(ast::Pattern::Bind(
+                            resolver.define_local(id, false, meta.clone()),
+                            meta,
+                        ))
                     } else {
                         e.push(errors::NeitherConstructorNorBinding::new(&p, &meta));
                         Err(())
@@ -843,14 +864,20 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 Ok(ast::Pattern::Construct(cn, Vec::new(), p.meta))
             } else {
                 if let Some(id) = p.only_one() {
-                    Ok(ast::Pattern::Bind(resolver.define_local(id, false), p.meta))
+                    Ok(ast::Pattern::Bind(
+                        resolver.define_local(id, false, p.meta.clone()),
+                        p.meta,
+                    ))
                 } else {
                     e.push(errors::NeitherConstructorNorBinding::new(&p, &p.meta));
                     Err(())
                 }
             }
         }
-        MutableBind(id, meta) => Ok(ast::Pattern::Bind(resolver.define_local(id, true), meta)),
+        MutableBind(id, meta) => Ok(ast::Pattern::Bind(
+            resolver.define_local(id, true, meta.clone()),
+            meta,
+        )),
         Literal(constant, meta) => Ok(ast::Pattern::Literal(
             lower_constant(&constant, &meta, e),
             meta,
@@ -939,6 +966,7 @@ fn lower_case_of<'s, 'sy, B, F, C, R: tast::RelationArity>(
 
 fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     id: &'s str,
+    id_meta: Meta,
     f: tast::Function<'s>,
     in_: tast::Expr<'s>,
     let_fn_meta: Meta,
@@ -949,15 +977,17 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
     let r = resolver.with_scope(|resolver| {
-        let local_id = resolver.define_local(id, false);
+        let local_id = resolver.define_local(id, false, id_meta);
 
-        let (captures, captures_meta, local_cnt, body) =
-            resolver.with_closure_scope(id, |resolver| {
-                f.params.iter().for_each(|p| {
-                    resolver.define_local(p, !f.pure);
+        let (cinfo, body) = resolver.with_closure_scope(id, |resolver| {
+            f.params
+                .iter()
+                .zip(f.param_metas.iter())
+                .for_each(|(p, m)| {
+                    resolver.define_local(p, !f.pure, m.clone());
                 });
-                lower_expr(*f.body, resolver, functions, ast_heap, e)
-            });
+            lower_expr(*f.body, resolver, functions, ast_heap, e)
+        });
 
         let constrains = f
             .constrains
@@ -974,37 +1004,46 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
             })
             .collect();
 
+        let f_type = f
+            .type_
+            .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
+
+        if f_type.is_none() && cinfo.recursive.is_some() {
+            e.push(errors::TypeAnnotationForRecursiveClosure::new(
+                &f.meta,
+                &cinfo.recursive.unwrap(),
+            ));
+        }
+
         let ast_f = ast::Function {
-            type_: None,
+            type_: f_type,
             var_cnt: 0,
-            local_cnt,
+            local_cnt: cinfo.local_cnt,
             arity: f.params.len(),
             body,
             meta: f.meta.clone(),
             param_metas: f.param_metas,
-            captures,
-            captures_meta,
+            capture_cnt: cinfo.captures.len(),
             pure: f.pure,
             constrains,
         };
         let closure_fid = ast::FunctionId::of_closure_at(&f.meta);
         functions.insert(closure_fid.clone(), ast_f);
 
-        let closure_expr = ast_heap.push(ast::Expr::new_untyped(
-            ast::ExprNode::MakeClosure(closure_fid),
-            f.meta.clone(),
-        ));
-
         let in_ = lower_expr(in_, resolver, functions, ast_heap, e);
-        ast::Expr::new(
-            ast::ExprNode::LetIn {
-                bind: local_id,
-                value: closure_expr,
-                in_,
+
+        let closure_expr = ast::Expr::new(
+            ast::ExprNode::MakeClosure {
+                at: local_id,
+                f: closure_fid,
+                captures: cinfo.captures,
+                then: in_,
             },
             let_fn_meta,
             type_,
-        )
+        );
+
+        closure_expr
     });
     ast_heap.push(r)
 }

@@ -212,9 +212,9 @@ impl<'s> FunctionId<'s> {
         ins_tab: &ast::InstanceTable<'s>,
     ) -> std::fmt::Result {
         self.ast_id.fmt(f, ins_tab)?;
-        write!(f, "::<")?;
+        write!(f, ".[")?;
         ast::str_join_vec(f, ", ", self.type_args.as_slice())?;
-        write!(f, ">")
+        write!(f, "]")
     }
     pub fn to_string(&self, ins_tab: &ast::InstanceTable<'s>) -> String {
         let mut buf = String::new();

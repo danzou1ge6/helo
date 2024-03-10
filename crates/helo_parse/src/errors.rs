@@ -1,7 +1,7 @@
+use crate::inferer::Inferer;
+use crate::{ast, parse::tast};
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 use thiserror::Error;
-
-use crate::{ast, parse::tast};
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Can only assign to local mutable variable")]
@@ -176,10 +176,11 @@ impl UnificationFailure {
         b: &ast::Type<'s>,
         b_meta: &ast::Meta,
         meta: &ast::Meta,
+        inferer: &Inferer<'s>,
     ) -> Self {
         UnificationFailure {
-            a: a.to_string(),
-            b: b.to_string(),
+            a: type_to_string(a, inferer, a_meta),
+            b: type_to_string(b, inferer, b_meta),
             src: meta.named_source(),
             span: meta.span(),
             a_span: a_meta.span(),
@@ -189,7 +190,7 @@ impl UnificationFailure {
 }
 
 #[derive(Diagnostic, Debug, Error)]
-#[error("Unification Failure: can't unify local {local} with value = {value}")]
+#[error("Unification Failure: can't unify local {local} with value of type {value}")]
 pub struct LocalUnificationFailure {
     pub local: String,
     pub value: String,
@@ -207,13 +208,34 @@ impl LocalUnificationFailure {
         value: &ast::Type<'s>,
         value_meta: &ast::Meta,
         meta: &ast::Meta,
+        inferer: &Inferer<'s>,
     ) -> Self {
         Self {
             local: local.to_string(),
-            value: value.to_string(),
+            value: type_to_string(value, inferer, meta),
             src: meta.named_source(),
             span: meta.span(),
             value_span: value_meta.span(),
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Unification Failure: can't unify captured local with value of type {value}")]
+pub struct CaptureUnificationFailure {
+    pub value: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Variable here is captured")]
+    pub span: SourceSpan,
+}
+
+impl CaptureUnificationFailure {
+    pub fn new<'s>(value: &ast::Type<'s>, meta: &ast::Meta, inferer: &Inferer<'s>) -> Self {
+        Self {
+            value: type_to_string(value, inferer, meta),
+            src: meta.named_source(),
+            span: meta.span(),
         }
     }
 }
@@ -247,14 +269,14 @@ pub struct BodyTypeMismatchAnnotation {
     pub value: String,
     #[source_code]
     pub src: NamedSource,
-    #[label("Functio body here has type {}", .value)]
+    #[label("Function body here has type {}", .value)]
     pub span: SourceSpan,
 }
 
 impl BodyTypeMismatchAnnotation {
-    pub fn new<'s>(value: &ast::Type<'s>, meta: &ast::Meta) -> Self {
+    pub fn new<'s>(value: &ast::Type<'s>, meta: &ast::Meta, inferer: &Inferer<'s>) -> Self {
         Self {
-            value: value.to_string(),
+            value: type_to_string(value, inferer, meta),
             src: meta.named_source(),
             span: meta.span(),
         }
@@ -282,10 +304,11 @@ impl PatternUnificationFailure {
         i: usize,
         arg_meta: &ast::Meta,
         ctx_meta: &ast::Meta,
+        inferer: &Inferer<'s>,
     ) -> Self {
         Self {
-            arg_type: arg_type.to_string(),
-            param_type: param_type.to_string(),
+            arg_type: type_to_string(arg_type, inferer, arg_meta),
+            param_type: type_to_string(param_type, inferer, ctx_meta),
             i,
             src: ctx_meta.named_source(),
             span: ctx_meta.span(),
@@ -307,9 +330,14 @@ pub struct ArmTypeUnificationFailure {
 }
 
 impl ArmTypeUnificationFailure {
-    pub fn new<'s>(value: &ast::Type<'s>, value_meta: &ast::Meta, meta: &ast::Meta) -> Self {
+    pub fn new<'s>(
+        value: &ast::Type<'s>,
+        value_meta: &ast::Meta,
+        meta: &ast::Meta,
+        inferer: &Inferer<'s>,
+    ) -> Self {
         Self {
-            value: value.to_string(),
+            value: type_to_string(value, inferer, value_meta),
             src: meta.named_source(),
             span: meta.span(),
             value_span: value_meta.span(),
@@ -332,6 +360,12 @@ pub struct ArgumentUnificationFailure {
     pub callee_span: SourceSpan,
 }
 
+fn type_to_string<'s>(t: &ast::Type<'s>, inferer: &Inferer<'s>, meta: &ast::Meta) -> String {
+    inferer
+        .resolve(t, meta)
+        .map_or_else(|_| "<Infinite Type>".to_string(), |t| t.to_string())
+}
+
 impl ArgumentUnificationFailure {
     pub fn new<'s>(
         a: &ast::Type<'s>,
@@ -339,10 +373,11 @@ impl ArgumentUnificationFailure {
         b: &ast::Type<'s>,
         arg_meta: &ast::Meta,
         meta: &ast::Meta,
+        inferer: &Inferer<'s>,
     ) -> Self {
         Self {
-            a: a.to_string(),
-            b: b.to_string(),
+            a: type_to_string(a, inferer, callee_meta),
+            b: type_to_string(b, inferer, arg_meta),
             src: meta.named_source(),
             span: meta.span(),
             callee_span: callee_meta.span(),
@@ -367,13 +402,14 @@ impl ArgumentsUnificationFailure {
         callee_type: &ast::Type<'s>,
         mut args_types: impl Iterator<Item = &'a ast::Type<'s>>,
         meta: &ast::Meta,
+        inferer: &Inferer<'s>,
     ) -> Self {
         Self {
             callee: callee_type.to_string(),
             args: {
                 let mut s = String::new();
                 if let Some(first) = args_types.next() {
-                    s.push_str(&first.to_string());
+                    s.push_str(&type_to_string(&first, inferer, meta));
                 }
                 for arg_typ in args_types {
                     s.push_str(&format!(", {}", arg_typ));
@@ -607,6 +643,27 @@ impl TooManyArguments {
             src: meta.named_source(),
             span: meta.span(),
             expected,
+        }
+    }
+}
+
+#[derive(Diagnostic, Debug, Error)]
+#[error("Type annotation required for recursive closure")]
+pub struct TypeAnnotationForRecursiveClosure {
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Closure definition here")]
+    pub closure_span: SourceSpan,
+    #[label("The closure is recursive due to reference here")]
+    pub ref_span: SourceSpan,
+}
+
+impl TypeAnnotationForRecursiveClosure {
+    pub fn new(closure_meta: &ast::Meta, reference_meta: &ast::Meta) -> Self {
+        Self {
+            src: closure_meta.named_source(),
+            closure_span: closure_meta.span(),
+            ref_span: reference_meta.span(),
         }
     }
 }

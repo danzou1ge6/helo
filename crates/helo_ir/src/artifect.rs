@@ -35,16 +35,20 @@ pub fn infer_type<'s>(
     let mut typed_functions = typed::FunctionTable::new();
 
     for f_id in symbols.functions.keys() {
-        let f = infer::infer_function(
-            f_id.clone(),
-            &symbols,
-            &ast_nodes,
-            &mut typed_nodes,
-            &mut typed_functions,
-            e,
-        );
-        if let Some(f) = f {
-            typed_functions.insert(f_id.clone(), f);
+        // Closures well be inferred in enclosing functions
+        if !typed_functions.contains(&f_id) && !f_id.is_closure() {
+            let f = infer::infer_function(
+                f_id.clone(),
+                &infer::CapturedTypeInfo::empty(),
+                &symbols,
+                &ast_nodes,
+                &mut typed_nodes,
+                &mut typed_functions,
+                e,
+            );
+            if let Some(f) = f {
+                typed_functions.insert(f_id.clone(), f);
+            }
         }
     }
 

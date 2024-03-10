@@ -370,6 +370,7 @@ pub enum ExprNode<'s> {
     },
     LetFnIn {
         identifier: &'s str,
+        identifier_meta: Meta,
         f: Function<'s>,
         in_: Box<Expr<'s>>,
     },
