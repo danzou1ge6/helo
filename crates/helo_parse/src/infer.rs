@@ -85,12 +85,12 @@ fn infer_expr<'s>(
             inferer,
             e,
         ),
-        ExprNode::MakeClosure {
+        ExprNode::MakeClosureAt {
             at,
             f,
             captures,
             then,
-        } => infer_make_closure(
+        } => infer_make_closure_at(
             *at,
             f,
             captures,
@@ -102,6 +102,17 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            e,
+        ),
+        ExprNode::MakeClosure { f, captures } => infer_make_closure(
+            f,
+            captures,
+            &expr.meta,
+            symbols,
+            ast_nodes,
+            typed_nodes,
+            typed_functions,
+            inferer,
             e,
         ),
         ExprNode::UserFunction(name) => infer_user_function(
@@ -973,20 +984,18 @@ impl<'s> CapturedTypeInfo<'s> {
     }
 }
 
-fn infer_make_closure<'s>(
-    at: ast::LocalId,
+fn infer_closure<'s>(
+    at: Option<ast::LocalId>,
     f_id: &ast::FunctionId<'s>,
     captures: &Vec<ast::Capture>,
-    then: ast::ExprId,
     meta: &ast::Meta,
     symbols: &ast::Symbols<'s>,
     ast_nodes: &ast::ExprHeap<'s>,
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
-    assumptions: &constrain::Assumptions<'s>,
     e: &mut errors::ManyError,
-) -> typed::Expr<'s> {
+) -> Option<ast::FunctionType<'s>> {
     // Check purity
     if !symbols.functions.get(&f_id).unwrap().pure
         && symbols
@@ -999,21 +1008,23 @@ fn infer_make_closure<'s>(
     }
 
     let f = symbols.functions.get(f_id).unwrap();
-    let callable_constructor = if f.pure {
-        ast::TypeNode::Callable
-    } else {
-        ast::TypeNode::ImpureCallable
-    };
 
     // Assign local bound to the closure a type, if any
     if let Some(f_type) = &f.type_ {
-        let renamed_ftype = inferer.rename_type_vars(f_type, f.var_cnt);
-        inferer
-            .update_var(
-                type_var_id_for_local(at),
-                &ast::Type::new(callable_constructor(renamed_ftype)),
-            )
-            .expect("`at` should be a fresh type var, and updating it shouldn't go wrong");
+        if let Some(at) = at {
+            let callable_constructor = if f.pure {
+                ast::TypeNode::Callable
+            } else {
+                ast::TypeNode::ImpureCallable
+            };
+            let renamed_ftype = inferer.rename_type_vars(f_type, f.var_cnt);
+            inferer
+                .update_var(
+                    type_var_id_for_local(at),
+                    &ast::Type::new(callable_constructor(renamed_ftype)),
+                )
+                .expect("`at` should be a fresh type var, and updating it shouldn't go wrong");
+        }
     }
 
     let local_cnt = symbols.functions[typed_functions.currently_infering().unwrap()].local_cnt;
@@ -1039,7 +1050,7 @@ fn infer_make_closure<'s>(
         metas: captures.iter().map(|c| c.meta().clone()).collect(),
     };
 
-    infer_function_type_renamed(
+    match infer_function_type_renamed(
         f_id.clone(),
         &captured_type_info,
         meta,
@@ -1049,15 +1060,11 @@ fn infer_make_closure<'s>(
         typed_functions,
         inferer,
         e,
-    )
-    .map_or_else(
-        || typed::Expr {
-            node: typed::ExprNode::Never,
-            type_: ast::Type::new_never(),
-            meta: meta.clone(),
-        },
-        |c| {
-            c.captures
+    ) {
+        Some(f_type) => {
+            // Unify types for each capture
+            f_type
+                .captures
                 .iter()
                 .zip(captures.iter())
                 .for_each(|(ctype, cap)| {
@@ -1068,8 +1075,89 @@ fn infer_make_closure<'s>(
                         })
                         .commit(e);
                 });
-            let closure_type = ast::Type {
-                node: callable_constructor(c.clone().into()),
+
+            Some(f_type)
+        }
+        None => None,
+    }
+}
+
+fn infer_make_closure<'s>(
+    f_id: &ast::FunctionId<'s>,
+    captures: &Vec<ast::Capture>,
+    meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    match infer_closure(
+        None,
+        f_id,
+        captures,
+        meta,
+        symbols,
+        ast_nodes,
+        typed_nodes,
+        typed_functions,
+        inferer,
+        e,
+    ) {
+        Some(f_type) => typed::Expr {
+            node: typed::ExprNode::MakeClosure {
+                f: f_id.clone(),
+                type_: f_type.clone(),
+                captures: captures.clone(),
+            },
+            type_: if symbols.functions.get(f_id).unwrap().pure {
+                ast::Type::new(ast::TypeNode::Callable(f_type.into()))
+            } else {
+                ast::Type::new(ast::TypeNode::ImpureCallable(f_type.into()))
+            },
+            meta: meta.clone(),
+        },
+        None => typed::Expr {
+            node: typed::ExprNode::Never,
+            type_: ast::Type::new_never(),
+            meta: meta.clone(),
+        },
+    }
+}
+
+fn infer_make_closure_at<'s>(
+    at: ast::LocalId,
+    f_id: &ast::FunctionId<'s>,
+    captures: &Vec<ast::Capture>,
+    then: ast::ExprId,
+    meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    ast_nodes: &ast::ExprHeap<'s>,
+    typed_nodes: &mut typed::ExprHeap<'s>,
+    typed_functions: &mut typed::FunctionTable<'s>,
+    inferer: &mut inferer::Inferer<'s>,
+    assumptions: &constrain::Assumptions<'s>,
+    e: &mut errors::ManyError,
+) -> typed::Expr<'s> {
+    match infer_closure(
+        Some(at),
+        f_id,
+        captures,
+        meta,
+        symbols,
+        ast_nodes,
+        typed_nodes,
+        typed_functions,
+        inferer,
+        e,
+    ) {
+        Some(f_type) => {
+            let f = symbols.functions.get(f_id).unwrap();
+            let closure_type = if f.pure {
+                ast::Type::new(ast::TypeNode::Callable(f_type.clone().into()))
+            } else {
+                ast::Type::new(ast::TypeNode::ImpureCallable(f_type.clone().into()))
             };
 
             inferer
@@ -1096,9 +1184,9 @@ fn infer_make_closure<'s>(
             let then_id = typed_nodes.push(then);
 
             typed::Expr {
-                node: typed::ExprNode::MakeClosure {
+                node: typed::ExprNode::MakeClosureAt {
                     f: f_id.clone(),
-                    fty: c,
+                    type_: f_type,
                     captures: captures.clone(),
                     at,
                     then: then_id,
@@ -1106,8 +1194,13 @@ fn infer_make_closure<'s>(
                 type_: then_type,
                 meta: meta.clone(),
             }
+        }
+        None => typed::Expr {
+            node: typed::ExprNode::Never,
+            type_: ast::Type::new_never(),
+            meta: meta.clone(),
         },
-    )
+    }
 }
 
 fn infer_pattern_type<'s>(

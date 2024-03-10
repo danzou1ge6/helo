@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+use super::context::ClosureInfo;
 use super::context::GlobalSymbols;
 use super::tast;
 use super::tast::Path;
@@ -564,6 +565,9 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
             ast_heap,
             e,
         ),
+        AnonymousClosure(f) => {
+            lower_anonymous_closure(f, expr.meta, type_, resolver, functions, ast_heap, e)
+        }
         Tuple(args) => lower_tuple(args, expr.meta, type_, resolver, functions, ast_heap, e),
         Constant(c) => {
             let expr = ast::Expr::new(
@@ -592,6 +596,101 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
         }
         Unit => ast_heap.push(ast::Expr::new_untyped(ast::ExprNode::Unit, expr.meta)),
     }
+}
+
+fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
+    id: &'s str,
+    f: tast::Function<'s>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    functions: &mut ast::FunctionTable<'s>,
+    ast_heap: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+) -> (ClosureInfo, ast::FunctionId<'s>) {
+    let (cinfo, body) = resolver.with_closure_scope(id, |resolver| {
+        f.params
+            .iter()
+            .zip(f.param_metas.iter())
+            .for_each(|(p, m)| {
+                resolver.define_local(p, !f.pure, m.clone());
+            });
+        lower_expr(*f.body, resolver, functions, ast_heap, e)
+    });
+
+    let constrains = f
+        .constrains
+        .into_iter()
+        .filter_map(|c| {
+            lower_constrain(
+                c,
+                &resolver.global,
+                e,
+                resolver.symbols.datas,
+                resolver.symbols.relations,
+            )
+            .ok()
+        })
+        .collect();
+
+    let f_type = f
+        .type_
+        .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
+
+    if f_type.is_none() && cinfo.recursive.is_some() {
+        e.push(errors::TypeAnnotationForRecursiveClosure::new(
+            &f.meta,
+            &cinfo.recursive.clone().unwrap(),
+        ));
+    }
+
+    let ast_f = ast::Function {
+        type_: f_type,
+        var_cnt: 0,
+        local_cnt: cinfo.local_cnt,
+        arity: f.params.len(),
+        body,
+        meta: f.meta.clone(),
+        param_metas: f.param_metas,
+        capture_cnt: cinfo.captures.len(),
+        pure: f.pure,
+        constrains,
+    };
+    let closure_fid = ast::FunctionId::of_closure_at(&f.meta);
+    functions.insert(closure_fid.clone(), ast_f);
+
+    (cinfo, closure_fid)
+}
+
+fn lower_anonymous_closure<'s, 'sy, B, F, C, R: tast::RelationArity>(
+    f: tast::Function<'s>,
+    closure_meta: Meta,
+    type_: Option<(ast::Type<'s>, Meta)>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    functions: &mut ast::FunctionTable<'s>,
+    ast_heap: &mut ast::ExprHeap<'s>,
+    e: &mut errors::ManyError,
+) -> ast::ExprId {
+    let r = resolver.with_scope(|resolver| {
+        let (cinfo, closure_fid) = lower_closure_function(
+            "<this closure is not bound to any local>",
+            f,
+            resolver,
+            functions,
+            ast_heap,
+            e,
+        );
+
+        let closure_expr = ast::Expr::new(
+            ast::ExprNode::MakeClosure {
+                f: closure_fid,
+                captures: cinfo.captures,
+            },
+            closure_meta,
+            type_,
+        );
+
+        closure_expr
+    });
+    ast_heap.push(r)
 }
 
 fn lower_in_namespace<'s, 'sy, B, F, C, R: tast::RelationArity>(
@@ -979,61 +1078,19 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     let r = resolver.with_scope(|resolver| {
         let local_id = resolver.define_local(id, false, id_meta);
 
-        let (cinfo, body) = resolver.with_closure_scope(id, |resolver| {
-            f.params
-                .iter()
-                .zip(f.param_metas.iter())
-                .for_each(|(p, m)| {
-                    resolver.define_local(p, !f.pure, m.clone());
-                });
-            lower_expr(*f.body, resolver, functions, ast_heap, e)
-        });
-
-        let constrains = f
-            .constrains
-            .into_iter()
-            .filter_map(|c| {
-                lower_constrain(
-                    c,
-                    &resolver.global,
-                    e,
-                    resolver.symbols.datas,
-                    resolver.symbols.relations,
-                )
-                .ok()
-            })
-            .collect();
-
-        let f_type = f
-            .type_
-            .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
-
-        if f_type.is_none() && cinfo.recursive.is_some() {
-            e.push(errors::TypeAnnotationForRecursiveClosure::new(
-                &f.meta,
-                &cinfo.recursive.unwrap(),
-            ));
-        }
-
-        let ast_f = ast::Function {
-            type_: f_type,
-            var_cnt: 0,
-            local_cnt: cinfo.local_cnt,
-            arity: f.params.len(),
-            body,
-            meta: f.meta.clone(),
-            param_metas: f.param_metas,
-            capture_cnt: cinfo.captures.len(),
-            pure: f.pure,
-            constrains,
-        };
-        let closure_fid = ast::FunctionId::of_closure_at(&f.meta);
-        functions.insert(closure_fid.clone(), ast_f);
+        let (cinfo, closure_fid) = lower_closure_function(
+            "<this closure is not bound to any local>",
+            f,
+            resolver,
+            functions,
+            ast_heap,
+            e,
+        );
 
         let in_ = lower_expr(in_, resolver, functions, ast_heap, e);
 
         let closure_expr = ast::Expr::new(
-            ast::ExprNode::MakeClosure {
+            ast::ExprNode::MakeClosureAt {
                 at: local_id,
                 f: closure_fid,
                 captures: cinfo.captures,

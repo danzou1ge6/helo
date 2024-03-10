@@ -574,6 +574,46 @@ fn function_params<'s>(
     nom_context("function parameters", parse)(s)
 }
 
+fn anonymous_closure_expr<'s>(
+    s: &'s str,
+    pure: bool,
+    ctx: &Context<'s>,
+    precedence_table: &PrecedenceTable<'s>,
+    generic_params: &Vec<&'s str>,
+) -> EResult<'s> {
+    let parse = |s| {
+        let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| {
+            alphabetic_identifier_str_with_meta(s, ctx)
+        })(s)?;
+        let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
+
+        let (s3, type_) = ncomb::opt(nseq::preceded(trailing_space_tag(":"), |s| {
+            type_callable_type(s, ctx, generic_params)
+        }))(s2)?;
+
+        let (s3, _) = trailing_space_tag("->")(s3)?;
+
+        let (s4, body) = expression(s3, ctx, precedence_table, generic_params)?;
+
+        let f = tast::Function {
+            type_,
+            var_cnt: 0,
+            body: Box::new(body),
+            meta: ctx.meta(s, s4),
+            params,
+            param_metas: params_meta,
+            pure,
+            constrains: Vec::new(),
+        };
+
+        let closure_expr =
+            tast::Expr::new_untyped(tast::ExprNode::AnonymousClosure(f), ctx.meta(s, s4));
+
+        Ok((s4, closure_expr))
+    };
+    nom_context("anonymous closure expression", parse)(s)
+}
+
 fn let_in_closure_expr<'s>(
     s: &'s str,
     pure: bool,
@@ -740,9 +780,7 @@ fn type_callable<'s>(
 ) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
         let (s2, params) =
-            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
-                s,
-            )?;
+            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(s)?;
         let (s3, _) = trailing_space_tag("]")(s2)?;
 
         let (s3, _) = trailing_space_tag("->")(s3)?;
@@ -1017,6 +1055,10 @@ fn prefix_expression<'s>(
             let_in_expr(s1, ctx, precedence_table, generic_params)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("begin"))(s)? {
             seq_expr(s1, ctx, precedence_table, generic_params)
+        } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\"))(s)? {
+            anonymous_closure_expr(s1, true, ctx, precedence_table, generic_params)
+        } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\'"))(s)? {
+            anonymous_closure_expr(s1, false, ctx, precedence_table, generic_params)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("use"))(s)? {
             let (s2, ns_ops) = use_decl(s1, ctx)?;
             let (s2, _) = trailing_space1_tag("in")(s2)?;

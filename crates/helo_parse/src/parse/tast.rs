@@ -374,6 +374,7 @@ pub enum ExprNode<'s> {
         f: Function<'s>,
         in_: Box<Expr<'s>>,
     },
+    AnonymousClosure(Function<'s>),
     Tuple(Vec<Expr<'s>>),
     Constant(Constant<'s>),
     Identifier(&'s str),

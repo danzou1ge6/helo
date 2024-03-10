@@ -32,12 +32,17 @@ pub enum ExprNode<'s> {
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure {
+    MakeClosureAt {
         f: FunctionId<'s>,
-        fty: ast::FunctionType<'s>,
+        type_: ast::FunctionType<'s>,
         captures: Vec<ast::Capture>,
         at: LocalId,
         then: ExprId,
+    },
+    MakeClosure {
+        f: FunctionId<'s>,
+        type_: ast::FunctionType<'s>,
+        captures: Vec<ast::Capture>,
     },
     Constructor(ConstructorName<'s>),
     UserFunction(FunctionId<'s>),
@@ -179,14 +184,13 @@ impl<'s> ExprHeap<'s> {
             }
             Case { operand, arms } => {
                 self.walk(operand, f);
-                arms.iter()
-                    .for_each(|arm| self.walk(arm.result, f));
+                arms.iter().for_each(|arm| self.walk(arm.result, f));
             }
             LetIn { value, in_, .. } => {
                 self.walk(value, f);
                 self.walk(in_, f);
             }
-            MakeClosure { then, .. } => {
+            MakeClosureAt { then, .. } => {
                 self.walk(then, f);
             }
             LetPatIn { value, in_, .. } => {

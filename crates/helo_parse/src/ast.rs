@@ -314,11 +314,15 @@ pub enum ExprNode<'s> {
         value: ExprId,
         in_: ExprId,
     },
-    MakeClosure {
+    MakeClosureAt {
         at: LocalId,
         f: FunctionId<'s>,
         captures: Vec<Capture>,
         then: ExprId,
+    },
+    MakeClosure {
+        f: FunctionId<'s>,
+        captures: Vec<Capture>
     },
     Constructor(ConstructorName<'s>),
     Builtin(BuiltinFunctionName<'s>),

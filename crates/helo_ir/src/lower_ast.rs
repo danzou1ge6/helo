@@ -302,17 +302,35 @@ fn lower_expr<'s>(
             lower_ctx,
             e,
         ),
-        MakeClosure {
+        MakeClosureAt {
             f,
-            fty,
+            type_: fty,
             captures,
             at,
             then,
-        } => lower_make_closure(
+        } => lower_make_closure_at(
             f,
             captures,
             *at,
             *then,
+            inferer,
+            fty,
+            &expr.meta,
+            symbols,
+            typed_nodes,
+            function_table,
+            ir_nodes,
+            str_table,
+            lower_ctx,
+            e,
+        ),
+        MakeClosure {
+            f,
+            type_: fty,
+            captures,
+        } => lower_make_closure(
+            f,
+            captures,
             inferer,
             fty,
             &expr.meta,
@@ -1386,8 +1404,6 @@ fn unify_simple<'s>(
 fn lower_make_closure<'s>(
     fid: &ast::FunctionId<'s>,
     captures: &Vec<ast::Capture>,
-    at: ast::LocalId,
-    then: typed::ExprId,
     inferer: &Inferer<'s>,
     type_: &ast::FunctionType<'s>,
     closure_meta: &ast::Meta,
@@ -1419,6 +1435,46 @@ fn lower_make_closure<'s>(
         str_table,
         e,
     );
+    let mk_closure = ir_nodes.push(ir::Expr::new(
+        ir::ExprNode::MakeClosure(
+            ir_fid,
+            captures.iter().map(|c| map_capture(c, lower_ctx)).collect(),
+        ),
+        closure_meta.into(),
+    ));
+
+    mk_closure
+}
+fn lower_make_closure_at<'s>(
+    fid: &ast::FunctionId<'s>,
+    captures: &Vec<ast::Capture>,
+    at: ast::LocalId,
+    then: typed::ExprId,
+    inferer: &Inferer<'s>,
+    type_: &ast::FunctionType<'s>,
+    closure_meta: &ast::Meta,
+    symbols: &typed::Symbols<'s>,
+    typed_nodes: &typed::ExprHeap<'s>,
+    function_table: &mut ir::FunctionTable<'s>,
+    ir_nodes: &mut ir::ExprHeap<'s>,
+    str_table: &mut ir::StrTable,
+    lower_ctx: &mut Context,
+    e: &mut ManyError,
+) -> ir::ExprId {
+    let mk_closure = lower_make_closure(
+        fid,
+        captures,
+        inferer,
+        type_,
+        closure_meta,
+        symbols,
+        typed_nodes,
+        function_table,
+        ir_nodes,
+        str_table,
+        lower_ctx,
+        e,
+    );
 
     let then = lower_expr(
         then,
@@ -1431,14 +1487,6 @@ fn lower_make_closure<'s>(
         lower_ctx,
         e,
     );
-
-    let mk_closure = ir_nodes.push(ir::Expr::new(
-        ir::ExprNode::MakeClosure(
-            ir_fid,
-            captures.iter().map(|c| map_capture(c, lower_ctx)).collect(),
-        ),
-        closure_meta.into(),
-    ));
 
     ir_nodes.push(ir::Expr::new(
         ir::ExprNode::LetBind {
