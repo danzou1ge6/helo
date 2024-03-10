@@ -6,7 +6,11 @@ use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
 
+#[cfg(debug_assertions)]
 const DEBUG: bool = true;
+
+#[cfg(not(debug_assertions))]
+const DBUEG: bool = false;
 
 fn infer_expr<'s>(
     expr_id: ast::ExprId,

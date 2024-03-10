@@ -1,11 +1,7 @@
 use ops
 
-fn f x: [Int] -> [Int] -> Int =
-    let fn g y: [Int] -> Int = 
-        if y > x then g (y - 1) else y
-    in g
+fn f x: [Int] -> _ = x + 1
 
 routine main =
-    let g = f 10 in
-    let k = g 20 in
+    let k = f 10 in
     io.println (fmt.to_string k)

@@ -33,5 +33,5 @@
 [-] Fix bug in closure tailcall in virtual machine
     This problem never existed. I thought of it long ago.
 [x] Fix bug in discovering closure tailcall
-[ ] Fix bug of fail to unify wildcard type
+[x] Fix bug of fail to unify wildcard type
 [ ] Force arithmatic operators to take two operands of same type

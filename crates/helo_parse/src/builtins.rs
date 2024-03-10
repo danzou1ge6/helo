@@ -14,16 +14,16 @@ const BUILTIN_SIGS: &'static str = r#"
         builtin fn /   a,b : [Int, Int] -> Int = ..
         builtin fn mod a,b : [Int, Int] -> Int = ..
 
-        instance ops.Add Int,Int,Int
+        instance ops.Add Int,Int
             fn + a,b = a + b
         end
-        instance ops.Subs Int,Int,Int
+        instance ops.Subs Int,Int
             fn - a,b = a - b
         end
-        instance ops.Mul Int,Int,Int
+        instance ops.Mul Int,Int
             fn * a,b = a * b
         end
-        instance ops.Div Int,Int,Int
+        instance ops.Div Int,Int
             fn / a,b = a / b
         end
         instance ops.Pow Int,Int,Int
@@ -40,22 +40,22 @@ const BUILTIN_SIGS: &'static str = r#"
         builtin fn >  a,b : [Int, Int] -> Bool = ..
         builtin fn <  a,b : [Int, Int] -> Bool = ..
 
-        instance ops.Eq Int,Int
+        instance ops.Eq Int
             fn == a,b = a == b
         end
-        instance ops.Ne Int,Int
+        instance ops.Ne Int
             fn /= a,b = a /= b
         end
-        instance ops.Gt Int,Int
+        instance ops.Gt Int
             fn > a,b = a > b
         end
-        instance ops.Lt Int,Int
+        instance ops.Lt Int
             fn < a,b = a < b
         end
-        instance ops.Ge Int,Int
+        instance ops.Ge Int
             fn >= a,b = a >= b
         end
-        instance ops.Le Int,Int
+        instance ops.Le Int
             fn <= a,b = a <= b
         end
 
@@ -70,16 +70,16 @@ const BUILTIN_SIGS: &'static str = r#"
         builtin fn **.. a,b : [Float, Float] -> Float = ..
         builtin fn /.   a,b : [Float, Float] -> Float = ..
 
-        instance ops.Add Float,Float,Float
+        instance ops.Add Float,Float
             fn + a,b = a +. b
         end
-        instance ops.Subs Float,Float,Float
+        instance ops.Subs Float,Float
             fn - a,b = a -. b
         end
-        instance ops.Mul Float,Float,Float
+        instance ops.Mul Float,Float
             fn * a,b = a *. b
         end
-        instance ops.Div Float,Float,Float
+        instance ops.Div Float,Float
             fn / a,b = a /. b
         end
         instance ops.Pow Float,Float,Float
@@ -96,22 +96,22 @@ const BUILTIN_SIGS: &'static str = r#"
         builtin fn >.   a,b : [Float, Float] -> Bool = ..
         builtin fn <.   a,b : [Float, Float] -> Bool = ..
 
-        instance ops.Eq Float,Float
+        instance ops.Eq Float
             fn == a,b = a =. b
         end
-        instance ops.Ne Float,Float
+        instance ops.Ne Float
             fn /= a,b = a /=. b
         end
-        instance ops.Gt Float,Float
+        instance ops.Gt Float
             fn > a,b = a >. b
         end
-        instance ops.Lt Float,Float
+        instance ops.Lt Float
             fn < a,b = a <. b
         end
-        instance ops.Ge Float,Float
+        instance ops.Ge Float
             fn >= a,b = a >=. b
         end
-        instance ops.Le Float,Float
+        instance ops.Le Float
             fn <= a,b = a <=. b
         end
 
@@ -159,7 +159,7 @@ const BUILTIN_SIGS: &'static str = r#"
     module arith.char
         builtin fn char_eq      a,b   : [Char, Char] -> Bool = ..
         
-        instance ops.Eq Char,Char
+        instance ops.Eq Char
             fn == a,b = char_eq a,b
         end
     end
@@ -172,8 +172,11 @@ const BUILTIN_SIGS: &'static str = r#"
         builtin fn str_head     a     : [Str] -> Char      = ..
         builtin fn str_tail     a     : [Str] -> Str       = ..
 
-        instance ops.Mul Str,Str,Str
+        instance ops.Mul Str,Str
             fn * a,b = str_cat a,b
+        end
+        instance ops.Eq Str
+            fn == a,b = str_eq a,b
         end
     end
 
@@ -203,17 +206,17 @@ const BUILTIN_SIGS: &'static str = r#"
     end
 
     module ops
-        relation Add 'a,'b,'c -> 'c
-            fn + a,b : ['a, 'b] -> 'c
+        relation Add 'a,'c -> 'c
+            fn + a,b : ['a, 'a] -> 'c
         end
-        relation Subs 'a,'b,'c -> 'c
-            fn - a,b : ['a, 'b] -> 'c
+        relation Subs 'a,'c -> 'c
+            fn - a,b : ['a, 'a] -> 'c
         end
-        relation Mul 'a,'b,'c -> 'c
-            fn * a,b : ['a, 'b] -> 'c
+        relation Mul 'a,'c -> 'c
+            fn * a,b : ['a, 'a] -> 'c
         end
-        relation Div 'a,'b,'c -> 'c
-            fn / a,b : ['a, 'b] -> 'c
+        relation Div 'a,'c -> 'c
+            fn / a,b : ['a, 'a] -> 'c
         end
         relation Pow 'a,'b,'c -> 'c
             fn ** a,b : ['a, 'b] -> 'c
@@ -222,23 +225,23 @@ const BUILTIN_SIGS: &'static str = r#"
             fn mod a,b : ['a, 'b] -> 'c
         end
 
-        relation Eq 'a,'b
-            fn == a,b : ['a, 'b] -> Bool
+        relation Eq 'a
+            fn == a,b : ['a, 'a] -> Bool
         end
-        relation Ne 'a,'b
-            fn /= a,b : ['a, 'b] -> Bool
+        relation Ne 'a
+            fn /= a,b : ['a, 'a] -> Bool
         end
-        relation Lt 'a,'b
-            fn < a,b : ['a, 'b] -> Bool
+        relation Lt 'a
+            fn < a,b : ['a, 'a] -> Bool
         end
-        relation Gt 'a,'b
-            fn > a,b : ['a, 'b] -> Bool
+        relation Gt 'a
+            fn > a,b : ['a, 'a] -> Bool
         end
-        relation Le 'a,'b
-            fn <= a,b : ['a, 'b] -> Bool
+        relation Le 'a
+            fn <= a,b : ['a, 'a] -> Bool
         end
-        relation Ge 'a,'b
-            fn >= a,b : ['a, 'b] -> Bool
+        relation Ge 'a
+            fn >= a,b : ['a, 'a] -> Bool
         end
     end
 

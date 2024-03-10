@@ -346,11 +346,12 @@ impl<'s> Inferer<'s> {
     pub fn rename_type_vars<T: ast::TypeApply<'s>>(&mut self, type_: &T, var_cnt: usize) -> T {
         let offset = self.uf.new_slots(var_cnt);
         type_.apply(
-            &|t| matches!(t.node, ast::TypeNode::Var(_)),
+            &|t| matches!(t.node, ast::TypeNode::Var(_) | ast::TypeNode::WildCard),
             &mut |t| match t.node {
                 ast::TypeNode::Var(v) => ast::Type {
                     node: ast::TypeNode::Var(v + offset),
                 },
+                ast::TypeNode::WildCard => ast::Type::new_var(self.alloc_var()),
                 _ => unreachable!(),
             },
         )
@@ -471,8 +472,10 @@ impl<'s> Inferer<'s> {
         self.uf.new_slots(cnt)
     }
 
-    pub fn instantiate_wildcard(&mut self, type_: &ast::Type<'s>) -> ast::Type<'s> {
-        use ast::TypeApply;
+    pub fn instantiate_wildcard<T>(&mut self, type_: &T) -> T
+    where
+        T: ast::TypeApply<'s>,
+    {
         type_.apply(&|t| matches!(&t.node, ast::TypeNode::WildCard), &mut |_| {
             ast::Type::new_var(self.alloc_var())
         })
