@@ -6,7 +6,8 @@
 [x] Fix expression type annotation: Currently type-vars in annotations are colliding inferer-defined ones
 [x] Support guard in case-of expression
 [x] Use more efficient method when backing-up union-find array
-[x] Check constructor name is uppercase
+[-] Check constructor name is uppercase
+    Not needed. Now whether a identifier is a constructor is determined if such constructor exists.
 [x] Curried function
 [x] More accurate parse-error position
 [x] Check number of variants of a type is at most 256
@@ -34,4 +35,6 @@
     This problem never existed. I thought of it long ago.
 [x] Fix bug in discovering closure tailcall
 [x] Fix bug of fail to unify wildcard type
-[ ] Force arithmatic operators to take two operands of same type
+[x] Force arithmatic operators to take two operands of same type
+[x] Modifying generic type variables should be prohibited
+[ ] Trace back to definition of generic type variable in diagnostic

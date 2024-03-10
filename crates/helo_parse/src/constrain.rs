@@ -52,12 +52,13 @@ impl<'s> Assumptions<'s> {
 
         let matches = instances
             .of_rel(&c.rel_name)
+            .unwrap_or(&[])
             .iter()
             .enumerate()
             .filter_map(|(i, ins)| {
                 let mut inferer1 = inferer.clone();
 
-                let ins = inferer1.rename_type_vars(ins, ins.var_cnt);
+                let ins = inferer1.rename_type_vars_free(ins, ins.var_cnt);
                 let rel = relations.get(&c.rel_name)?;
 
                 // free variables in non-dependent arguments in `c` are not allowed to
@@ -138,12 +139,13 @@ impl<'s> Assumptions<'s> {
     ) -> Result<(InstanceId<'s>, Inferer<'s>), Error> {
         let matches = instances
             .of_rel(&c.rel_name)
+            .unwrap_or(&[])
             .iter()
             .enumerate()
             .filter_map(|(i, ins)| {
                 let mut inferer1 = inferer.clone();
 
-                let ins = inferer1.rename_type_vars(ins, ins.var_cnt);
+                let ins = inferer1.rename_type_vars_free(ins, ins.var_cnt);
 
                 if let Ok(()) = inferer1.unify_list_lock::<true>(c.args.iter(), ins.rel.args.iter())
                 {

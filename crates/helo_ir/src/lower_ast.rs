@@ -1389,7 +1389,7 @@ fn unify_simple<'s>(
     var_cnt: usize,
 ) -> Result<Inferer<'s>, ()> {
     let mut inferer = Inferer::new();
-    let _ = inferer.alloc_vars(var_cnt);
+    let _ = inferer.alloc_free_vars(var_cnt);
     inferer
         .unify_list_no_rollback_lock::<true>(instance.captures.iter(), template.captures.iter())?;
     inferer.unify_callable_no_rallback_lock::<true>(

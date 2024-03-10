@@ -5,10 +5,11 @@ use crate::ast;
 #[derive(Debug, Clone)]
 /// Represents a type variable
 pub enum Slot<'s> {
-    /// The type variable is bound to some other type expression
+    /// The type variable is bound to some other type expression.
     Value(ast::Type<'s>),
-    /// The type variable is undetermined
-    Empty,
+    /// The type variable is undetermined.
+    /// .0 indicates if the var is locked
+    Empty(bool),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -86,17 +87,17 @@ impl<'s> UnionFind<'s> {
     }
 
     /// Allocate a new empty type variale on heap
-    pub fn new_slot(&mut self) -> ast::TypeVarId {
+    pub fn new_slot(&mut self, lock: bool) -> ast::TypeVarId {
         let addr = self.heap.len();
-        self.heap.push_back(Slot::Empty);
+        self.heap.push_back(Slot::Empty(lock));
         addr.into()
     }
 
     /// Allocate a continuous series of empty type variables on heap, returning the index of the first one
-    pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
+    pub fn new_slots(&mut self, cnt: usize, lock: bool) -> ast::TypeVarId {
         let addr = self.heap.len();
         (addr..addr + cnt).for_each(|_| {
-            self.heap.push_back(Slot::Empty);
+            self.heap.push_back(Slot::Empty(lock));
         });
         addr.into()
     }
@@ -121,7 +122,8 @@ impl<'s> std::fmt::Debug for Inferer<'s> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, slot) in self.uf.heap.iter().enumerate() {
             match slot {
-                Slot::Empty => write!(f, "{}: Empty\n", i)?,
+                Slot::Empty(true) => write!(f, "{}: Any\n", i)?,
+                Slot::Empty(false) => write!(f, "{}: Var\n", i)?,
                 Slot::Value(v) => write!(f, "{}: {}\n", i, v)?,
             };
         }
@@ -143,7 +145,7 @@ impl<'s> Inferer<'s> {
                 .iter()
                 .map(|x| match x {
                     Slot::Value(v) => v.clone(),
-                    Slot::Empty => panic!("cannot export var store: some type-var undetermined"),
+                    Slot::Empty(_) => panic!("cannot export var store: some type-var undetermined"),
                 })
                 .collect(),
         )
@@ -183,8 +185,8 @@ impl<'s> Inferer<'s> {
             }
         }
         match self.uf.get(root).clone() {
-            Slot::Empty if !LOCK => self.fill_empty_slot(root, type_),
-            Slot::Empty => return Err(()),
+            Slot::Empty(false) if !LOCK => self.fill_empty_slot(root, type_),
+            Slot::Empty(_) => return Err(()),
             Slot::Value(old_value) => self.unify_no_rollback_lock::<LOCK>(&old_value, &type_)?,
         };
         Ok(())
@@ -204,7 +206,8 @@ impl<'s> Inferer<'s> {
             }
         }
         match self.uf.get(root).clone() {
-            Slot::Empty => self.fill_empty_slot(root, type_),
+            Slot::Empty(false) => self.fill_empty_slot(root, type_),
+            Slot::Empty(true) => return Err(()),
             Slot::Value(old_value) => self.unify_no_rollback_lock::<LOCK>(&type_, &old_value)?,
         };
         Ok(())
@@ -219,12 +222,21 @@ impl<'s> Inferer<'s> {
             })
     }
 
-    pub fn alloc_var(&mut self) -> ast::TypeVarId {
-        self.uf.new_slot()
+    pub fn alloc_free_var(&mut self) -> ast::TypeVarId {
+        self.uf.new_slot(false)
     }
 
-    pub fn alloc_vars(&mut self, var_cnt: usize) -> impl Iterator<Item = ast::TypeVarId> {
-        let offset = self.uf.new_slots(var_cnt).0;
+    pub fn alloc_locked_var(&mut self) -> ast::TypeVarId {
+        self.uf.new_slot(true)
+    }
+
+    pub fn alloc_free_vars(&mut self, var_cnt: usize) -> impl Iterator<Item = ast::TypeVarId> {
+        let offset = self.uf.new_slots(var_cnt, false).0;
+        (offset..offset + var_cnt).map(|x| ast::TypeVarId(x))
+    }
+
+    pub fn alloc_locked_vars(&mut self, var_cnt: usize) -> impl Iterator<Item = ast::TypeVarId> {
+        let offset = self.uf.new_slots(var_cnt, true).0;
         (offset..offset + var_cnt).map(|x| ast::TypeVarId(x))
     }
 
@@ -234,7 +246,7 @@ impl<'s> Inferer<'s> {
         &mut self,
         var_cnt: usize,
     ) -> impl Iterator<Item = ast::Type<'static>> + 'a {
-        self.alloc_vars(var_cnt).map(|id| ast::Type {
+        self.alloc_free_vars(var_cnt).map(|id| ast::Type {
             node: ast::TypeNode::Var(id),
         })
     }
@@ -309,6 +321,12 @@ impl<'s> Inferer<'s> {
         let r =
             match (&a.node, &b.node) {
                 (Unit, Unit) => Ok(()),
+                (Var(a_id), Var(b_id)) => {
+                    match self.update_var_no_rollback_left_lock::<LOCK>(*a_id, b) {
+                        Ok(()) => Ok(()),
+                        Err(()) => self.update_var_no_rollback_right_lock::<LOCK>(*b_id, a),
+                    }
+                }
                 (Var(a_id), _) => Ok(self.update_var_no_rollback_left_lock::<LOCK>(*a_id, b)?),
                 (_, Var(b_id)) => Ok(self.update_var_no_rollback_right_lock::<LOCK>(*b_id, a)?),
                 (Never, _) => Ok(()),
@@ -340,18 +358,48 @@ impl<'s> Inferer<'s> {
         })
     }
 
+    pub fn rename_type_vars_free<T: ast::TypeApply<'s>>(&mut self, type_: &T, var_cnt: usize) -> T {
+        self.rename_type_vars(type_, var_cnt, false)
+    }
+
+    pub fn rename_type_vars_locked<T1: ast::TypeApply<'s>, T2: ast::TypeApply<'s>>(
+        &mut self,
+        t1: &T1,
+        t2: &T2,
+        var_cnt: usize,
+    ) -> (T1, T2) {
+        let offset = self.uf.new_slots(var_cnt, true);
+        let selector =
+            &|t: &ast::Type<'s>| matches!(t.node, ast::TypeNode::Var(_) | ast::TypeNode::WildCard);
+        let f = &mut |t: &ast::Type<'s>| match t.node {
+            ast::TypeNode::Var(v) => ast::Type {
+                node: ast::TypeNode::Var(v + offset),
+            },
+            ast::TypeNode::WildCard => ast::Type::new_var(self.alloc_free_var()),
+            _ => unreachable!(),
+        };
+        let t1 = t1.apply(selector, f);
+        let t2 = t2.apply(selector, f);
+        (t1, t2)
+    }
+
     /// During type inference of function call, new type-vars may be introduced by the
     /// function template. Corresponding slots must be created in uf set, and those
     /// type-vars need to be renamed.
-    pub fn rename_type_vars<T: ast::TypeApply<'s>>(&mut self, type_: &T, var_cnt: usize) -> T {
-        let offset = self.uf.new_slots(var_cnt);
+    pub fn rename_type_vars<T: ast::TypeApply<'s>>(
+        &mut self,
+        type_: &T,
+        var_cnt: usize,
+        lock: bool,
+    ) -> T {
+        let offset = self.uf.new_slots(var_cnt, lock);
         type_.apply(
             &|t| matches!(t.node, ast::TypeNode::Var(_) | ast::TypeNode::WildCard),
             &mut |t| match t.node {
                 ast::TypeNode::Var(v) => ast::Type {
                     node: ast::TypeNode::Var(v + offset),
                 },
-                ast::TypeNode::WildCard => ast::Type::new_var(self.alloc_var()),
+                ast::TypeNode::WildCard => ast::Type::new_var(self.alloc_free_var()),
                 _ => unreachable!(),
             },
         )
@@ -376,7 +424,7 @@ impl<'s> Inferer<'s> {
                 var_stack.pop().unwrap();
                 Ok(r)
             }
-            Slot::Empty => Ok(ast::Type::new_var(root_var_id)),
+            Slot::Empty(_) => Ok(ast::Type::new_var(root_var_id)),
         }
     }
 
@@ -440,7 +488,7 @@ impl<'s> Inferer<'s> {
                         Slot::Value(v) => {
                             walk_f(inferer, map, counter, v);
                         }
-                        Slot::Empty => {
+                        Slot::Empty(_) => {
                             map.entry(root_var_id).or_insert_with(|| {
                                 let x = *counter;
                                 *counter += 1;
@@ -468,8 +516,8 @@ impl<'s> Inferer<'s> {
         )
     }
 
-    pub fn new_slots(&mut self, cnt: usize) -> ast::TypeVarId {
-        self.uf.new_slots(cnt)
+    pub fn new_slots_free(&mut self, cnt: usize) -> ast::TypeVarId {
+        self.uf.new_slots(cnt, false)
     }
 
     pub fn instantiate_wildcard<T>(&mut self, type_: &T) -> T
@@ -477,7 +525,7 @@ impl<'s> Inferer<'s> {
         T: ast::TypeApply<'s>,
     {
         type_.apply(&|t| matches!(&t.node, ast::TypeNode::WildCard), &mut |_| {
-            ast::Type::new_var(self.alloc_var())
+            ast::Type::new_var(self.alloc_free_var())
         })
     }
 }

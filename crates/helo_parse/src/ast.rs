@@ -322,7 +322,7 @@ pub enum ExprNode<'s> {
     },
     MakeClosure {
         f: FunctionId<'s>,
-        captures: Vec<Capture>
+        captures: Vec<Capture>,
     },
     Constructor(ConstructorName<'s>),
     Builtin(BuiltinFunctionName<'s>),
@@ -966,10 +966,18 @@ impl std::fmt::Display for PrimitiveType {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash)]
 pub struct Type<'s> {
     pub node: TypeNode<'s>,
 }
+
+impl<'s> PartialEq for Type<'s> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
+
+impl<'s> Eq for Type<'s> {}
 
 pub trait TypeWalk<'s> {
     fn walk(&self, f: &mut impl FnMut(&Type<'s>));
@@ -1068,6 +1076,7 @@ where
         self.iter().map(|x| x.apply(selector, f)).collect()
     }
 }
+
 
 pub trait TypeApplyResult<'s> {
     fn apply_result<E>(
@@ -1269,6 +1278,7 @@ pub struct BuiltinFunction<'s> {
     pub pure: bool,
 }
 
+#[derive(Debug)]
 pub struct InstanceIdTable<'s, I>(Trie<RelationName<'s>, Vec<I>, &'s str>);
 
 impl<'s, I> InstanceIdTable<'s, I> {
@@ -1283,8 +1293,8 @@ impl<'s, I> InstanceIdTable<'s, I> {
     pub fn new() -> Self {
         Self(Trie::new_branch())
     }
-    pub fn of_rel(&self, rel_name: &RelationName<'s>) -> &[I] {
-        &self.0.get(rel_name).unwrap()
+    pub fn of_rel(&self, rel_name: &RelationName<'s>) -> Option<&[I]> {
+        self.0.get(rel_name).map(|x| &x[..])
     }
     pub fn insert(&mut self, rel_name: RelationName<'s>, instance: I) -> InstanceId<'s> {
         if self.0.contains_key(&rel_name) {
@@ -1551,6 +1561,7 @@ impl<'s> Symbols<'s> {
     }
 }
 
+#[derive(Debug)]
 pub enum Trie<K, V, NK> {
     Branch(Option<V>, HashMap<NK, Trie<K, V, NK>>),
     Leaf(V),

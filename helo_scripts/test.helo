@@ -1,6 +1,6 @@
 use ops
 
-fn f x: [Int] -> _ = x + 1
+fn f 'a x: [Int] -> 'a = x + 1
 
 routine main =
     let k = f 10 in

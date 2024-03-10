@@ -337,12 +337,11 @@ fn infer_seq<'s, 'a>(
         )
     });
 
-    let type_ = result.as_ref().map_or(
-        ast::Type {
-            node: ast::TypeNode::Unit,
-        },
-        |expr| expr.type_.clone(),
-    );
+    let type_ = result
+        .as_ref()
+        .map_or(ast::Type::new(ast::TypeNode::Unit), |expr| {
+            expr.type_.clone()
+        });
 
     let result = result.map(|r| typed_nodes.push(r));
 
@@ -450,9 +449,7 @@ fn infer_tuple<'s>(
     let elements = typed_nodes.push_many(elements.into_iter());
     typed::Expr {
         node: typed::ExprNode::Tuple(elements),
-        type_: ast::Type {
-            node: ast::TypeNode::Tuple(type_),
-        },
+        type_: ast::Type::new(ast::TypeNode::Tuple(type_)),
         meta: tuple_meta.clone(),
     }
 }
@@ -489,6 +486,8 @@ fn infer_call<'s>(
         assumptions,
         e,
     );
+
+    dbg!(&inferer);
 
     let callee_type_node = inferer
         .resolve(&callee.type_, &callee.meta)
@@ -542,16 +541,12 @@ fn infer_call<'s>(
                     params: params[args.len()..params.len()].to_vec(),
                     ret: ret.clone(),
                 };
-                let ret_type = ast::Type {
-                    node: type_constructor(ret_callable_type),
-                };
+                let ret_type = ast::Type::new(type_constructor(ret_callable_type));
                 ret_type
             }
         }
         ast::TypeNode::Var(v_id) => {
-            let ret_type = ast::Type {
-                node: ast::TypeNode::Var(inferer.alloc_var()),
-            };
+            let ret_type = ast::Type::new(ast::TypeNode::Var(inferer.alloc_free_var()));
 
             let type_constructor = if symbols
                 .functions
@@ -567,12 +562,10 @@ fn infer_call<'s>(
             inferer
                 .update_var(
                     *v_id,
-                    &ast::Type {
-                        node: type_constructor(ast::CallableType {
-                            params: args.iter().map(|a| a.type_.clone()).collect(),
-                            ret: Box::new(ret_type.clone()),
-                        }),
-                    },
+                    &ast::Type::new(type_constructor(ast::CallableType {
+                        params: args.iter().map(|a| a.type_.clone()).collect(),
+                        ret: Box::new(ret_type.clone()),
+                    })),
                 )
                 .map_err(|_| {
                     errors::ArgumentsUnificationFailure::new(
@@ -775,7 +768,7 @@ fn infer_user_function<'s>(
             .get(rel_name)
             .unwrap()
             .method_sig(name.id());
-        let renamed_sig = inferer.rename_type_vars(sig, sig.var_cnt);
+        let renamed_sig = inferer.rename_type_vars_free(sig, sig.var_cnt);
 
         let type_constructor = if sig.pure {
             ast::TypeNode::Callable
@@ -813,7 +806,7 @@ fn infer_builtin<'s>(
     _e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let f = symbols.builtins.get(name).unwrap();
-    let renamed_type = inferer.rename_type_vars(&f.type_, f.var_cnt);
+    let renamed_type = inferer.rename_type_vars_free(&f.type_, f.var_cnt);
 
     let type_constructor = if f.pure {
         ast::TypeNode::Callable
@@ -828,7 +821,7 @@ fn infer_builtin<'s>(
         },
         meta: meta.clone(),
     };
-    return r;
+    r
 }
 
 fn infer_constructor<'s>(
@@ -856,7 +849,7 @@ fn infer_constructor<'s>(
         params: constructor.params.clone(),
         ret: Box::new(ret_type),
     };
-    let type_ = inferer.rename_type_vars(&type_, data.kind_arity);
+    let type_ = inferer.rename_type_vars_free(&type_, data.kind_arity);
 
     let type_ = if type_.params.len() == 0 {
         *type_.ret
@@ -1021,7 +1014,7 @@ fn infer_closure<'s>(
             } else {
                 ast::TypeNode::ImpureCallable
             };
-            let renamed_ftype = inferer.rename_type_vars(f_type, f.var_cnt);
+            let renamed_ftype = inferer.rename_type_vars_free(f_type, f.var_cnt);
             inferer
                 .update_var(
                     type_var_id_for_local(at),
@@ -1228,7 +1221,7 @@ fn infer_pattern_type<'s>(
             let constructor = symbols.constructors.get(constructor).unwrap();
             let data = symbols.datas.get(&constructor.belongs_to).unwrap();
 
-            let type_var_zero = inferer.new_slots(data.kind_arity);
+            let type_var_zero = inferer.new_slots_free(data.kind_arity);
             let data_params = (0..data.kind_arity)
                 .map(|i| ast::Type::new_var(type_var_zero.offset(i)))
                 .collect();
@@ -1286,7 +1279,7 @@ fn infer_case<'s>(
         assumptions,
         e,
     );
-    let ret_type = ast::Type::new_var(inferer.alloc_var());
+    let ret_type = ast::Type::new_var(inferer.alloc_free_var());
 
     let typed_arms = arms
         .iter()
@@ -1432,7 +1425,7 @@ fn infer_function_type_renamed<'s>(
 ) -> Option<ast::FunctionType<'s>> {
     // Already infered its type
     if let Some(infered_f) = typed_functions.get(&id) {
-        let renamed_type = inferer.rename_type_vars(&infered_f.type_, infered_f.var_cnt);
+        let renamed_type = inferer.rename_type_vars_free(&infered_f.type_, infered_f.var_cnt);
         return Some(renamed_type);
     }
 
@@ -1441,7 +1434,7 @@ fn infer_function_type_renamed<'s>(
     let f = &symbols.functions[&id];
     if let Some(f_type) = &f.type_ {
         if !id.is_closure() {
-            return Some(inferer.rename_type_vars(&f_type.clone().into(), f.var_cnt));
+            return Some(inferer.rename_type_vars_free(&f_type.clone().into(), f.var_cnt));
         }
     }
 
@@ -1456,7 +1449,7 @@ fn infer_function_type_renamed<'s>(
             typed_functions,
             e,
         ) {
-            let renamed_type = inferer.rename_type_vars(&infered_f.type_, infered_f.var_cnt);
+            let renamed_type = inferer.rename_type_vars_free(&infered_f.type_, infered_f.var_cnt);
             typed_functions.insert(id, infered_f);
             return Some(renamed_type);
         }
@@ -1487,16 +1480,18 @@ fn init_inferer_for_function_inference<'s>(
     f: &ast::Function<'s>,
     inferer: &mut inferer::Inferer<'s>,
     captured_types: &CapturedTypeInfo<'s>,
-) -> ast::Type<'s> {
+    assumptions: Vec<ast::Constrain<'s>>,
+) -> (ast::Type<'s>, Vec<ast::Constrain<'s>>) {
     // allocate type-vars for locals and return-value and captures
-    let _ = inferer.alloc_vars(f.local_cnt + 1 + f.capture_cnt);
+    let _ = inferer.alloc_free_vars(f.local_cnt + 1 + f.capture_cnt);
 
     let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt));
 
     // Assign types to captures
 
     if f.capture_cnt != 0 {
-        let renamed = inferer.rename_type_vars(&captured_types.types, captured_types.var_cnt);
+        // Those type-vars cannot be modified to have concrete type
+        let renamed = inferer.rename_type_vars_free(&captured_types.types, captured_types.var_cnt);
 
         renamed.iter().enumerate().for_each(|(i, t)| {
             let _ = inferer.update_var(type_var_id_for_captured(f.local_cnt, i.into()), &t);
@@ -1505,8 +1500,10 @@ fn init_inferer_for_function_inference<'s>(
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
-        // Allocate type-vars for those in user provided function signature and rename
-        let f_type = inferer.rename_type_vars(f_type, f.var_cnt);
+        // Allocate type-vars for those in user provided function signature and rename.
+        // Those type-vars cannot be modified to have concrete type
+        let (f_type, assumptions) =
+            inferer.rename_type_vars_locked(f_type, &assumptions, f.var_cnt);
         // Unify parameters
         for i in 0..f_type.params.len() {
             inferer.update_var(i.into(), &f_type.params[i]).unwrap()
@@ -1515,10 +1512,10 @@ fn init_inferer_for_function_inference<'s>(
             .update_var(type_var_id_for_ret(f.local_cnt), &f_type.ret)
             .unwrap();
 
-        return ret_type;
+        return (ret_type, assumptions);
     };
 
-    ret_type
+    (ret_type, assumptions)
 }
 
 fn type_var_id_for_capture(local_cnt: usize, capture: ast::Capture) -> ast::TypeVarId {
@@ -1681,7 +1678,6 @@ pub fn infer_function<'s>(
 
     let mut inferer = inferer::Inferer::new();
 
-    let ret_type = init_inferer_for_function_inference(f, &mut inferer, &captured_types);
     let assumptions = match &id {
         ast::FunctionId::Method(ins_id, _) => {
             let ins = symbols.instances.get(ins_id).unwrap();
@@ -1693,6 +1689,12 @@ pub fn infer_function<'s>(
         }
         _ => f.constrains.iter().cloned().collect(),
     };
+    let (ret_type, assumptions) =
+        init_inferer_for_function_inference(f, &mut inferer, &captured_types, assumptions);
+    dbg!(&assumptions);
+    let assumptions = assumptions.into_iter().collect();
+
+    dbg!(&inferer);
 
     typed_functions.begin_infering(id.clone());
     // Resolve type of function body
@@ -1715,6 +1717,7 @@ pub fn infer_function<'s>(
         .commit(e);
 
     let body = typed_nodes.push(body_expr);
+
 
     check_and_resolve_constrains(body, symbols, typed_nodes, &mut inferer, &assumptions, e);
 

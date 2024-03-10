@@ -32,7 +32,7 @@ fn check_symbols<'s>(symbols: &ast::Symbols<'s>, e: &mut errors::ManyError) {
     symbols.instances.iter().for_each(|(_, ins)| {
         if let Some(rel) = symbols.relations.get(&ins.rel_name()) {
             let mut inferer = inferer::Inferer::new();
-            let _ = inferer.alloc_vars(ins.var_cnt);
+            let _ = inferer.alloc_free_vars(ins.var_cnt);
             let rel_constrains = rel
                 .constrains
                 .iter()
