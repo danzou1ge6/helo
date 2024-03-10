@@ -30,4 +30,6 @@
 [ ] Inline optimization
 [x] Relation methods for arithmatics
 [ ] Anonymous closure
-[ ] Fix bug in closure tailcall in virtual machine
+[-] Fix bug in closure tailcall in virtual machine
+    This problem never existed. I thought of it long ago.
+[x] Fix bug in discovering closure tailcall

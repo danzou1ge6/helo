@@ -739,10 +739,9 @@ fn type_callable<'s>(
     generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
-        let (s1, _) = trailing_space_tag("[")(s)?;
         let (s2, params) =
             nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
-                s1,
+                s,
             )?;
         let (s3, _) = trailing_space_tag("]")(s2)?;
 

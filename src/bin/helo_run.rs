@@ -248,7 +248,7 @@ pub fn main() -> miette::Result<()> {
     //     .get(1)
     //     .unwrap_or_else(|| panic!("Usage: helo_compile_ir <file_name>"))
     //     .clone();
-    let file_path = std::path::PathBuf::from("helo_scripts/calculator.helo");
+    let file_path = std::path::PathBuf::from("helo_scripts/test.helo");
     let mut file = fs::File::open(&file_path)
         .into_diagnostic()
         .wrap_err("Open source file failed")?;

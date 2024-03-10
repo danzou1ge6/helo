@@ -77,6 +77,7 @@ pub fn lower_function<'s>(
         ir::Function {
             local_cnt: lower_ctx.local_cnt,
             arity: f.type_.params.len() + f.type_.captures.len(),
+            capture_cnt: f.type_.captures.len(),
             body,
             meta: f.meta.clone(),
             name: f_name_id,

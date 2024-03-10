@@ -7,7 +7,7 @@ use crate::{ir, lir};
 pub struct Compiler {
     local_cnt: usize,
     temp_cnt: usize,
-    arity: usize,
+    non_capture_arity: usize,
 }
 
 impl Compiler {
@@ -19,11 +19,11 @@ impl Compiler {
         self.temp_cnt += 1;
         r
     }
-    fn new(local_cnt: usize, arity: usize) -> Self {
+    fn new(local_cnt: usize, non_capture_arity: usize) -> Self {
         Self {
             local_cnt,
             temp_cnt: local_cnt + 1,
-            arity,
+            non_capture_arity,
         }
     }
     fn ret_temp(&self) -> lir::TempId {
@@ -382,7 +382,7 @@ pub fn lower_function<'s>(
 
     functions.insert(fid.clone(), move |_, functions| {
         let f = ir_functions.get(&fid).unwrap();
-        let mut compiler = Compiler::new(f.local_cnt, f.arity);
+        let mut compiler = Compiler::new(f.local_cnt, f.arity - f.capture_cnt);
         let mut blocks = lir::BlockHeap::new();
 
         let body = blocks.new_block();
@@ -1008,7 +1008,7 @@ fn lower_apply<'s>(
             block
         }
         // Optimization: Call of the executing closure
-        ir::ExprNode::ThisClosure(local) if args.len() == compiler.arity => {
+        ir::ExprNode::ThisClosure(local) if args.len() == compiler.non_capture_arity => {
             let callee_temp = compiler.local_id_to_temp(*local);
             let block = emit_arguments!(block);
 

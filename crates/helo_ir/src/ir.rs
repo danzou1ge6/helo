@@ -45,6 +45,7 @@ impl std::fmt::Display for StrId {
 pub struct Function {
     pub local_cnt: usize,
     pub arity: usize,
+    pub capture_cnt: usize,
     pub body: ExprId,
     pub meta: helo_parse::ast::Meta,
     pub name: StrId,
