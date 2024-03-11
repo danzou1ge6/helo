@@ -428,7 +428,7 @@ impl OpCode {
 }
 
 pub struct Chunk {
-    code: Vec<u8>,
+    pub(crate) code: Vec<u8>,
 }
 
 pub struct ChunkWriter<'c> {

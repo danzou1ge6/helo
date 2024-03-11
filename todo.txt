@@ -23,7 +23,7 @@
 [x] Curry notion for callable type
 [x] Impurity and IO
 [x] Recursive type in inference, for example List['0] = '0
-[ ] Emit artifect and run
+[x] Emit artifect and run
 [x] Module
 [x] Comments
 [x] Ad-hoc polymorphism

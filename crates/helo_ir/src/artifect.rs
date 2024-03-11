@@ -1,6 +1,6 @@
 use helo_runtime::{byte_code, executable};
 
-use crate::{ir, lir, lir::ssa};
+use crate::{ir, lir, lir::ssa, pretty_print};
 use crate::{lower_ast, lower_ir, lower_lir};
 
 use helo_parse::builtins;
@@ -242,4 +242,108 @@ pub fn compile_byte_code(
 
     let executable = executable::Executable::new(chunk, entry, str_chunk, symbols);
     Ok(executable)
+}
+
+use std::io;
+use std::io::Write;
+
+pub fn format_ir_functions<'s>(
+    formatter: &mut impl Write,
+    ir_functions: &ir::FunctionTable<'s>,
+    ir_nodes: &ir::ExprHeap<'s>,
+    str_list: &ir::StrList,
+    instances: &ast::InstanceTable<'s>,
+    term_width: usize,
+) -> io::Result<()> {
+    for f_id in ir_functions.function_ids() {
+        let allocator = pretty::RcAllocator;
+        let doc_builder = pretty_print::pretty_ir_function::<_, ()>(
+            ir_functions.get(f_id).unwrap(),
+            &f_id.to_string(instances),
+            &ir_nodes,
+            &str_list,
+            instances,
+            &allocator,
+        );
+        let doc = doc_builder.pretty(term_width);
+        write!(formatter, "{doc}")?;
+    }
+    Ok(())
+}
+
+pub fn format_lir_functions(
+    formatter: &mut impl Write,
+    lir_functions: &lir::FunctionList<lir::Function>,
+    function_names: &lir::FunctionNameList,
+    str_list: &ir::StrList,
+    term_width: usize,
+) -> io::Result<()> {
+    for lir_fid in lir_functions.iter_id() {
+        let allocator = pretty::RcAllocator;
+        let doc_builder = pretty_print::pretty_lir_function::<_, ()>(
+            lir_fid,
+            lir_functions.get(lir_fid).unwrap(),
+            &str_list,
+            function_names,
+            &allocator,
+        );
+        let doc = doc_builder.pretty(term_width);
+        write!(formatter, "{doc}")?;
+    }
+    Ok(())
+}
+
+pub fn format_lir_function_optimized(
+    formatter: &mut impl Write,
+    f: &lir::FunctionOptimized,
+    lir_fid: lir::FunctionId,
+    function_names: &lir::FunctionNameList,
+    str_list: &ir::StrList,
+    term_width: usize,
+) -> io::Result<()> {
+    let allocator = pretty::RcAllocator;
+    let doc_builder = pretty_print::pretty_lir_function_optimized::<_, ()>(
+        lir_fid,
+        f,
+        &str_list,
+        function_names,
+        &allocator,
+    );
+    let doc = doc_builder.pretty(term_width);
+    write!(formatter, "{doc}")
+}
+
+pub fn format_lir_functions_optimized(
+    formatter: &mut impl Write,
+    lir_functions: &lir::FunctionList<lir::FunctionOptimized>,
+    function_names: &lir::FunctionNameList,
+    str_list: &ir::StrList,
+    term_width: usize,
+) -> io::Result<()> {
+    for lir_fid in lir_functions.iter_id() {
+        format_lir_function_optimized(
+            formatter,
+            &lir_functions.get(lir_fid).unwrap(),
+            lir_fid,
+            function_names,
+            str_list,
+            term_width,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn format_ssa_blocks(
+    formatter: &mut impl Write,
+    f_id: lir::FunctionId,
+    f: &ssa::Function,
+    str_list: &ir::StrList,
+    function_names: &lir::FunctionNameList,
+    term_width: usize,
+) -> io::Result<()> {
+    let allocator = pretty::RcAllocator;
+    let doc_builder =
+        pretty_print::pretty_ssa_function::<_, ()>(f_id, f, str_list, function_names, &allocator);
+    let doc = doc_builder.pretty(term_width);
+    write!(formatter, "{doc}")
 }

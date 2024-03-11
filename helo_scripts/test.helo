@@ -1,7 +1,3 @@
-use ops
+routine main: [] -> () = 
+    io.println "123"
 
-fn f 'a x: [Int] -> 'a = x + 1
-
-routine main =
-    let k = f 10 in
-    io.println (fmt.to_string k)

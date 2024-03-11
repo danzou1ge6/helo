@@ -12,7 +12,7 @@ pretty_print = ["terminal_size", "pretty", "miette/fancy"]
 [dependencies]
 helo_parse = { path = "../helo_parse" }
 helo_runtime = { path = "../helo_runtime" }
-miette = "5.10"
+miette = "7.2"
 thiserror = "1.0"
 imbl = "2.0"
 pretty = { version = "0.12", optional = true }

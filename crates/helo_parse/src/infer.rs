@@ -7,7 +7,7 @@ use crate::typed;
 use errors::ManyErrorReceive;
 
 #[cfg(debug_assertions)]
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 #[cfg(not(debug_assertions))]
 const DBUEG: bool = false;
@@ -486,8 +486,6 @@ fn infer_call<'s>(
         assumptions,
         e,
     );
-
-    dbg!(&inferer);
 
     let callee_type_node = inferer
         .resolve(&callee.type_, &callee.meta)
@@ -1691,10 +1689,7 @@ pub fn infer_function<'s>(
     };
     let (ret_type, assumptions) =
         init_inferer_for_function_inference(f, &mut inferer, &captured_types, assumptions);
-    dbg!(&assumptions);
     let assumptions = assumptions.into_iter().collect();
-
-    dbg!(&inferer);
 
     typed_functions.begin_infering(id.clone());
     // Resolve type of function body
@@ -1717,7 +1712,6 @@ pub fn infer_function<'s>(
         .commit(e);
 
     let body = typed_nodes.push(body_expr);
-
 
     check_and_resolve_constrains(body, symbols, typed_nodes, &mut inferer, &assumptions, e);
 

@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use helo_parse::ast::{self, Meta};
 
-use miette::{Diagnostic, NamedSource, SourceSpan};
+use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
+
+type NamedSource = miette::NamedSource<Arc<String>>;
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Some branch in this function requires jumping from instruction {} to {}, but we only support jump distance that can be represented by an i16", from, to)]

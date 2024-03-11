@@ -1,14 +1,16 @@
 use crate::{ast, errors, parse, parse::tast};
 use errors::ManyError;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct SourceFile {
-    src: Arc<String>,
-    file_path: Arc<String>,
-    file_name: String,
+    pub src: Arc<String>,
+    pub file_path: Arc<String>,
+    pub file_name: String,
 }
 
 pub enum SourceTreeNode {
@@ -19,6 +21,7 @@ pub enum SourceTreeNode {
 pub struct SourceTree {
     nodes: Vec<SourceTreeNode>,
     root_file_name: String,
+    root_dir: PathBuf,
 }
 
 impl SourceFile {
@@ -117,6 +120,29 @@ impl SourceTreeNode {
             .ok_or_else(|| Error::NonUtf8FileName(fp.clone()))?;
         Ok(Some(Self::Directory(dir_name.to_string(), items)))
     }
+
+    pub fn search<'a>(&self, mut p: impl Iterator<Item = &'a OsStr>) -> Option<SourceFile> {
+        match self {
+            Self::File(f) => match p.next() {
+                None => Some(f.clone()),
+                Some(_) => None,
+            },
+            Self::Directory(_, children) => match p.next() {
+                None => None,
+                Some(name) => search_dir(name, p, &children),
+            },
+        }
+    }
+}
+
+fn search_dir<'a>(
+    name: &OsStr,
+    p: impl Iterator<Item = &'a OsStr>,
+    children: &[SourceTreeNode],
+) -> Option<SourceFile> {
+    let name = name.to_str()?.trim_end_matches(".helo");
+    let node = children.iter().find(|n| n.name() == name)?;
+    node.search(p)
 }
 
 fn dir_items(fp: PathBuf) -> Result<Vec<SourceTreeNode>, Error> {
@@ -185,9 +211,18 @@ impl SourceTree {
             Ok(Self {
                 nodes: items,
                 root_file_name: root_file_name.to_string(),
+                root_dir: parent.to_path_buf(),
             })
         } else {
             Err(Error::NotFile(fp))
         }
+    }
+
+    pub fn search(&self, p: &str) -> Option<SourceFile> {
+        let p = PathBuf::from(p);
+        let rel_p = p.strip_prefix(self.root_dir.clone()).ok()?;
+        let mut p = rel_p.iter();
+        let name = p.next()?;
+        search_dir(name, p, &self.nodes)
     }
 }

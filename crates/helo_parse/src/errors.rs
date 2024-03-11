@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use crate::inferer::Inferer;
 use crate::{ast, parse::tast};
-use miette::{Diagnostic, NamedSource, Report, SourceSpan};
+use miette::{Diagnostic, Report, SourceSpan};
 use thiserror::Error;
+
+type NamedSource = miette::NamedSource<Arc<String>>;
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Can only assign to local mutable variable")]

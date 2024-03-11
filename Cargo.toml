@@ -5,9 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
 [[bin]]
-name = "helo_run"
-required-features = ["helo_ir/pretty_print"]
+name = "helo_vm"
+
+[[bin]]
+name = "heloc"
+
+[lib]
+name = "helo_driver"
 
 
 [dependencies]
@@ -15,7 +21,9 @@ pretty = { version = "*" }
 helo_ir = { path = "crates/helo_ir" }
 helo_runtime = { path = "crates/helo_runtime" }
 helo_parse = { path = "crates/helo_parse" }
-miette = { version = "*", features = ["fancy"] }
+miette = { version = "7.2", features = ["fancy"] }
+clap = { version = "4.5", features = ["derive"] }
+terminal_size = { version = "0.3" }
 
 [workspace]
 members = ["crates/*"]

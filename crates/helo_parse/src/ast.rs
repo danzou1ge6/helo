@@ -545,7 +545,7 @@ pub struct Meta {
 }
 
 impl Meta {
-    pub fn named_source(&self) -> miette::NamedSource {
+    pub fn named_source(&self) -> miette::NamedSource<Arc<String>> {
         let file: &String = self.file_name.borrow();
         miette::NamedSource::new(file, self.src.clone())
     }
@@ -1076,7 +1076,6 @@ where
         self.iter().map(|x| x.apply(selector, f)).collect()
     }
 }
-
 
 pub trait TypeApplyResult<'s> {
     fn apply_result<E>(

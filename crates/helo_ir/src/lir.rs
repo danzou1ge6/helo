@@ -623,6 +623,12 @@ impl<F> FunctionList<F> {
             .enumerate()
             .map(|(i, f)| (FunctionId(i), f))
     }
+    pub fn push(&mut self, f: F) {
+        self.v.push(f);
+    }
+    pub fn new() -> Self {
+        Self { v: Vec::new() }
+    }
 }
 
 impl FunctionList<Function> {
