@@ -1,3 +1,7 @@
+fn alt_from 'a,'b x: ['b] -> 'a where convert.From 'a,'b =
+    let b = (convert.from x) : 'a in b
+
 routine main: [] -> () = 
-    io.println "123"
+    let f = (alt_from 1) : Float in
+    io.println (fmt.to_string f)
 

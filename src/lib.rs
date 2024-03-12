@@ -79,7 +79,7 @@ pub fn compile(
         for (name, f) in typed_symbols.functions.iter() {
             write!(
                 formatter,
-                "{}: {}",
+                "{}: {}\n",
                 name.to_string(&typed_symbols.instances),
                 f.type_
             )

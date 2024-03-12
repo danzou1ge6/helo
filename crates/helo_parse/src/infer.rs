@@ -12,6 +12,29 @@ const DEBUG: bool = false;
 #[cfg(not(debug_assertions))]
 const DBUEG: bool = false;
 
+struct TypeMapping {
+    generic_var_cnt: usize,
+    local_cnt: usize,
+}
+
+impl TypeMapping {
+    fn local(&self, local: ast::LocalId) -> ast::TypeVarId {
+        ast::TypeVarId::from(self.generic_var_cnt + local.0)
+    }
+    fn ret(&self) -> ast::TypeVarId {
+        ast::TypeVarId::from(self.generic_var_cnt + self.local_cnt)
+    }
+    fn captured(&self, captured: ast::CapturedId) -> ast::TypeVarId {
+        ast::TypeVarId::from(captured.0 + self.local_cnt + 1 + self.generic_var_cnt)
+    }
+    fn capture(&self, capture: ast::Capture) -> ast::TypeVarId {
+        match capture {
+            ast::Capture::Local(id, _) => self.local(id),
+            ast::Capture::Capture(id, _) => self.captured(id),
+        }
+    }
+}
+
 fn infer_expr<'s>(
     expr_id: ast::ExprId,
     symbols: &ast::Symbols<'s>,
@@ -20,6 +43,7 @@ fn infer_expr<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let expr = &ast_nodes[expr_id];
@@ -35,6 +59,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::IfElse { test, then, else_ } => infer_if_else(
@@ -48,6 +73,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Case { operand, arms } => infer_case(
@@ -60,6 +86,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::LetPatIn { bind, value, in_ } => infer_let_pattern_in(
@@ -73,6 +100,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Captured {
@@ -87,6 +115,7 @@ fn infer_expr<'s>(
             symbols,
             typed_functions,
             inferer,
+            type_mapping,
             e,
         ),
         ExprNode::MakeClosureAt {
@@ -106,6 +135,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::MakeClosure { f, captures } => infer_make_closure(
@@ -117,6 +147,7 @@ fn infer_expr<'s>(
             typed_nodes,
             typed_functions,
             inferer,
+            type_mapping,
             e,
         ),
         ExprNode::UserFunction(name) => infer_user_function(
@@ -128,6 +159,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Constructor(name) => infer_constructor(
@@ -139,6 +171,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Builtin(name) => infer_builtin(
@@ -150,6 +183,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Tuple(v) => infer_tuple(
@@ -161,10 +195,11 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Constant(constant) => infer_constant(constant, &expr.meta),
-        ExprNode::Local(id, mutable) => infer_local(*id, *mutable, &expr.meta),
+        ExprNode::Local(id, mutable) => infer_local(*id, *mutable, &expr.meta, type_mapping),
         ExprNode::Seq(stmts, result) => infer_seq(
             stmts.iter(),
             *result,
@@ -175,6 +210,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Assign(to, from) => infer_assign(
@@ -187,6 +223,7 @@ fn infer_expr<'s>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         ),
         ExprNode::Unit => {
@@ -227,6 +264,7 @@ fn infer_stmt<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Stmt {
     match &stmt.node {
@@ -239,6 +277,7 @@ fn infer_stmt<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let then = infer_expr(
@@ -249,6 +288,7 @@ fn infer_stmt<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let test = typed_nodes.push(test);
@@ -264,6 +304,7 @@ fn infer_stmt<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let then = infer_expr(
@@ -274,6 +315,7 @@ fn infer_stmt<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let test = typed_nodes.push(test);
@@ -289,6 +331,7 @@ fn infer_stmt<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let expr = typed_nodes.push(expr);
@@ -307,6 +350,7 @@ fn infer_seq<'s, 'a>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let stmts = stmts
@@ -319,6 +363,7 @@ fn infer_seq<'s, 'a>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             )
         })
@@ -333,6 +378,7 @@ fn infer_seq<'s, 'a>(
             typed_functions,
             inferer,
             assumptions,
+            type_mapping,
             e,
         )
     });
@@ -362,6 +408,7 @@ fn infer_assign<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let from = infer_expr(
@@ -372,6 +419,7 @@ fn infer_assign<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     match &ast_nodes[to].node {
@@ -406,6 +454,7 @@ fn infer_expr_many<'s, 'a>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> Vec<typed::Expr<'s>> {
     expr_ids
@@ -418,6 +467,7 @@ fn infer_expr_many<'s, 'a>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             )
         })
@@ -433,6 +483,7 @@ fn infer_tuple<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let elements = infer_expr_many(
@@ -443,6 +494,7 @@ fn infer_tuple<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     let type_ = elements.iter().map(|e| e.type_.clone()).collect();
@@ -464,6 +516,7 @@ fn infer_call<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let callee = infer_expr(
@@ -474,6 +527,7 @@ fn infer_call<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     let args = infer_expr_many(
@@ -484,6 +538,7 @@ fn infer_call<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
 
@@ -605,6 +660,7 @@ fn _infer_let_in<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let value = infer_expr(
@@ -615,11 +671,12 @@ fn _infer_let_in<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     // Bind type of value to local
     inferer
-        .update_var(type_var_id_for_local(bind), &value.type_)
+        .update_var(type_mapping.local(bind), &value.type_)
         .map_err(|_| {
             errors::LocalUnificationFailure::new(
                 bind,
@@ -640,6 +697,7 @@ fn _infer_let_in<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
 
@@ -666,13 +724,14 @@ fn infer_let_pattern_in<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     if !pattern.inrefutable(symbols) {
         e.push(errors::RefutablePattern::new(pattern.meta()));
     }
 
-    let pattern_type = infer_pattern_type(pattern, symbols, inferer, e);
+    let pattern_type = infer_pattern_type(pattern, symbols, inferer, type_mapping, e);
     let value = infer_expr(
         value,
         symbols,
@@ -681,6 +740,7 @@ fn infer_let_pattern_in<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     // Bind type of value to pattern
@@ -707,6 +767,7 @@ fn infer_let_pattern_in<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
 
@@ -731,6 +792,7 @@ fn infer_user_function<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     _assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let id = ast::FunctionId::of_standard(name.clone());
@@ -744,6 +806,7 @@ fn infer_user_function<'s>(
             typed_nodes,
             typed_functions,
             inferer,
+            type_mapping,
             e,
         ) {
             let type_constructor = if f.pure {
@@ -801,6 +864,7 @@ fn infer_builtin<'s>(
     _typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     _assumptions: &constrain::Assumptions<'s>,
+    _type_mapping: &TypeMapping,
     _e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let f = symbols.builtins.get(name).unwrap();
@@ -831,6 +895,7 @@ fn infer_constructor<'s>(
     _typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     _assumptions: &constrain::Assumptions<'s>,
+    _type_mapping: &TypeMapping,
     _e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let constructor = symbols.constructors.get(name).unwrap();
@@ -874,6 +939,7 @@ fn infer_if_else<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let test = infer_expr(
@@ -884,6 +950,7 @@ fn infer_if_else<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     let then = infer_expr(
@@ -894,6 +961,7 @@ fn infer_if_else<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     let else_ = infer_expr(
@@ -904,6 +972,7 @@ fn infer_if_else<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
 
@@ -989,6 +1058,7 @@ fn infer_closure<'s>(
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> Option<ast::FunctionType<'s>> {
     // Check purity
@@ -1015,21 +1085,19 @@ fn infer_closure<'s>(
             let renamed_ftype = inferer.rename_type_vars_free(f_type, f.var_cnt);
             inferer
                 .update_var(
-                    type_var_id_for_local(at),
+                    type_mapping.local(at),
                     &ast::Type::new(callable_constructor(renamed_ftype)),
                 )
                 .expect("`at` should be a fresh type var, and updating it shouldn't go wrong");
         }
     }
 
-    let local_cnt = symbols.functions[typed_functions.currently_infering().unwrap()].local_cnt;
-
     // Collect type of captures
     let captured_types = captures
         .iter()
         .map(|c| {
             inferer
-                .resolve_var(type_var_id_for_capture(local_cnt, c.clone()), c.meta())
+                .resolve_var(type_mapping.capture(c.clone()), c.meta())
                 .unwrap_or_else(|err| {
                     e.push(err);
                     ast::Type::new_never()
@@ -1054,6 +1122,7 @@ fn infer_closure<'s>(
         typed_nodes,
         typed_functions,
         inferer,
+        type_mapping,
         e,
     ) {
         Some(f_type) => {
@@ -1064,7 +1133,7 @@ fn infer_closure<'s>(
                 .zip(captures.iter())
                 .for_each(|(ctype, cap)| {
                     inferer
-                        .update_var(type_var_id_for_capture(local_cnt, cap.clone()), ctype)
+                        .update_var(type_mapping.capture(cap.clone()), ctype)
                         .map_err(|_| {
                             errors::CaptureUnificationFailure::new(&ctype, cap.meta(), &inferer)
                         })
@@ -1086,6 +1155,7 @@ fn infer_make_closure<'s>(
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     match infer_closure(
@@ -1098,6 +1168,7 @@ fn infer_make_closure<'s>(
         typed_nodes,
         typed_functions,
         inferer,
+        type_mapping,
         e,
     ) {
         Some(f_type) => typed::Expr {
@@ -1133,6 +1204,7 @@ fn infer_make_closure_at<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     match infer_closure(
@@ -1145,6 +1217,7 @@ fn infer_make_closure_at<'s>(
         typed_nodes,
         typed_functions,
         inferer,
+        type_mapping,
         e,
     ) {
         Some(f_type) => {
@@ -1156,7 +1229,7 @@ fn infer_make_closure_at<'s>(
             };
 
             inferer
-                .update_var(type_var_id_for_local(at), &closure_type)
+                .update_var(type_mapping.local(at), &closure_type)
                 .unwrap_or_else(|_| {
                     e.push(errors::BodyTypeMismatchAnnotation::new(
                         &closure_type,
@@ -1173,6 +1246,7 @@ fn infer_make_closure_at<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
             let then_type = then.type_.clone();
@@ -1202,11 +1276,12 @@ fn infer_pattern_type<'s>(
     pattern: &ast::Pattern<'s>,
     symbols: &ast::Symbols<'s>,
     inferer: &mut crate::inferer::Inferer<'s>,
+    type_mapping: &TypeMapping,
     e: &mut crate::errors::ManyError,
 ) -> ast::Type<'s> {
     match pattern {
         ast::Pattern::Bind(local_id, _meta) => ast::Type {
-            node: ast::TypeNode::Var(type_var_id_for_local(*local_id)),
+            node: ast::TypeNode::Var(type_mapping.local(*local_id)),
         },
         ast::Pattern::Literal(c, _meta) => ast::Type {
             node: ast::TypeNode::Primitive(c.type_()),
@@ -1214,7 +1289,7 @@ fn infer_pattern_type<'s>(
         ast::Pattern::Construct(constructor, args, meta) => {
             let args_type: Vec<_> = args
                 .iter()
-                .map(|p| infer_pattern_type(p, symbols, inferer, e))
+                .map(|p| infer_pattern_type(p, symbols, inferer, type_mapping, e))
                 .collect();
             let constructor = symbols.constructors.get(constructor).unwrap();
             let data = symbols.datas.get(&constructor.belongs_to).unwrap();
@@ -1248,7 +1323,7 @@ fn infer_pattern_type<'s>(
         ast::Pattern::Tuple(v, _meta) => ast::Type {
             node: ast::TypeNode::Tuple(
                 v.iter()
-                    .map(|x| infer_pattern_type(x, symbols, inferer, e))
+                    .map(|x| infer_pattern_type(x, symbols, inferer, type_mapping, e))
                     .collect(),
             ),
         },
@@ -1265,6 +1340,7 @@ fn infer_case<'s>(
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
     assumptions: &constrain::Assumptions<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
     let operand = infer_expr(
@@ -1275,6 +1351,7 @@ fn infer_case<'s>(
         typed_functions,
         inferer,
         assumptions,
+        type_mapping,
         e,
     );
     let ret_type = ast::Type::new_var(inferer.alloc_free_var());
@@ -1290,6 +1367,7 @@ fn infer_case<'s>(
                 typed_functions,
                 inferer,
                 assumptions,
+                type_mapping,
                 e,
             );
 
@@ -1302,6 +1380,7 @@ fn infer_case<'s>(
                     typed_functions,
                     inferer,
                     assumptions,
+                    type_mapping,
                     e,
                 );
                 inferer
@@ -1332,7 +1411,7 @@ fn infer_case<'s>(
                 .commit(e);
 
             // Infer type of pattern
-            let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, e);
+            let pat_type = infer_pattern_type(&arm.pattern, symbols, inferer, type_mapping, e);
 
             inferer
                 .unify(&operand.type_, &pat_type)
@@ -1365,10 +1444,15 @@ fn infer_case<'s>(
     }
 }
 
-fn infer_local(id: ast::LocalId, _mutable: bool, id_meta: &ast::Meta) -> typed::Expr<'static> {
+fn infer_local(
+    id: ast::LocalId,
+    _mutable: bool,
+    id_meta: &ast::Meta,
+    type_mapping: &TypeMapping,
+) -> typed::Expr<'static> {
     typed::Expr {
         node: typed::ExprNode::Local(id),
-        type_: ast::Type::new_var(type_var_id_for_local(id)),
+        type_: ast::Type::new_var(type_mapping.local(id)),
         meta: id_meta.clone(),
     }
 }
@@ -1378,13 +1462,13 @@ fn infer_captured<'s>(
     is_self: bool,
     _mutable: bool,
     id_meta: &ast::Meta,
-    symbols: &ast::Symbols<'s>,
-    typed_functions: &mut typed::FunctionTable<'s>,
+    _symbols: &ast::Symbols<'s>,
+    _typed_functions: &mut typed::FunctionTable<'s>,
     _inferer: &mut inferer::Inferer<'s>,
+    type_mapping: &TypeMapping,
     _e: &mut errors::ManyError,
 ) -> typed::Expr<'s> {
-    let local_cnt = symbols.functions[typed_functions.currently_infering().unwrap()].local_cnt;
-    let type_ = { ast::Type::new_var(type_var_id_for_captured(local_cnt, id)) };
+    let type_ = { ast::Type::new_var(type_mapping.captured(id)) };
 
     typed::Expr {
         node: typed::ExprNode::Captured { id, is_self },
@@ -1397,9 +1481,10 @@ fn current_inferred_renamed<'s>(
     f: &ast::Function<'s>,
     inferer: &mut inferer::Inferer<'s>,
     captured_types: &CapturedTypeInfo<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> (ast::FunctionType<'s>, bool) {
-    let currently_infered = construct_function_type(f, inferer, captured_types, e);
+    let currently_infered = construct_function_type(f, inferer, captured_types, type_mapping, e);
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
     let (map, _var_cnt) = inferer.discretization(&currently_infered);
@@ -1419,6 +1504,7 @@ fn infer_function_type_renamed<'s>(
     typed_nodes: &mut typed::ExprHeap<'s>,
     typed_functions: &mut typed::FunctionTable<'s>,
     inferer: &mut inferer::Inferer<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> Option<ast::FunctionType<'s>> {
     // Already infered its type
@@ -1455,7 +1541,8 @@ fn infer_function_type_renamed<'s>(
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
     if *typed_functions.currently_infering().unwrap() == id {
-        let (currently_infered, _) = current_inferred_renamed(f, inferer, &captured_types, e);
+        let (currently_infered, _) =
+            current_inferred_renamed(f, inferer, &captured_types, type_mapping, e);
 
         return Some(currently_infered);
     }
@@ -1467,10 +1554,10 @@ fn infer_function_type_renamed<'s>(
 /// Init the [`inferer::Inferer`] for infering function `f`.
 ///
 /// # Special type variables
-/// `0..f.arity` are assigned to parameters of `f`
-/// `0..f.locals_cnt ` are assigned to locals of f. Actually, `f`'s parameters are exactly the first few locals
-/// `f.locals_cnt` is assigned to return value of `f`
-/// `(f.locals_cnt + 1)..(f.locals_cnt + 1 + f.captures_cnt)` are assigned to captured values of `f`
+/// `0..f.var_cnt` are assigned to generic type variables
+/// Next `f.locals_cnt ` are assigned to locals of f. Actually, `f`'s parameters are exactly the first few locals
+/// `f.var_cnt + f.locals_cnt` is assigned to return value of `f`
+/// Next `f.captures_cnt are assigned to captured values of `f`
 ///
 /// This function allocate locals, unify user provided function signature and returns the type variable representing
 /// return value of the function
@@ -1479,73 +1566,64 @@ fn init_inferer_for_function_inference<'s>(
     inferer: &mut inferer::Inferer<'s>,
     captured_types: &CapturedTypeInfo<'s>,
     assumptions: Vec<ast::Constrain<'s>>,
-) -> (ast::Type<'s>, Vec<ast::Constrain<'s>>) {
+) -> (ast::Type<'s>, Vec<ast::Constrain<'s>>, TypeMapping) {
+    // If this is a closure, number of generic type variables is stored in
+    // `captured_types`;
+    // Otherwise `f` knows it
+    let var_cnt = if f.capture_cnt == 0 {
+        f.var_cnt
+    } else {
+        captured_types.var_cnt
+    };
+
+    // Allocate type-vars for those in user provided function signature and rename.
+    // Those type-vars cannot be modified to have concrete type
+    let _ = inferer.alloc_locked_vars(var_cnt);
     // allocate type-vars for locals and return-value and captures
     let _ = inferer.alloc_free_vars(f.local_cnt + 1 + f.capture_cnt);
 
-    let ret_type = ast::Type::new_var(type_var_id_for_ret(f.local_cnt));
+    let type_mapping = TypeMapping {
+        local_cnt: f.local_cnt,
+        generic_var_cnt: f.var_cnt,
+    };
+
+    let ret_type = ast::Type::new_var(type_mapping.ret());
 
     // Assign types to captures
-
     if f.capture_cnt != 0 {
-        // Those type-vars cannot be modified to have concrete type
-        let renamed = inferer.rename_type_vars_free(&captured_types.types, captured_types.var_cnt);
-
-        renamed.iter().enumerate().for_each(|(i, t)| {
-            let _ = inferer.update_var(type_var_id_for_captured(f.local_cnt, i.into()), &t);
+        captured_types.types.iter().enumerate().for_each(|(i, t)| {
+            let _ = inferer.update_var(type_mapping.captured(i.into()), &t);
         });
     }
 
     // User provided function signature
     if let Some(f_type) = &f.type_ {
-        // Allocate type-vars for those in user provided function signature and rename.
-        // Those type-vars cannot be modified to have concrete type
-        let (f_type, assumptions) =
-            inferer.rename_type_vars_locked(f_type, &assumptions, f.var_cnt);
         // Unify parameters
         for i in 0..f_type.params.len() {
-            inferer.update_var(i.into(), &f_type.params[i]).unwrap()
+            inferer
+                .update_var(type_mapping.local(i.into()), &f_type.params[i])
+                .unwrap()
         }
-        inferer
-            .update_var(type_var_id_for_ret(f.local_cnt), &f_type.ret)
-            .unwrap();
+        inferer.update_var(type_mapping.ret(), &f_type.ret).unwrap();
 
-        return (ret_type, assumptions);
+        return (ret_type, assumptions, type_mapping);
     };
 
-    (ret_type, assumptions)
-}
-
-fn type_var_id_for_capture(local_cnt: usize, capture: ast::Capture) -> ast::TypeVarId {
-    match capture {
-        ast::Capture::Local(id, _) => type_var_id_for_local(id),
-        ast::Capture::Capture(id, _) => type_var_id_for_captured(local_cnt, id),
-    }
-}
-
-fn type_var_id_for_local(local: ast::LocalId) -> ast::TypeVarId {
-    ast::TypeVarId::from(local.0)
-}
-
-fn type_var_id_for_ret(local_cnt: usize) -> ast::TypeVarId {
-    ast::TypeVarId::from(local_cnt)
-}
-
-fn type_var_id_for_captured(local_cnt: usize, captured: ast::CapturedId) -> ast::TypeVarId {
-    ast::TypeVarId::from(captured.0 + local_cnt + 1)
+    (ret_type, assumptions, type_mapping)
 }
 
 fn construct_function_type<'s, 'a>(
     f: &ast::Function<'s>,
     inferer: &mut inferer::Inferer<'s>,
     captured_types: &CapturedTypeInfo<'s>,
+    type_mapping: &TypeMapping,
     e: &mut errors::ManyError,
 ) -> ast::FunctionType<'s> {
     ast::FunctionType {
         params: (0..f.arity)
             .map(|i| {
                 inferer
-                    .resolve_var(type_var_id_for_local(i.into()), &f.param_metas[i])
+                    .resolve_var(type_mapping.local(i.into()), &f.param_metas[i])
                     .unwrap_or_else(|err| {
                         e.push(err);
                         ast::Type::new_never()
@@ -1555,10 +1633,7 @@ fn construct_function_type<'s, 'a>(
         captures: (0..f.capture_cnt)
             .map(|i| {
                 inferer
-                    .resolve_var(
-                        type_var_id_for_captured(f.local_cnt, i.into()),
-                        &captured_types.metas[i],
-                    )
+                    .resolve_var(type_mapping.captured(i.into()), &captured_types.metas[i])
                     .unwrap_or_else(|err| {
                         e.push(err);
                         ast::Type::new_never()
@@ -1567,7 +1642,7 @@ fn construct_function_type<'s, 'a>(
             .collect(),
         ret: Box::new(
             inferer
-                .resolve_var(type_var_id_for_ret(f.local_cnt), &f.meta)
+                .resolve_var(type_mapping.ret(), &f.meta)
                 .unwrap_or_else(|err| {
                     e.push(err);
                     ast::Type::new_never()
@@ -1687,7 +1762,7 @@ pub fn infer_function<'s>(
         }
         _ => f.constrains.iter().cloned().collect(),
     };
-    let (ret_type, assumptions) =
+    let (ret_type, assumptions, type_mapping) =
         init_inferer_for_function_inference(f, &mut inferer, &captured_types, assumptions);
     let assumptions = assumptions.into_iter().collect();
 
@@ -1701,6 +1776,7 @@ pub fn infer_function<'s>(
         typed_functions,
         &mut inferer,
         &assumptions,
+        &type_mapping,
         e,
     );
 
@@ -1716,7 +1792,7 @@ pub fn infer_function<'s>(
     check_and_resolve_constrains(body, symbols, typed_nodes, &mut inferer, &assumptions, e);
 
     // Construct type of function
-    let f_type = construct_function_type(f, &mut inferer, &captured_types, e);
+    let f_type = construct_function_type(f, &mut inferer, &captured_types, &type_mapping, e);
     // Discretize type of function such that variables are the first few unsigned integers
     // e.g. from 2, 3 -> 4 to 0, 1 -> 2
     let (map, var_cnt) = inferer.discretization(&f_type);

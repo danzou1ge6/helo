@@ -266,7 +266,7 @@ pub fn format_ir_functions<'s>(
             &allocator,
         );
         let doc = doc_builder.pretty(term_width);
-        write!(formatter, "{doc}")?;
+        write!(formatter, "{doc}\n")?;
     }
     Ok(())
 }
@@ -288,7 +288,7 @@ pub fn format_lir_functions(
             &allocator,
         );
         let doc = doc_builder.pretty(term_width);
-        write!(formatter, "{doc}")?;
+        write!(formatter, "{doc}\n")?;
     }
     Ok(())
 }
@@ -310,7 +310,7 @@ pub fn format_lir_function_optimized(
         &allocator,
     );
     let doc = doc_builder.pretty(term_width);
-    write!(formatter, "{doc}")
+    write!(formatter, "{doc}\n")
 }
 
 pub fn format_lir_functions_optimized(
@@ -345,5 +345,5 @@ pub fn format_ssa_blocks(
     let doc_builder =
         pretty_print::pretty_ssa_function::<_, ()>(f_id, f, str_list, function_names, &allocator);
     let doc = doc_builder.pretty(term_width);
-    write!(formatter, "{doc}")
+    write!(formatter, "{doc}\n")
 }
