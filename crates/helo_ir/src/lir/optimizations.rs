@@ -506,19 +506,19 @@ mod constant_propagation {
 
                 use std::ops::{Add, BitAnd, BitOr, Div, Mul, Sub};
                 match (builtins::module_str(*builtin), builtins::ident(*builtin)) {
-                    ("Arith.Int", "+") => int_airth(i64::add, values, temps_worklist),
-                    ("Arith.Int", "-") => int_airth(i64::sub, values, temps_worklist),
-                    ("Arith.Int", "*") => int_airth(i64::mul, values, temps_worklist),
-                    ("Arith.Int", "/") => int_airth(i64::div, values, temps_worklist),
-                    ("Arith.Int", "==") => int_relation(i64::eq, values, temps_worklist),
-                    ("Arith.Int", "/=") => int_relation(i64::ne, values, temps_worklist),
-                    ("Arith.Int", ">=") => int_relation(i64::ge, values, temps_worklist),
-                    ("Arith.Int", "<=") => int_relation(i64::le, values, temps_worklist),
-                    ("Arith.Int", ">") => int_relation(i64::gt, values, temps_worklist),
-                    ("Arith.Int", "<") => int_relation(i64::lt, values, temps_worklist),
-                    ("Arith.Int", "mod") => int_airth(i64::rem_euclid, values, temps_worklist),
-                    ("Arith.Bool", "&&") => bool_arith(bool::bitand, values, temps_worklist),
-                    ("Arith.Bool", "||") => bool_arith(bool::bitor, values, temps_worklist),
+                    ("arith.int", "+") => int_airth(i64::add, values, temps_worklist),
+                    ("arith.int", "-") => int_airth(i64::sub, values, temps_worklist),
+                    ("arith.int", "*") => int_airth(i64::mul, values, temps_worklist),
+                    ("arith.int", "/") => int_airth(i64::div, values, temps_worklist),
+                    ("arith.int", "==") => int_relation(i64::eq, values, temps_worklist),
+                    ("arith.int", "/=") => int_relation(i64::ne, values, temps_worklist),
+                    ("arith.int", ">=") => int_relation(i64::ge, values, temps_worklist),
+                    ("arith.int", "<=") => int_relation(i64::le, values, temps_worklist),
+                    ("arith.int", ">") => int_relation(i64::gt, values, temps_worklist),
+                    ("arith.int", "<") => int_relation(i64::lt, values, temps_worklist),
+                    ("arith.int", "mod") => int_airth(i64::rem_euclid, values, temps_worklist),
+                    ("arith.bool", "&&") => bool_arith(bool::bitand, values, temps_worklist),
+                    ("arith.bool", "||") => bool_arith(bool::bitor, values, temps_worklist),
                     _ => default_case_for_inst(inst, values, temps_worklist),
                 }
             }
