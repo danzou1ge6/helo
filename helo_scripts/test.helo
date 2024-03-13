@@ -1,7 +1,11 @@
-fn alt_from 'a,'b x: ['b] -> 'a where convert.From 'a,'b =
-    let b = (convert.from x) : 'a in b
+/* use ops
 
-routine main: [] -> () = 
-    let f = (alt_from 1) : Float in
-    io.println (fmt.to_string f)
+fn f a,b: [Int, Int] -> Int = if a > b then a else b
+*/
+
+routine main =
+    let a = 1 in
+    let b = 2 in
+    use arith.int in
+    if a > b then a else b
 

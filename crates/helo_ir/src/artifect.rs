@@ -98,6 +98,8 @@ pub fn compiler_ir<'s: 'a, 'a>(
     (ir_functions, ir_nodes, str_list, ir_fids)
 }
 
+pub use ir::optimizations::inline_ir;
+
 pub fn compile_lir<'s>(
     ir_functions: ir::FunctionTable<'s>,
     ir_nodes: ir::ExprHeap<'s>,

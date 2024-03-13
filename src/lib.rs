@@ -15,6 +15,7 @@ use clap::ValueEnum;
 pub enum PrintFlag {
     InferedType,
     Ir,
+    AfterInline,
     FreshLir,
     FreshSsa,
     AfterConstantPropagation,
@@ -31,6 +32,7 @@ impl PrintFlag {
         match self {
             InferedType => "---- Infered Type ----\n",
             Ir => "---- IR ----\n",
+            AfterInline => "---- After Inline Optimization ----\n",
             FreshLir => "---- Fresh LIR ----\n",
             FreshSsa => "---- Fresh SSA ----\n",
             AfterConstantPropagation => "---- After Constant Propagation ----\n",
@@ -102,11 +104,29 @@ pub fn compile(
     let mut e = e.emit()?;
 
     // Lower to IR
-    let (ir_functions, ir_nodes, str_list, _) =
+    let (ir_functions, mut ir_nodes, str_list, _) =
         artifect::compiler_ir([main.clone()].iter(), &typed_symbols, typed_nodes, &mut e);
     let _ = e.emit()?;
 
     if config.print(formatter, PrintFlag::Ir).into_diagnostic()? {
+        artifect::format_ir_functions(
+            formatter,
+            &ir_functions,
+            &ir_nodes,
+            &str_list,
+            &typed_symbols.instances,
+            config.term_width,
+        )
+        .into_diagnostic()?;
+    }
+
+    // Do inline optimization
+    let ir_functions = artifect::inline_ir(ir_functions, &mut ir_nodes, 16, [main.clone()].iter());
+
+    if config
+        .print(formatter, PrintFlag::AfterInline)
+        .into_diagnostic()?
+    {
         artifect::format_ir_functions(
             formatter,
             &ir_functions,

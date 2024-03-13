@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 pub use helo_parse::typed::Tag;
 
+pub mod optimizations;
+
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct ExprId(pub usize);
 
@@ -17,6 +19,12 @@ impl std::fmt::Display for LocalId {
 impl PartialEq for ExprId {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+}
+
+impl LocalId {
+    pub fn offset(self, x: usize) -> Self {
+        Self(self.0 + x)
     }
 }
 
@@ -42,6 +50,7 @@ impl std::fmt::Display for StrId {
     }
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub local_cnt: usize,
     pub arity: usize,
@@ -120,10 +129,7 @@ impl<'s> BuiltinTable<'s> {
         for (i, (mod_str, ident, _)) in BUILTINS.iter().enumerate() {
             let mod_path = ast::Path::parse_simple(&mod_str);
             let path = mod_path.pushed(&ident);
-            tab.insert(
-                ast::BuiltinFunctionName(path),
-                BuiltinId(i as u16),
-            );
+            tab.insert(ast::BuiltinFunctionName(path), BuiltinId(i as u16));
         }
         Self { tab }
     }
@@ -259,6 +265,9 @@ impl<'s> FunctionTable<'s> {
     pub fn insert(&mut self, k: FunctionId<'s>, v: Function) {
         self.tab.insert(k, Some(v));
     }
+    pub fn iter(&self) -> impl Iterator<Item = (&FunctionId<'s>, &Function)> {
+        self.tab.iter().map(|(id, f)| (id, f.as_ref().unwrap()))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -366,6 +375,12 @@ impl<'s> std::ops::Index<ExprId> for ExprHeap<'s> {
     }
 }
 
+impl<'s> std::ops::IndexMut<ExprId> for ExprHeap<'s> {
+    fn index_mut(&mut self, index: ExprId) -> &mut Self::Output {
+        &mut self.0[index.0]
+    }
+}
+
 impl<'s> ExprHeap<'s> {
     pub fn push(&mut self, node: Expr<'s>) -> ExprId {
         let id = self.0.len();
@@ -384,5 +399,171 @@ impl<'s> ExprHeap<'s> {
     }
     pub fn get_mut(&mut self, index: ExprId) -> Option<&mut Expr<'s>> {
         self.0.get_mut(index.0)
+    }
+    pub fn walk(&self, i: ExprId, f: &mut impl FnMut(&Expr<'s>)) {
+        f(&self[i]);
+
+        use ExprNode::*;
+        match self[i].node() {
+            LetBind { value, in_, .. } => {
+                self.walk(*value, f);
+                self.walk(*in_, f);
+            }
+            SwitchTag(value, arms, default) => {
+                self.walk(*value, f);
+                arms.iter().for_each(|(_, e)| self.walk(*e, f));
+                self.walk(*default, f)
+            }
+            Switch(value, arms, default) => {
+                self.walk(*value, f);
+                arms.iter().for_each(|(_, e)| self.walk(*e, f));
+                self.walk(*default, f)
+            }
+            Cond(arms, default) => {
+                arms.iter().for_each(|(e1, e2)| {
+                    self.walk(*e1, f);
+                    self.walk(*e2, f);
+                });
+                self.walk(*default, f);
+            }
+            IfElse { test, then, else_ } => {
+                self.walk(*test, f);
+                self.walk(*then, f);
+                self.walk(*else_, f);
+            }
+            Apply { callee, args, .. } => {
+                self.walk(*callee, f);
+                args.iter().for_each(|e| self.walk(*e, f));
+            }
+            MakeTagged(_, v) | MakeTuple(v) => v.iter().for_each(|e| self.walk(*e, f)),
+            Assign(_, e) => {
+                self.walk(*e, f);
+            }
+            Seq(v, e) => {
+                v.iter().for_each(|e| self.walk(*e, f));
+                e.map(|e| self.walk(e, f));
+            }
+            If { test, then } => {
+                self.walk(*test, f);
+                self.walk(*then, f);
+            }
+            While { test, then } => {
+                self.walk(*test, f);
+                self.walk(*then, f);
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_helper(
+        &mut self,
+        i: ExprId,
+        selector: &impl Fn(ExprId, &Self) -> bool,
+        f: &mut impl FnMut(ExprId, &mut Self) -> ExprId,
+    ) -> ExprNode<'s> {
+        use ExprNode::*;
+        let node = match self[i].node().clone() {
+            LetBind { value, in_, local } => LetBind {
+                local,
+                value: self.apply(value, selector, f),
+                in_: self.apply(in_, selector, f),
+            },
+            SwitchTag(value, arms, default) => SwitchTag(
+                self.apply(value, selector, f),
+                arms.into_iter()
+                    .map(|(t, e)| (t.clone(), self.apply(e, selector, f)))
+                    .collect(),
+                self.apply(default, selector, f),
+            ),
+            Switch(value, arms, default) => Switch(
+                self.apply(value, selector, f),
+                arms.into_iter()
+                    .map(|(t, e)| (t.clone(), self.apply(e, selector, f)))
+                    .collect(),
+                self.apply(default, selector, f),
+            ),
+            Cond(arms, default) => Cond(
+                arms.into_iter()
+                    .map(|(e1, e2)| (self.apply(e1, selector, f), self.apply(e2, selector, f)))
+                    .collect(),
+                self.apply(default, selector, f),
+            ),
+            IfElse { test, then, else_ } => IfElse {
+                test: self.apply(test, selector, f),
+                then: self.apply(then, selector, f),
+                else_: self.apply(else_, selector, f),
+            },
+            Apply {
+                callee,
+                args,
+                callee_impure,
+            } => Apply {
+                callee: self.apply(callee, selector, f),
+                args: args
+                    .into_iter()
+                    .map(|arg| self.apply(arg, selector, f))
+                    .collect(),
+                callee_impure,
+            },
+            MakeTuple(v) => MakeTuple(v.into_iter().map(|e| self.apply(e, selector, f)).collect()),
+            MakeTagged(t, v) => MakeTagged(
+                t.clone(),
+                v.into_iter().map(|e| self.apply(e, selector, f)).collect(),
+            ),
+            Assign(v, e) => Assign(v, self.apply(e, selector, f)),
+            Seq(v, e) => Seq(
+                v.into_iter().map(|e| self.apply(e, selector, f)).collect(),
+                e.map(|e| self.apply(e, selector, f)),
+            ),
+            If { test, then } => If {
+                test: self.apply(test, selector, f),
+                then: self.apply(then, selector, f),
+            },
+            While { test, then } => While {
+                test: self.apply(test, selector, f),
+                then: self.apply(then, selector, f),
+            },
+            other => other.clone(),
+        };
+        node
+    }
+
+    /// Walk the tree in pre-order and returns a NEW tree.
+    /// Nodes selected by `selector` are replaced by result of calling `f`, and ancestors of
+    /// replaced nodes are cloned on heap
+    pub fn apply(
+        &mut self,
+        i: ExprId,
+        selector: &impl Fn(ExprId, &Self) -> bool,
+        f: &mut impl FnMut(ExprId, &mut Self) -> ExprId,
+    ) -> ExprId {
+        if selector(i, &self) {
+            return f(i, self);
+        }
+
+        let node = self.walk_helper(i, selector, f);
+
+        let meta = self[i].meta().clone();
+        self.push(Expr::new(node, meta))
+    }
+
+    /// Walk the tree in pre-order and return a INPLACE MODIFIED tree.
+    /// Nodes selected by `selector` are replaced by aresult of calling `f`, but their ancestors
+    /// are not cloned.
+    pub fn apply_in_place(
+        &mut self,
+        i: ExprId,
+        selector: &impl Fn(ExprId, &Self) -> bool,
+        f: &mut impl FnMut(ExprId, &mut Self) -> ExprId,
+    ) -> ExprId {
+        if selector(i, &self) {
+            return f(i, self);
+        }
+
+        let node = self.walk_helper(i, selector, f);
+
+        let meta = self[i].meta().clone();
+        self[i] = Expr::new(node, meta);
+        i
     }
 }

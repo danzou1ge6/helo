@@ -28,7 +28,7 @@
 [x] Comments
 [x] Ad-hoc polymorphism
 [x] Infix constructor
-[ ] Inline optimization
+[x] Inline optimization
 [x] Relation methods for arithmatics
 [x] Anonymous closure
 [-] Fix bug in closure tailcall in virtual machine
@@ -38,3 +38,4 @@
 [x] Force arithmatic operators to take two operands of same type
 [x] Modifying generic type variables should be prohibited
 [ ] Trace back to definition of generic type variable in diagnostic
+[x] Fix: Allow referencing generic type variables in function body
