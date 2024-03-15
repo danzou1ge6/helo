@@ -39,10 +39,7 @@
             },
             "args": [
                 "helo_scripts/test.helo",
-                "-p",
-                "fresh-ssa",
-                "-p",
-                "after-constant-propagation",
+                "--print-all",
                 "--no-save",
                 "--run"
             ],

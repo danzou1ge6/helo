@@ -46,6 +46,32 @@ pub enum ValueSafe<'p> {
     Obj(ObjRef<'p>),
 }
 
+pub trait ToSafe {
+    type Output<'p>;
+    unsafe fn to_safe<'p>(self, _phantom: PhantomData<&'p GcPool>) -> Self::Output<'p>;
+    fn from_safe<'p>(v: Self::Output<'p>) -> Self;
+}
+
+impl ToSafe for Value {
+    type Output<'p> = ValueSafe<'p>;
+    unsafe fn to_safe<'p>(self, _phantom: PhantomData<&'p GcPool>) -> Self::Output<'p> {
+        self.to_safe(_phantom)
+    }
+    fn from_safe<'p>(v: Self::Output<'p>) -> Self {
+        Self::from_safe(v)
+    }
+}
+
+impl ToSafe for Vec<Value> {
+    type Output<'p> = Vec<ValueSafe<'p>>;
+    unsafe fn to_safe<'p>(self, _phantom: PhantomData<&'p GcPool>) -> Self::Output<'p> {
+        self.into_iter().map(|v| v.to_safe(_phantom)).collect()
+    }
+    fn from_safe<'p>(v: Self::Output<'p>) -> Self {
+        v.into_iter().map(|v| Value::from_safe(v)).collect()
+    }
+}
+
 impl Value {
     pub fn from_safe<'p>(v: ValueSafe<'p>) -> Self {
         use ValueSafe::*;

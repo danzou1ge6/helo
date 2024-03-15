@@ -1,4 +1,4 @@
-use helo_runtime::{errors, executable, vm};
+use helo_runtime::{builtins, errors, executable, vm};
 
 use std::env;
 use std::fs;
@@ -12,11 +12,14 @@ pub fn load_executable(file: &path::PathBuf) -> std::io::Result<Executable> {
     Executable::read_from(&mut handle)
 }
 
-pub fn run<'e, G>(mut vm: vm::Vm<'e, G>)
+pub fn run<G>(vm: vm::VmState, exe: &Executable, g: G)
 where
     G: vm::GcPolicy,
 {
-    let r = vm.run();
+    let builtin_table = builtins::BuiltinTable::new_sync();
+    let mut io = vm::SyncIo::new_std();
+    let r = vm.run(exe, &mut io, &builtin_table, g);
+
     match r {
         Ok((pack, mut lock)) => {
             let (mut pool, val) = pack.unpack(&lock);
@@ -24,10 +27,10 @@ where
             pool.clear(&mut lock);
         }
         Err(e) => match e {
-            errors::RunTimeError::Panic { file, span, msg } => {
+            errors::Exception::Panic { file, span, msg , ..} => {
                 print_panic(file, span, msg);
             }
-            _ => eprintln!("{:?}", e),
+            _ => eprintln!("{}", e),
         },
     }
 }
@@ -59,8 +62,8 @@ pub fn main() {
     match load_executable(&path::PathBuf::from(file_name)) {
         Ok(exe) => {
             let gc_policy = vm::IncreasingGcPolicy::new(2, 1024 * 1024 * 50);
-            let vm = vm::Vm::new(&exe, gc_policy);
-            run(vm);
+            let vm_state = vm::VmState::new(&exe);
+            run(vm_state, &exe, gc_policy);
         }
         Err(e) => eprintln!("{e}"),
     }

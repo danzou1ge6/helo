@@ -1,2 +1,19 @@
 /target
 /firedbg
+
+# web
+
+/web/node_modules
+
+# Quasar core related directories
+/web/.quasar
+/web/dist
+/web/quasar.config.*.temporary.compiled*
+
+# Log files
+/web/npm-debug.log*
+/web/yarn-debug.log*
+/web/yarn-error.log*
+
+# local .env files
+/web/.env.local*

@@ -115,7 +115,7 @@ impl Immediate {
     }
 }
 
-use builtins::BUILTINS;
+use builtins::BUILTIN_NAMES;
 use helo_runtime::builtins;
 pub use helo_runtime::builtins::BuiltinId;
 
@@ -126,7 +126,7 @@ pub struct BuiltinTable<'s> {
 impl<'s> BuiltinTable<'s> {
     pub fn new() -> Self {
         let mut tab = HashMap::new();
-        for (i, (mod_str, ident, _)) in BUILTINS.iter().enumerate() {
+        for (i, (mod_str, ident, _)) in BUILTIN_NAMES.iter().enumerate() {
             let mod_path = ast::Path::parse_simple(&mod_str);
             let path = mod_path.pushed(&ident);
             tab.insert(ast::BuiltinFunctionName(path), BuiltinId(i as u16));

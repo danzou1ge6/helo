@@ -12,9 +12,7 @@ pub use callable::{ObjCallable, Routine};
 pub use list::ObjList;
 pub use objects::{Gc, GcPool, Lock, MemPack, ObjPointer, ObjRef, Pointer, Ref};
 pub use string::ObjString;
-pub use value::ValueSafe;
-
-use self::value::Value;
+pub use value::{Value, ValueSafe};
 
 /// # Safety:
 /// All pointer should be valid
@@ -25,7 +23,9 @@ pub struct ValueVec {
 impl std::fmt::Debug for ValueVec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unsafe {
-            f.debug_list().entries(self.v.iter().map(|v| v.to_safe(PhantomData))).finish()
+            f.debug_list()
+                .entries(self.v.iter().map(|v| v.to_safe(PhantomData)))
+                .finish()
         }
     }
 }

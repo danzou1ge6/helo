@@ -1,18 +1,14 @@
-use std::io;
-
 use helo_ir::{artifect, ir, lir};
 use helo_parse::{ast, errors, source_tree};
 use helo_runtime::{disassembler, executable};
-
-use std::io::Write;
 
 use miette::IntoDiagnostic;
 
 use clap::ValueEnum;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, PartialOrd, Ord)]
 #[value(rename_all = "kebab-case")]
-pub enum PrintFlag {
+pub enum Stage {
     InferedType,
     Ir,
     AfterInline,
@@ -26,9 +22,9 @@ pub enum PrintFlag {
     ByteCode,
 }
 
-impl PrintFlag {
+impl Stage {
     pub fn name(&self) -> &'static str {
-        use PrintFlag::*;
+        use Stage::*;
         match self {
             InferedType => "---- Infered Type ----\n",
             Ir => "---- IR ----\n",
@@ -45,28 +41,358 @@ impl PrintFlag {
     }
 }
 
-pub struct Config {
-    pub print_flags: Vec<PrintFlag>,
+pub struct SingleOutController<O>
+where
+    O: std::io::Write,
+{
+    pub produce_exe: bool,
+    pub print_stages: Vec<Stage>,
     pub print_all: bool,
     pub term_width: usize,
+    pub out: O,
 }
 
-impl Config {
-    pub fn print(&self, formatter: &mut impl Write, flag: PrintFlag) -> Result<bool, io::Error> {
-        if self.print_flags.contains(&flag) || self.print_all {
-            write!(formatter, "{}", flag.name())?;
-            Ok(true)
+impl<O> SingleOutController<O>
+where
+    O: std::io::Write,
+{
+    fn print_header(&self) -> bool {
+        self.print_stages.len() > 1
+    }
+    fn abort(&self, stage: Stage) -> bool {
+        if self.produce_exe || self.print_all {
+            return false;
+        }
+        if let Some(last_stage) = self.print_stages.iter().max() {
+            *last_stage <= stage
         } else {
-            Ok(false)
+            true
         }
     }
 }
 
+impl<O> CompileController for SingleOutController<O>
+where
+    O: std::io::Write,
+{
+    fn infered_type(
+        &mut self,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::InferedType.name()).into_diagnostic()?;
+        }
+        for (name, f) in typed_symbols.functions.iter() {
+            write!(
+                &mut self.out,
+                "{}: {}\n",
+                name.to_string(&typed_symbols.instances),
+                f.type_
+            )
+            .into_diagnostic()?;
+        }
+        Ok(self.abort(Stage::InferedType))
+    }
+
+    fn ir<'s>(
+        &mut self,
+        ir_functions: &helo_ir::ir::FunctionTable<'s>,
+        ir_nodes: &helo_ir::ir::ExprHeap<'s>,
+        str_list: &ir::StrList,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::Ir.name()).into_diagnostic()?;
+        }
+        artifect::format_ir_functions(
+            &mut self.out,
+            ir_functions,
+            ir_nodes,
+            str_list,
+            &typed_symbols.instances,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(self.abort(Stage::Ir))
+    }
+
+    fn after_inline<'s>(
+        &mut self,
+        ir_functions: &helo_ir::ir::FunctionTable<'s>,
+        ir_nodes: &helo_ir::ir::ExprHeap<'s>,
+        str_list: &ir::StrList,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::AfterInline.name()).into_diagnostic()?;
+        }
+        artifect::format_ir_functions(
+            &mut self.out,
+            ir_functions,
+            ir_nodes,
+            str_list,
+            &typed_symbols.instances,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+
+        Ok(self.abort(Stage::AfterInline))
+    }
+
+    fn fresh_lir<'s>(
+        &mut self,
+        lir_functions: &lir::FunctionList<lir::Function>,
+        function_names: &lir::FunctionNameList,
+        str_list: &ir::StrList,
+    ) -> miette::Result<bool> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::FreshLir.name()).into_diagnostic()?;
+        }
+        artifect::format_lir_functions(
+            &mut self.out,
+            lir_functions,
+            function_names,
+            str_list,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(self.abort(Stage::FreshLir))
+    }
+
+    fn fresh_ssa<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::FreshSsa.name()).into_diagnostic()?;
+        }
+        artifect::format_ssa_blocks(
+            &mut self.out,
+            *fid,
+            f,
+            str_list,
+            function_names,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(())
+    }
+
+    fn after_constant_propagation<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()> {
+        if self.print_header() {
+            write!(
+                &mut self.out,
+                "{}",
+                Stage::AfterConstantPropagation.name()
+            )
+            .into_diagnostic()?;
+        }
+        artifect::format_ssa_blocks(
+            &mut self.out,
+            *fid,
+            f,
+            str_list,
+            function_names,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(())
+    }
+
+    fn after_dead_code_elimination<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()> {
+        if self.print_header() {
+            write!(
+                &mut self.out,
+                "{}",
+                Stage::AfterDeadCodeElimination.name()
+            )
+            .into_diagnostic()?;
+        }
+        artifect::format_ssa_blocks(
+            &mut self.out,
+            *fid,
+            f,
+            str_list,
+            function_names,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(())
+    }
+
+    fn after_common_expression_elimination<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()> {
+        if self.print_header() {
+            write!(
+                &mut self.out,
+                "{}",
+                Stage::AfterCommonExpressionElimination.name()
+            )
+            .into_diagnostic()?;
+        }
+        artifect::format_ssa_blocks(
+            &mut self.out,
+            *fid,
+            f,
+            str_list,
+            function_names,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(())
+    }
+
+    fn back_to_lir<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::FunctionOptimized,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::BackToLir.name()).into_diagnostic()?;
+        }
+        artifect::format_lir_function_optimized(
+            &mut self.out,
+            f,
+            *fid,
+            function_names,
+            str_list,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+
+        Ok(())
+    }
+
+    fn after_control_flow_simplification<'s>(
+        &mut self,
+        lir_functions: &lir::FunctionList<lir::FunctionOptimized>,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<bool> {
+        if self.print_header() {
+            write!(
+                &mut self.out,
+                "{}",
+                Stage::AfterControlFlowOptimization.name()
+            )
+            .into_diagnostic()?;
+        }
+        artifect::format_lir_functions_optimized(
+            &mut self.out,
+            lir_functions,
+            function_names,
+            str_list,
+            self.term_width,
+        )
+        .into_diagnostic()?;
+        Ok(self.abort(Stage::AfterControlFlowOptimization))
+    }
+
+    fn byte_code<'s>(&mut self, exe: &executable::Executable) -> miette::Result<()> {
+        if self.print_header() {
+            write!(&mut self.out, "{}", Stage::ByteCode.name()).into_diagnostic()?;
+        }
+        let pretty_table = disassembler::disassemble(exe);
+        write!(&mut self.out, "{pretty_table}").into_diagnostic()?;
+        Ok(())
+    }
+}
+
+pub trait CompileController {
+    fn infered_type(
+        &mut self,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool>;
+    fn ir<'s>(
+        &mut self,
+        ir_functions: &helo_ir::ir::FunctionTable<'s>,
+        ir_nodes: &helo_ir::ir::ExprHeap<'s>,
+        str_list: &ir::StrList,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool>;
+    fn after_inline<'s>(
+        &mut self,
+        ir_functions: &helo_ir::ir::FunctionTable<'s>,
+        ir_nodes: &helo_ir::ir::ExprHeap<'s>,
+        str_list: &ir::StrList,
+        typed_symbols: &helo_parse::typed::Symbols<'_>,
+    ) -> miette::Result<bool>;
+    fn fresh_lir<'s>(
+        &mut self,
+        lir_functions: &lir::FunctionList<lir::Function>,
+        function_names: &lir::FunctionNameList,
+        str_list: &ir::StrList,
+    ) -> miette::Result<bool>;
+    fn fresh_ssa<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()>;
+    fn after_constant_propagation<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()>;
+    fn after_dead_code_elimination<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()>;
+    fn after_common_expression_elimination<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::ssa::Function,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()>;
+    fn back_to_lir<'s>(
+        &mut self,
+        fid: &lir::FunctionId,
+        f: &lir::FunctionOptimized,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<()>;
+    fn after_control_flow_simplification<'s>(
+        &mut self,
+        lir_functions: &lir::FunctionList<lir::FunctionOptimized>,
+        str_list: &ir::StrList,
+        function_names: &lir::FunctionNameList,
+    ) -> miette::Result<bool>;
+    fn byte_code<'s>(&mut self, exe: &executable::Executable) -> miette::Result<()>;
+}
+
 pub fn compile(
     src_tree: &source_tree::SourceTree,
-    config: &Config,
-    formatter: &mut impl Write,
-) -> miette::Result<executable::Executable> {
+    mut controller: impl CompileController,
+) -> miette::Result<Option<executable::Executable>> {
     // Parse
     let (ast_symbols, ast_nodes) = artifect::parse(src_tree)?;
 
@@ -74,19 +400,8 @@ pub fn compile(
     let mut e = errors::ManyError::new();
     let (typed_symbols, typed_nodes) = artifect::infer_type(ast_symbols, ast_nodes, &mut e);
 
-    if config
-        .print(formatter, PrintFlag::InferedType)
-        .into_diagnostic()?
-    {
-        for (name, f) in typed_symbols.functions.iter() {
-            write!(
-                formatter,
-                "{}: {}\n",
-                name.to_string(&typed_symbols.instances),
-                f.type_
-            )
-            .into_diagnostic()?;
-        }
+    if controller.infered_type(&typed_symbols)? {
+        return Ok(None);
     }
 
     // Check existence and type of main
@@ -108,34 +423,15 @@ pub fn compile(
         artifect::compiler_ir([main.clone()].iter(), &typed_symbols, typed_nodes, &mut e);
     let _ = e.emit()?;
 
-    if config.print(formatter, PrintFlag::Ir).into_diagnostic()? {
-        artifect::format_ir_functions(
-            formatter,
-            &ir_functions,
-            &ir_nodes,
-            &str_list,
-            &typed_symbols.instances,
-            config.term_width,
-        )
-        .into_diagnostic()?;
+    if controller.ir(&ir_functions, &ir_nodes, &str_list, &typed_symbols)? {
+        return Ok(None);
     }
 
     // Do inline optimization
     let ir_functions = artifect::inline_ir(ir_functions, &mut ir_nodes, 16, [main.clone()].iter());
 
-    if config
-        .print(formatter, PrintFlag::AfterInline)
-        .into_diagnostic()?
-    {
-        artifect::format_ir_functions(
-            formatter,
-            &ir_functions,
-            &ir_nodes,
-            &str_list,
-            &typed_symbols.instances,
-            config.term_width,
-        )
-        .into_diagnostic()?;
+    if controller.after_inline(&ir_functions, &ir_nodes, &str_list, &typed_symbols)? {
+        return Ok(None);
     }
 
     // Lower to LIR
@@ -146,18 +442,8 @@ pub fn compile(
     let lir_functions = lir_functions.to_list();
     let function_names = lir_functions.function_name_list();
 
-    if config
-        .print(formatter, PrintFlag::FreshLir)
-        .into_diagnostic()?
-    {
-        artifect::format_lir_functions(
-            formatter,
-            &lir_functions,
-            &function_names,
-            &str_list,
-            config.term_width,
-        )
-        .into_diagnostic()?;
+    if controller.fresh_lir(&lir_functions, &function_names, &str_list)? {
+        return Ok(None);
     }
 
     // Optimization passes
@@ -166,138 +452,43 @@ pub fn compile(
         // To SSA
         let (f, dom_tree) = artifect::compile_ssa(f);
 
-        if config
-            .print(formatter, PrintFlag::FreshSsa)
-            .into_diagnostic()?
-        {
-            artifect::format_ssa_blocks(
-                formatter,
-                fid,
-                &f,
-                &str_list,
-                &function_names,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
+        controller.fresh_ssa(&fid, &f, &str_list, &function_names)?;
 
         // Constant progpagation
         let f = artifect::constant_propagation(f);
 
-        if config
-            .print(formatter, PrintFlag::AfterConstantPropagation)
-            .into_diagnostic()?
-        {
-            artifect::format_ssa_blocks(
-                formatter,
-                fid,
-                &f,
-                &str_list,
-                &function_names,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
+        controller.after_constant_propagation(&fid, &f, &str_list, &function_names)?;
 
         // Dead Code Elimination
         let f = artifect::dead_code_elimination(f);
 
-        if config
-            .print(formatter, PrintFlag::AfterDeadCodeElimination)
-            .into_diagnostic()?
-        {
-            artifect::format_ssa_blocks(
-                formatter,
-                fid,
-                &f,
-                &str_list,
-                &function_names,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
+        controller.after_dead_code_elimination(&fid, &f, &str_list, &function_names)?;
 
         // Common Expression Elimination
         let f = artifect::common_expression_elimination(f, &dom_tree);
 
-        if config
-            .print(formatter, PrintFlag::AfterCommonExpressionElimination)
-            .into_diagnostic()?
-        {
-            artifect::format_ssa_blocks(
-                formatter,
-                fid,
-                &f,
-                &str_list,
-                &function_names,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
+        controller.after_common_expression_elimination(&fid, &f, &str_list, &function_names)?;
 
         // Back to LIR
         let f = artifect::deconstruct_ssa(f);
 
-        if config
-            .print(formatter, PrintFlag::BackToLir)
-            .into_diagnostic()?
-        {
-            artifect::format_lir_function_optimized(
-                formatter,
-                &f,
-                fid,
-                &function_names,
-                &str_list,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
-
-        // Control Flow Simplification
-        let f = artifect::control_flow_simplification(f);
-
-        if config
-            .print(formatter, PrintFlag::AfterControlFlowOptimization)
-            .into_diagnostic()?
-        {
-            artifect::format_lir_function_optimized(
-                formatter,
-                &f,
-                fid,
-                &function_names,
-                &str_list,
-                config.term_width,
-            )
-            .into_diagnostic()?;
-        }
+        controller.back_to_lir(&fid, &f, &str_list, &function_names)?;
 
         lir_optimized_functions.push(f);
     }
 
-    if config
-        .print(formatter, PrintFlag::AfterControlFlowOptimization)
-        .into_diagnostic()?
-    {
-        artifect::format_lir_functions_optimized(
-            formatter,
-            &lir_optimized_functions,
-            &function_names,
-            &str_list,
-            config.term_width,
-        )
-        .into_diagnostic()?;
+    if controller.after_control_flow_simplification(
+        &lir_optimized_functions,
+        &str_list,
+        &function_names,
+    )? {
+        return Ok(None);
     }
 
     // Compile byte-code
     let executable = artifect::compile_byte_code(lir_optimized_functions, str_list, main_fid)?;
 
-    if config
-        .print(formatter, PrintFlag::ByteCode)
-        .into_diagnostic()?
-    {
-        let pretty_table = disassembler::disassemble(&executable);
-        write!(formatter, "{pretty_table}").into_diagnostic()?;
-    }
+    controller.byte_code(&executable)?;
 
-    Ok(executable)
+    Ok(Some(executable))
 }

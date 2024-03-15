@@ -1,9 +1,7 @@
-use super::{
-    value::Value, ObjArray, ObjCallable, ObjList, ObjString, Routine, ValueSafe, ValueVec,
-};
+use super::{value::ToSafe, ObjArray, ObjCallable, ObjList, ObjString, Routine, ValueVec};
 
 use core::ptr;
-use std::{alloc, marker::PhantomData,  collections::HashSet};
+use std::{alloc, collections::HashSet, marker::PhantomData};
 
 pub struct Pointer<T>(pub(super) ptr::NonNull<T>)
 where
@@ -211,7 +209,7 @@ where
     T: Obj + ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}{:?}",self.addr(), self.as_ref())
+        write!(f, "{:?}{:?}", self.addr(), self.as_ref())
     }
 }
 
@@ -234,11 +232,14 @@ pub trait Obj: Gc + ObjDebug + std::fmt::Debug {
     fn kind(&self) -> ObjectKind;
 }
 
-
 /// Special formating trait for Vm objects. `debug_fmt` requires a set of already formatted
 /// objects to prevent endless recursion
 pub trait ObjDebug {
-    fn debug_fmt(&self, f: &mut std::fmt::Formatter<'_>, visited: &mut HashSet<*const u8>) -> std::fmt::Result;
+    fn debug_fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        visited: &mut HashSet<*const u8>,
+    ) -> std::fmt::Result;
 }
 
 /// Used for dynamic checked cast
@@ -393,7 +394,6 @@ impl GcPool {
 
                     first.deallocate();
                     self.first = new_first;
-
                 } else {
                     first.unmark();
                     break;
@@ -411,7 +411,6 @@ impl GcPool {
 
                         p_next.deallocate();
                         p.set_next_obj(new_next);
-
                     } else {
                         p_next.unmark();
                         p = p_next;
@@ -442,10 +441,13 @@ impl GcPool {
     pub fn memory_usage(&self) -> usize {
         self.memory_usage
     }
-    pub fn pack<'p>(self, value: ValueSafe<'p>) -> MemPack {
+    pub fn pack<'p, V>(self, value: V::Output<'p>) -> MemPack<V>
+    where
+        V: ToSafe,
+    {
         MemPack {
             pool: self,
-            value: Value::from_safe(value),
+            value: V::from_safe(value),
         }
     }
     pub fn clear<'p>(&mut self, _lock: &'p mut Lock) {
@@ -464,13 +466,19 @@ impl GcPool {
     }
 }
 
-pub struct MemPack {
+pub struct MemPack<V>
+where
+    V: ToSafe,
+{
     pool: GcPool,
-    value: Value,
+    value: V,
 }
 
-impl MemPack {
-    pub fn unpack<'p>(self, _lock: &'p Lock) -> (GcPool, ValueSafe<'p>) {
+impl<V> MemPack<V>
+where
+    V: ToSafe,
+{
+    pub fn unpack<'p>(self, _lock: &'p Lock) -> (GcPool, V::Output<'p>) {
         (self.pool, unsafe { self.value.to_safe(PhantomData) })
     }
 }

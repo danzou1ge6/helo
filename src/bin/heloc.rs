@@ -3,7 +3,7 @@ use std::io::stdout;
 
 use helo_driver::*;
 use helo_parse::source_tree;
-use helo_runtime::{errors as vm_errors, vm};
+use helo_runtime::{builtins, errors as vm_errors, executable::Executable, vm};
 
 use clap::Parser;
 use miette::IntoDiagnostic;
@@ -17,7 +17,7 @@ struct Cli {
     output: String,
     #[arg(short, long)]
     /// Specify which intermediate result to print
-    prints: Vec<PrintFlag>,
+    prints: Vec<Stage>,
     #[arg(long)]
     /// Print all intermediate result
     print_all: bool,
@@ -31,11 +31,17 @@ struct Cli {
     input: String,
 }
 
-pub fn run_with_source_tree<'e, G>(mut vm: vm::Vm<'e, G>, src_tree: &source_tree::SourceTree)
-where
+pub fn run_with_source_tree<'e, G>(
+    vm: vm::VmState,
+    exe: &Executable,
+    g: G,
+    src_tree: &source_tree::SourceTree,
+) where
     G: vm::GcPolicy,
 {
-    let r = vm.run();
+    let builtin_table = builtins::BuiltinTable::new_sync();
+    let mut io = vm::SyncIo::new_std();
+    let r = vm.run(exe, &mut io, &builtin_table, g);
     match r {
         Ok((pack, mut lock)) => {
             let (mut pool, val) = pack.unpack(&lock);
@@ -43,10 +49,12 @@ where
             pool.clear(&mut lock);
         }
         Err(e) => match e {
-            vm_errors::RunTimeError::Panic { file, span, msg } => {
+            vm_errors::Exception::Panic {
+                file, span, msg, ..
+            } => {
                 print_panic_with_source_tree(file, span, msg, src_tree);
             }
-            _ => eprintln!("{:?}", e),
+            _ => eprintln!("{}", e),
         },
     }
 }
@@ -82,25 +90,27 @@ pub fn main() -> miette::Result<()> {
         80
     };
 
-    let config = Config {
-        print_flags: cli.prints,
+    let config = SingleOutController {
+        produce_exe: !cli.no_save || cli.run,
+        print_stages: cli.prints,
         print_all: cli.print_all,
         term_width: term_width as usize,
+        out: stdout(),
     };
 
     let src_tree = helo_parse::source_tree::SourceTree::new(file_path).into_diagnostic()?;
-    let mut stdout = stdout();
-    let exe = compile(&src_tree, &config, &mut stdout)?;
 
-    if !cli.no_save {
-        let mut f = fs::File::create(cli.output).into_diagnostic()?;
-        exe.write_to(&mut f).into_diagnostic()?;
-    }
+    if let Some(exe) = compile(&src_tree, config)? {
+        if !cli.no_save {
+            let mut f = fs::File::create(cli.output).into_diagnostic()?;
+            exe.write_to(&mut f).into_diagnostic()?;
+        }
 
-    if cli.run {
-        let gc_policy = vm::IncreasingGcPolicy::new(2, 1024 * 1024 * 50);
-        let vm = vm::Vm::new(&exe, gc_policy);
-        run_with_source_tree(vm, &src_tree);
+        if cli.run {
+            let gc_policy = vm::IncreasingGcPolicy::new(2, 1024 * 1024 * 50);
+            let vm_state = vm::VmState::new(&exe);
+            run_with_source_tree(vm_state, &exe, gc_policy, &src_tree);
+        }
     }
 
     Ok(())

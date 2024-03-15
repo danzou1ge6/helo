@@ -1,4 +1,7 @@
-use crate::{errors, mem, vm};
+use crate::{
+    errors, mem,
+    vm::{self, VmIo},
+};
 use mem::ValueSafe;
 
 use errors::RunTimeError;
@@ -6,11 +9,12 @@ use errors::RunTimeError;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct BuiltinId(pub u16);
 
-type BuiltinFunc<const N: usize> = for<'p> fn(
+type BuiltinFunc<const N: usize, P> = for<'p> fn(
     [ValueSafe<'p>; N],
     pool: &mut mem::GcPool,
     registers: &mut mem::ValueVec,
     call_stack: &mut vm::CallStack,
+    io: &mut P,
     lock: &'p mem::Lock,
 ) -> BuiltinRet<'p>;
 
@@ -19,16 +23,19 @@ type BuiltinRet<'p> = Result<ValueSafe<'p>, RunTimeError>;
 mod functions;
 
 #[derive(Clone, Copy)]
-pub enum Builtin {
-    B0(BuiltinFunc<0>),
-    B1(BuiltinFunc<1>),
-    B2(BuiltinFunc<2>),
-    B3(BuiltinFunc<3>),
-    B4(BuiltinFunc<4>),
+pub enum Builtin<P> {
+    B0(BuiltinFunc<0, P>),
+    B1(BuiltinFunc<1, P>),
+    B2(BuiltinFunc<2, P>),
+    B3(BuiltinFunc<3, P>),
+    B4(BuiltinFunc<4, P>),
 }
 use Builtin::*;
 
-impl Builtin {
+impl<P> Builtin<P>
+where
+    P: VmIo,
+{
     pub fn arity(&self) -> usize {
         match self {
             B0(..) => 0,
@@ -38,45 +45,45 @@ impl Builtin {
             B4(..) => 4,
         }
     }
-    pub fn unwrap0(self) -> BuiltinFunc<0> {
+    pub fn unwrap0(&self) -> BuiltinFunc<0, P> {
         match self {
-            B0(f) => f,
+            B0(f) => *f,
             _ => panic!(
                 "Type Error: Expected a builtin with 1 arguments, got {}",
                 self.arity()
             ),
         }
     }
-    pub fn unwrap1(self) -> BuiltinFunc<1> {
+    pub fn unwrap1(&self) -> BuiltinFunc<1, P> {
         match self {
-            B1(f) => f,
+            B1(f) => *f,
             _ => panic!(
                 "Type Error: Expected a builtin with 1 arguments, got {}",
                 self.arity()
             ),
         }
     }
-    pub fn unwrap2(self) -> BuiltinFunc<2> {
+    pub fn unwrap2(&self) -> BuiltinFunc<2, P> {
         match self {
-            B2(f) => f,
+            B2(f) => *f,
             _ => panic!(
                 "Type Error: Expected a builtin with 2 arguments, got {}",
                 self.arity()
             ),
         }
     }
-    pub fn unwrap3(self) -> BuiltinFunc<3> {
+    pub fn unwrap3(&self) -> BuiltinFunc<3, P> {
         match self {
-            B3(f) => f,
+            B3(f) => *f,
             _ => panic!(
                 "Type Error: Expected a builtin with 3 arguments, got {}",
                 self.arity()
             ),
         }
     }
-    pub fn unwrap4(self) -> BuiltinFunc<4> {
+    pub fn unwrap4(&self) -> BuiltinFunc<4, P> {
         match self {
-            B4(f) => f,
+            B4(f) => *f,
             _ => panic!(
                 "Type Error: Expected a builtin with 4 arguments, got {}",
                 self.arity()
@@ -88,112 +95,199 @@ impl Builtin {
 pub fn name_by_id(id: BuiltinId) -> String {
     format!(
         "{}.{}",
-        BUILTINS[id.0 as usize].0, BUILTINS[id.0 as usize].1
+        BUILTIN_NAMES[id.0 as usize].0, BUILTIN_NAMES[id.0 as usize].1
     )
 }
 
-pub fn get(id: BuiltinId) -> Builtin {
-    BUILTINS[id.0 as usize].2
-}
-
 pub fn module_str(id: BuiltinId) -> &'static str {
-    BUILTINS[id.0 as usize].0
+    BUILTIN_NAMES[id.0 as usize].0
 }
 
 pub fn ident(id: BuiltinId) -> &'static str {
-    BUILTINS[id.0 as usize].1
+    BUILTIN_NAMES[id.0 as usize].1
 }
 
 pub fn get_arity(id: BuiltinId) -> usize {
-    get(id).arity()
+    BUILTIN_NAMES[id.0 as usize].2
 }
 
-pub fn call_adapted<'p>(
-    id: BuiltinId,
-    args: Vec<ValueSafe<'p>>,
-    pool: &mut mem::GcPool,
-    registers: &mut mem::ValueVec,
-    call_stack: &mut vm::CallStack,
-    lock: &'p mem::Lock,
-) -> BuiltinRet<'p> {
-    let builtin = get(id);
-    match builtin {
-        B0(f) => f([], pool, registers, call_stack, lock),
-        B1(f) => f([args[0]], pool, registers, call_stack, lock),
-        B2(f) => f([args[0], args[1]], pool, registers, call_stack, lock),
-        B3(f) => f(
-            [args[0], args[1], args[2]],
-            pool,
-            registers,
-            call_stack,
-            lock,
-        ),
-        B4(f) => f(
-            [args[0], args[1], args[2], args[3]],
-            pool,
-            registers,
-            call_stack,
-            lock,
-        ),
+pub struct BuiltinTable<P>
+where
+    P: VmIo,
+{
+    tab: Vec<Builtin<P>>,
+}
+
+impl<P> BuiltinTable<P>
+where
+    P: VmIo,
+{
+    pub fn get(&self, id: BuiltinId) -> &Builtin<P> {
+        &self.tab[id.0 as usize]
+    }
+
+    pub fn call_adapted<'p>(
+        &self,
+        id: BuiltinId,
+        args: Vec<ValueSafe<'p>>,
+        pool: &mut mem::GcPool,
+        registers: &mut mem::ValueVec,
+        call_stack: &mut vm::CallStack,
+        io: &mut P,
+        lock: &'p mem::Lock,
+    ) -> BuiltinRet<'p> {
+        let builtin = self.get(id);
+        match builtin {
+            B0(f) => f([], pool, registers, call_stack, io, lock),
+            B1(f) => f([args[0]], pool, registers, call_stack, io, lock),
+            B2(f) => f([args[0], args[1]], pool, registers, call_stack, io, lock),
+            B3(f) => f(
+                [args[0], args[1], args[2]],
+                pool,
+                registers,
+                call_stack,
+                io,
+                lock,
+            ),
+            B4(f) => f(
+                [args[0], args[1], args[2], args[3]],
+                pool,
+                registers,
+                call_stack,
+                io,
+                lock,
+            ),
+        }
+    }
+
+    pub fn new<const ASYNC: bool>() -> Self {
+        Self {
+            tab: vec![
+                // Int arithmatics
+                B2(int_add),
+                B2(int_subtract),
+                B2(int_mul),
+                B2(int_pow),
+                B2(int_div),
+                B2(int_mod),
+                // Int comparison
+                B2(int_eq),
+                B2(int_ne),
+                B2(int_ge),
+                B2(int_le),
+                B2(int_gt),
+                B2(int_lt),
+                // Float arithmatics
+                B1(float_neg),
+                B2(float_add),
+                B2(float_subtract),
+                B2(float_mul),
+                B2(float_powi),
+                B2(float_powf),
+                B2(float_div),
+                // Float comparison
+                B2(float_apr),
+                B2(float_napr),
+                B2(float_ge),
+                B2(float_le),
+                B2(float_gt),
+                B2(float_lt),
+                // Float <-> Int
+                B1(int_to_float),
+                B1(floor_float),
+                B1(ceil_float),
+                B1(round_float),
+                // To Str
+                B1(int_to_str),
+                B1(float_to_str),
+                B1(bool_to_string),
+                B1(char_to_string),
+                // Bool arithmatic
+                B2(bool_and),
+                B2(bool_or),
+                B1(bool_not),
+                // Char
+                B2(char_eq),
+                // String operations
+                B2(str_concat),
+                B1(string_some),
+                B1(string_len),
+                B2(string_eq),
+                B1(string_head),
+                B1(string_tail),
+                // Routines
+                B1(string_println),
+                B1(string_print),
+                B0(read_line::<P, ASYNC>),
+            ],
+        }
+    }
+
+    pub fn new_sync() -> Self {
+        Self::new::<false>()
+    }
+
+    pub fn new_async() -> Self {
+        Self::new::<true>()
     }
 }
 
 use functions::*;
-pub const BUILTINS: [(&'static str, &'static str, Builtin); 46] = [
+pub const BUILTIN_NAMES: [(&'static str, &'static str, usize); 46] = [
     // Int arithmatics
-    ("arith.int", "+", B2(int_add)),
-    ("arith.int", "-", B2(int_subtract)),
-    ("arith.int", "*", B2(int_mul)),
-    ("arith.int", "**", B2(int_pow)),
-    ("arith.int", "/", B2(int_div)),
-    ("arith.int", "mod", B2(int_mod)),
+    ("arith.int", "+", 2),
+    ("arith.int", "-", 2),
+    ("arith.int", "*", 2),
+    ("arith.int", "**", 2),
+    ("arith.int", "/", 2),
+    ("arith.int", "mod", 2),
     // Int comparison
-    ("arith.int", "==", B2(int_eq)),
-    ("arith.int", "/=", B2(int_ne)),
-    ("arith.int", ">=", B2(int_ge)),
-    ("arith.int", "<=", B2(int_le)),
-    ("arith.int", ">", B2(int_gt)),
-    ("arith.int", "<", B2(int_lt)),
+    ("arith.int", "==", 2),
+    ("arith.int", "/=", 2),
+    ("arith.int", ">=", 2),
+    ("arith.int", "<=", 2),
+    ("arith.int", ">", 2),
+    ("arith.int", "<", 2),
     // Float arithmatics
-    ("arith.float", "neg", B1(float_neg)),
-    ("arith.float", "+.", B2(float_add)),
-    ("arith.float", "-.", B2(float_subtract)),
-    ("arith.float", "*.", B2(float_mul)),
-    ("arith.float", "**.", B2(float_powi)),
-    ("arith.float", "**..", B2(float_powf)),
-    ("arith.float", "/.", B2(float_div)),
+    ("arith.float", "neg", 1),
+    ("arith.float", "+.", 2),
+    ("arith.float", "-.", 2),
+    ("arith.float", "*.", 2),
+    ("arith.float", "**.", 2),
+    ("arith.float", "**..", 2),
+    ("arith.float", "/.", 2),
     // Float comparison
-    ("arith.float", "=.", B2(float_apr)),
-    ("arith.float", "/=.", B2(float_napr)),
-    ("arith.float", ">=.", B2(float_ge)),
-    ("arith.float", "<=.", B2(float_le)),
-    ("arith.float", ">.", B2(float_gt)),
-    ("arith.float", "<.", B2(float_lt)),
+    ("arith.float", "=.", 2),
+    ("arith.float", "/=.", 2),
+    ("arith.float", ">=.", 2),
+    ("arith.float", "<=.", 2),
+    ("arith.float", ">.", 2),
+    ("arith.float", "<.", 2),
     // Float <-> Int
-    ("arith.float", "int_to_float", B1(int_to_float)),
-    ("arith.float", "floor_float", B1(floor_float)),
-    ("arith.float", "ceil_float", B1(ceil_float)),
-    ("arith.float", "round_float", B1(round_float)),
+    ("arith.float", "int_to_float", 1),
+    ("arith.float", "floor_float", 1),
+    ("arith.float", "ceil_float", 1),
+    ("arith.float", "round_float", 1),
     // To Str
-    ("fmt", "int_to_str", B1(int_to_str)),
-    ("fmt", "float_to_str", B1(float_to_str)),
-    ("fmt", "bool_to_str", B1(bool_to_string)),
-    ("fmt", "char_to_str", B1(char_to_string)),
+    ("fmt", "int_to_str", 1),
+    ("fmt", "float_to_str", 1),
+    ("fmt", "bool_to_str", 1),
+    ("fmt", "char_to_str", 1),
     // Bool arithmatic
-    ("arith.bool", "and", B2(bool_and)),
-    ("arith.bool", "or", B2(bool_or)),
-    ("arith.bool", "not", B1(bool_not)),
+    ("arith.bool", "and", 2),
+    ("arith.bool", "or", 2),
+    ("arith.bool", "not", 1),
     // Char
-    ("arith.char", "char_eq", B2(char_eq)),
+    ("arith.char", "char_eq", 2),
     // String operations
-    ("str", "str_cat", B2(str_concat)),
-    ("str", "str_some", B1(string_some)),
-    ("str", "str_len", B1(string_len)),
-    ("str", "str_eq", B2(string_eq)),
-    ("str", "str_head", B1(string_head)),
-    ("str", "str_tail", B1(string_tail)),
+    ("str", "str_cat", 2),
+    ("str", "str_some", 1),
+    ("str", "str_len", 1),
+    ("str", "str_eq", 2),
+    ("str", "str_head", 1),
+    ("str", "str_tail", 1),
     // Routines
-    ("io", "println", B1(string_println)),
-    ("io", "print", B1(string_print)),
-    ("io", "readline", B0(read_line)),
+    ("io", "println", 1),
+    ("io", "print", 1),
+    ("io", "readline", 0),
 ];
