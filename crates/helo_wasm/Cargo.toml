@@ -1,0 +1,22 @@
+[package]
+name = "helo_wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+helo = { path = "../../" }
+helo_runtime = { path = "../helo_runtime" }
+helo_parse = { path = "../helo_parse" }
+js-sys = "*"
+wasm-bindgen = { version = "0.2" }
+
+miette.workspace = true
+
+[features]
+default = [
+    "miette/fancy-no-syscall",
+    "helo/stage-wasm-bindgen"
+]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

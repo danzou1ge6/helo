@@ -12,7 +12,7 @@
                 "args": [
                     "build",
                     "--bin=helo_vm",
-                    "--package=helo"
+                    "--package=helo_bin",
                 ],
                 "filter": {
                     "name": "helo_vm",
@@ -30,7 +30,8 @@
                 "args": [
                     "build",
                     "--bin=heloc",
-                    "--package=helo"
+                    "--package=helo_bin",
+                    "--features=terminal_size"
                 ],
                 "filter": {
                     "name": "heloc",

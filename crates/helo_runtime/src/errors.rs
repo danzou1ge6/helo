@@ -6,13 +6,8 @@ use thiserror::Error;
 pub enum RunTimeError_<T> {
     #[error("Out of Menory")]
     OutOfMemory(T),
-    #[error("Program Paniced at {}@{}-{}: {}", .file, .span.0, .span.1, .msg)]
-    Panic {
-        file: String,
-        span: (usize, usize),
-        msg: String,
-        t: T,
-    },
+    #[error("{}", .0)]
+    Panic(Panic, T),
     #[error("Bad Op Code in Program: {}", .0)]
     BadOpCode(u8, T),
     #[error("Zero Division")]
@@ -35,6 +30,14 @@ impl From<std::io::Error> for RunTimeError {
     }
 }
 
+#[derive(Error, Debug)]
+#[error("Panic at characters {}-{} in file {}: {}", self.file, self.span.0, self.span.1, self.msg)]
+pub struct Panic {
+    pub file: String,
+    pub span: (usize, usize),
+    pub msg: String,
+}
+
 pub type RunTimeError = RunTimeError_<()>;
 pub type Exception = RunTimeError_<VmState>;
 
@@ -43,14 +46,7 @@ impl RunTimeError {
         use RunTimeError_::*;
         match self {
             OutOfMemory(_) => OutOfMemory(vm_state),
-            Panic {
-                file, span, msg, ..
-            } => Panic {
-                file,
-                span,
-                msg,
-                t: vm_state,
-            },
+            Panic(p, _) => Panic(p, vm_state),
             BadOpCode(c, ..) => BadOpCode(c, vm_state),
             ZeroDivision(_) => ZeroDivision(vm_state),
             IntExponentOutOfRange(x, _) => IntExponentOutOfRange(x, vm_state),
@@ -61,6 +57,3 @@ impl RunTimeError {
         }
     }
 }
-
-
-

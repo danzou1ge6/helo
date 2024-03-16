@@ -27,8 +27,8 @@ where
             pool.clear(&mut lock);
         }
         Err(e) => match e {
-            errors::Exception::Panic { file, span, msg , ..} => {
-                print_panic(file, span, msg);
+            errors::Exception::Panic(panic, _) => {
+                print_panic(panic.file, panic.span, panic.msg);
             }
             _ => eprintln!("{}", e),
         },

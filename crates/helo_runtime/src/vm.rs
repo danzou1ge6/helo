@@ -227,7 +227,7 @@ impl VmState {
             &mut registers,
             reg_cnt as usize,
             RegisterId(0),
-            Addr(0)  // never gonna return
+            Addr(0), // never gonna return
         );
 
         Self {
@@ -861,12 +861,14 @@ where
                         let msg = self.exe.str_chunk.read(msg_addr);
                         let file = self.exe.str_chunk.read(file_addr);
 
-                        Err(errors::RunTimeError::Panic {
-                            msg: msg.to_string(),
-                            file: file.to_string(),
-                            span: (span0 as usize, span1 as usize),
-                            t: (),
-                        })?;
+                        Err(errors::RunTimeError::Panic(
+                            errors::Panic {
+                                msg: msg.to_string(),
+                                file: file.to_string(),
+                                span: (span0 as usize, span1 as usize),
+                            },
+                            (),
+                        ))?;
                     }
                     RET => {
                         let reg = reader.ret();

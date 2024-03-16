@@ -49,34 +49,24 @@ pub fn run_with_source_tree<'e, G>(
             pool.clear(&mut lock);
         }
         Err(e) => match e {
-            vm_errors::Exception::Panic {
-                file, span, msg, ..
-            } => {
-                print_panic_with_source_tree(file, span, msg, src_tree);
+            vm_errors::Exception::Panic(panic, _) => {
+                print_panic_with_source_tree(panic, src_tree);
             }
             _ => eprintln!("{}", e),
         },
     }
 }
 
-fn print_panic_with_source_tree(
-    file: String,
-    span: (usize, usize),
-    msg: String,
-    src_tree: &source_tree::SourceTree,
-) {
-    if let Some(file) = src_tree.search(&file) {
+fn print_panic_with_source_tree(panic: vm_errors::Panic, src_tree: &source_tree::SourceTree) {
+    if let Some(file) = src_tree.search(&panic.file) {
         let report = miette::miette!(
-            labels = vec![miette::LabeledSpan::at(span, msg)],
+            labels = vec![miette::LabeledSpan::at(panic.span, panic.msg)],
             "Program Panicked"
         )
         .with_source_code(file.src);
         eprintln!("{:?}", report);
     } else {
-        eprintln!(
-            "In file {}, characters {} - {}: {}",
-            file, span.0, span.1, msg
-        );
+        eprintln!("{panic}");
     }
 }
 

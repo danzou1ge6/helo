@@ -6,11 +6,7 @@ use crate::inferer;
 use crate::typed;
 use errors::ManyErrorReceive;
 
-#[cfg(debug_assertions)]
 const DEBUG: bool = false;
-
-#[cfg(not(debug_assertions))]
-const DBUEG: bool = false;
 
 struct TypeMapping {
     generic_var_cnt: usize,

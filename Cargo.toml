@@ -6,24 +6,28 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
-[[bin]]
-name = "helo_vm"
-
-[[bin]]
-name = "heloc"
-
 [lib]
 name = "helo_driver"
 
+[features]
+stage-value-enum = ["clap"]
+stage-wasm-bindgen = ["wasm-bindgen"]
+
 
 [dependencies]
-pretty = { version = "*" }
 helo_ir = { path = "crates/helo_ir" }
 helo_runtime = { path = "crates/helo_runtime" }
 helo_parse = { path = "crates/helo_parse" }
-miette = { version = "7.2", features = ["fancy"] }
-clap = { version = "4.5", features = ["derive"] }
-terminal_size = { version = "0.3" }
+
+wasm-bindgen = { version = "0.2", optional = true }
+clap = { version = "4.5", features = ["derive"], optional = true }
+
+miette.workspace = true
 
 [workspace]
 members = ["crates/*"]
+
+[workspace.dependencies]
+miette = { version = "7.2", default-features = false }
+imbl = "2.0"
+thiserror = "1.0"

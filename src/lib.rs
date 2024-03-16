@@ -4,10 +4,15 @@ use helo_runtime::{disassembler, executable};
 
 use miette::IntoDiagnostic;
 
+#[cfg(feature = "stage-value-enum")]
 use clap::ValueEnum;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, PartialOrd, Ord)]
-#[value(rename_all = "kebab-case")]
+#[cfg(feature = "stage-wasm-bindgen")]
+use wasm_bindgen::prelude::wasm_bindgen;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "stage-value-enum", derive(ValueEnum), value(rename_all = "kebab-case"))]
+#[cfg_attr(feature = "stage-wasm-bindgen", wasm_bindgen)]
 pub enum Stage {
     InferedType,
     Ir,
