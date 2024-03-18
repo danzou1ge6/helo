@@ -289,8 +289,6 @@ impl std::fmt::Debug for GcPool {
     }
 }
 
-static mut GC_POOL_CNT: usize = 0;
-
 impl GcPool {
     /// # Safety
     /// `obj` must point to valid object.
@@ -423,12 +421,6 @@ impl GcPool {
         println!("--- GC SWEEP END ---");
     }
     pub fn new() -> (Self, super::ValueVec, Lock) {
-        unsafe {
-            if GC_POOL_CNT == 1 {
-                panic!("Only one GC pool can be instantiated");
-            }
-            GC_POOL_CNT += 1;
-        }
         (
             Self {
                 first: None,
