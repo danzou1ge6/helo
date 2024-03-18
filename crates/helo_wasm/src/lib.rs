@@ -3,24 +3,44 @@
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::io::Write;
+use std::panic;
+use std::sync::Arc;
 
 use helo_driver::*;
-use helo_parse::source_tree::SourceTree;
+use helo_parse::ast;
+use helo_parse::source_tree::{SourceFile, SourceTree};
 use helo_runtime::byte_code::ToBytes;
 use helo_runtime::vm::{self, VmIo};
 use helo_runtime::{builtins, errors, executable};
 use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
-use miette::{EyreContext, NarratableReportHandler};
+use miette::{EyreContext, MietteHandler};
+
+extern crate wee_alloc;
+
+// Use `wee_alloc` as the global allocator.
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+extern crate console_error_panic_hook;
+
+#[wasm_bindgen]
+pub fn register_panic_hook() {
+    panic::set_hook(Box::new(console_error_panic_hook::hook))
+}
 
 #[wasm_bindgen]
 #[derive(Clone)]
-pub struct JsOutput(js_sys::Function);
+pub struct JsOutput {
+    write: js_sys::Function,
+    flush: js_sys::Function,
+}
 
+#[wasm_bindgen]
 impl JsOutput {
-    pub fn new(f: js_sys::Function) -> Self {
-        Self(f)
+    pub fn new(write: js_sys::Function, flush: js_sys::Function) -> Self {
+        Self { write, flush }
     }
 }
 
@@ -44,10 +64,11 @@ impl std::io::Write for JsOutput {
         let js_val = JsValue::from(String::from_utf8_lossy(buf).to_string());
         let this = JsValue::null();
 
-        let _ = self.0.call1(&this, &js_val);
+        let _ = self.write.call1(&this, &js_val);
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
+        let _ = self.flush.call0(&JsValue::null());
         Ok(())
     }
 }
@@ -64,9 +85,9 @@ impl JsInput {
 }
 
 impl JsInput {
-    pub fn new() -> Self {
+    pub fn new(input: &[u8]) -> Self {
         Self {
-            buf: VecDeque::new(),
+            buf: VecDeque::from(input.to_vec()),
             eof: false,
         }
     }
@@ -121,10 +142,10 @@ impl VmIo for JsIo {
 
 #[wasm_bindgen]
 impl JsIo {
-    pub fn new(read: js_sys::Function) -> Self {
+    pub fn new(write: js_sys::Function, flush: js_sys::Function, input: String) -> Self {
         Self {
-            input: JsInput::new(),
-            output: JsOutput::new(read),
+            input: JsInput::new(input.as_bytes()),
+            output: JsOutput::new(write, flush),
         }
     }
     pub fn write(&mut self, data: &str) {
@@ -139,18 +160,53 @@ impl JsIo {
 pub struct Compiler {
     print_stages: Vec<Stage>,
     term_width: usize,
+    produce_exe: bool,
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct Src {
     tree: SourceTree,
+}
+
+#[wasm_bindgen]
+impl Src {
+    pub fn new() -> Self {
+        Self {
+            tree: SourceTree::new_empty(),
+        }
+    }
+    pub fn insert(&mut self, parent: Vec<String>, file_name: String, src: String) -> bool {
+        let mut path_string = String::new();
+        for item in parent.iter() {
+            path_string.push('/');
+            path_string.push_str(item);
+        }
+        path_string.push('/');
+        path_string.push_str(&file_name);
+        path_string.push_str(".helo");
+
+        let file = SourceFile {
+            src: Arc::new(src),
+            file_name: file_name.to_string(),
+            file_path: Arc::new(path_string),
+        };
+
+        let parent = parent.iter().map(|x| &x[..]).collect();
+        self.tree
+            .insert(ast::Path(parent).into_iter(), file)
+            .is_ok()
+    }
+    pub fn set_root_file_name(&mut self, name: String) {
+        self.tree.set_root_file_name(name)
+    }
 }
 
 #[wasm_bindgen]
 pub struct Executable(executable::Executable);
 
 fn write_miette_report(report: miette::Report, output: &mut JsOutput) {
-    let handler = NarratableReportHandler::new();
+    let handler = MietteHandler::new();
     let mut fmt = std::fmt::Formatter::new(output);
     let _ = handler.debug(report.borrow(), &mut fmt);
 }
@@ -159,7 +215,7 @@ fn write_miette_report(report: miette::Report, output: &mut JsOutput) {
 impl Compiler {
     pub fn compile(&self, mut output: JsOutput, src: Src) -> Option<Executable> {
         let controller = SingleOutController {
-            produce_exe: true,
+            produce_exe: self.produce_exe,
             print_stages: self.print_stages.clone(),
             term_width: self.term_width,
             out: output.clone(),
@@ -173,10 +229,11 @@ impl Compiler {
             }
         }
     }
-    pub fn new(print_stages: Vec<Stage>, term_width: usize) -> Self {
+    pub fn new(print_stages: Vec<Stage>, produce_exe: bool, term_width: usize) -> Self {
         Self {
             print_stages,
-            term_width
+            term_width,
+            produce_exe,
         }
     }
 }
@@ -184,7 +241,6 @@ impl Compiler {
 #[wasm_bindgen]
 pub struct Vm {
     st: vm::VmState,
-    io: JsIo,
     builtin_table: builtins::BuiltinTable<JsIo>,
     exe: executable::Executable,
 }
@@ -263,19 +319,17 @@ impl ExecutionResult {
 
 #[wasm_bindgen]
 impl Vm {
-    pub fn new(exe: Executable, io: JsIo) -> Self {
+    pub fn new(exe: Executable) -> Self {
         let st = vm::VmState::new(&exe.0);
         Self {
             exe: exe.0,
             st,
-            io,
             builtin_table: builtins::BuiltinTable::new_async(),
         }
     }
-    pub fn run(self) -> ExecutionResult {
+    pub fn run(self, mut io: JsIo) -> ExecutionResult {
         let Vm {
             st,
-            mut io,
             builtin_table,
             exe,
         } = self;
@@ -294,7 +348,6 @@ impl Vm {
             Err(errors::Exception::Hang(st)) => ExecutionResult {
                 payload: ExecutionResultPayload::Hung(Vm {
                     st,
-                    io,
                     builtin_table,
                     exe,
                 }),

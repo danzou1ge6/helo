@@ -9,13 +9,15 @@ helo_runtime = { path = "../helo_runtime" }
 helo_parse = { path = "../helo_parse" }
 js-sys = "*"
 wasm-bindgen = { version = "0.2" }
+wee_alloc = "*"
+console_error_panic_hook = "*"
 
 miette.workspace = true
 
 [features]
 default = [
     "miette/fancy-no-syscall",
-    "helo/stage-wasm-bindgen"
+    "helo/stage-wasm-bindgen",
 ]
 
 [lib]

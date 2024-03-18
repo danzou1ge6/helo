@@ -13,15 +13,17 @@ pub struct SourceFile {
     pub file_name: String,
 }
 
+#[derive(Clone)]
 pub enum SourceTreeNode {
     File(SourceFile),
     Directory(String, Vec<SourceTreeNode>),
 }
 
+#[derive(Clone)]
 pub struct SourceTree {
     nodes: Vec<SourceTreeNode>,
     root_file_name: String,
-    root_dir: PathBuf,
+    root_dir: String,
 }
 
 impl SourceFile {
@@ -133,6 +135,13 @@ impl SourceTreeNode {
             },
         }
     }
+
+    pub fn insert(&mut self, p: ast::PathIter<'_>, file: SourceFile) -> Result<(), ()> {
+        match self {
+            SourceTreeNode::File(..) => Err(()),
+            SourceTreeNode::Directory(_, items) => dir_insert(items, p, file),
+        }
+    }
 }
 
 fn search_dir<'a>(
@@ -167,6 +176,31 @@ fn dir_items(fp: PathBuf) -> Result<Vec<SourceTreeNode>, Error> {
         }
     }
     Ok(items)
+}
+
+/// Insert `file` in directory `parent` relative to `nodes`
+fn dir_insert(
+    nodes: &mut Vec<SourceTreeNode>,
+    mut parent: ast::PathIter<'_>,
+    file: SourceFile,
+) -> Result<(), ()> {
+    if let Some(head) = parent.next() {
+        if let Some(node) = nodes.iter_mut().find(|n| n.name() == head) {
+            node.insert(parent, file)
+        } else {
+            let mut new_dir_node = SourceTreeNode::Directory(head.to_string(), Vec::new());
+            new_dir_node.insert(parent, file)?;
+            nodes.push(new_dir_node);
+            Ok(())
+        }
+    } else {
+        if nodes.iter().find(|n| n.name() == file.file_name).is_some() {
+            Err(())
+        } else {
+            nodes.push(SourceTreeNode::File(file));
+            Ok(())
+        }
+    }
 }
 
 impl SourceTree {
@@ -211,11 +245,26 @@ impl SourceTree {
             Ok(Self {
                 nodes: items,
                 root_file_name: root_file_name.to_string(),
-                root_dir: parent.to_path_buf(),
+                root_dir: parent
+                    .to_str()
+                    .ok_or_else(|| Error::NonUtf8FileName(fp.clone()))?
+                    .to_string(),
             })
         } else {
             Err(Error::NotFile(fp))
         }
+    }
+
+    pub fn new_empty() -> Self {
+        Self {
+            nodes: Vec::new(),
+            root_file_name: String::new(),
+            root_dir: String::new(),
+        }
+    }
+
+    pub fn insert(&mut self, parent: ast::PathIter<'_>, file: SourceFile) -> Result<(), ()> {
+        dir_insert(&mut self.nodes, parent, file)
     }
 
     pub fn search(&self, p: &str) -> Option<SourceFile> {
@@ -224,5 +273,9 @@ impl SourceTree {
         let mut p = rel_p.iter();
         let name = p.next()?;
         search_dir(name, p, &self.nodes)
+    }
+
+    pub fn set_root_file_name(&mut self, name: String) {
+        self.root_file_name = name
     }
 }

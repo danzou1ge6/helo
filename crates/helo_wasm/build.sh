@@ -1,1 +1,1 @@
-wasm-pack build --out-dir ../../web/public/wasm
+wasm-pack build --out-dir ../../web/src/wasm

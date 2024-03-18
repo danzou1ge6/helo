@@ -11,7 +11,11 @@ use clap::ValueEnum;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "stage-value-enum", derive(ValueEnum), value(rename_all = "kebab-case"))]
+#[cfg_attr(
+    feature = "stage-value-enum",
+    derive(ValueEnum),
+    value(rename_all = "kebab-case")
+)]
 #[cfg_attr(feature = "stage-wasm-bindgen", wasm_bindgen)]
 pub enum Stage {
     InferedType,
@@ -62,7 +66,10 @@ where
     O: std::io::Write,
 {
     fn print_header(&self) -> bool {
-        self.print_stages.len() > 1
+        self.print_stages.len() > 1 || self.print_all
+    }
+    fn need_print(&self, stage: Stage) -> bool {
+        self.print_stages.contains(&stage) || self.print_all
     }
     fn abort(&self, stage: Stage) -> bool {
         if self.produce_exe || self.print_all {
@@ -84,17 +91,19 @@ where
         &mut self,
         typed_symbols: &helo_parse::typed::Symbols<'_>,
     ) -> miette::Result<bool> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::InferedType.name()).into_diagnostic()?;
-        }
-        for (name, f) in typed_symbols.functions.iter() {
-            write!(
-                &mut self.out,
-                "{}: {}\n",
-                name.to_string(&typed_symbols.instances),
-                f.type_
-            )
-            .into_diagnostic()?;
+        if self.need_print(Stage::InferedType) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::InferedType.name()).into_diagnostic()?;
+            }
+            for (name, f) in typed_symbols.functions.iter() {
+                write!(
+                    &mut self.out,
+                    "{}: {}\n",
+                    name.to_string(&typed_symbols.instances),
+                    f.type_
+                )
+                .into_diagnostic()?;
+            }
         }
         Ok(self.abort(Stage::InferedType))
     }
@@ -106,18 +115,20 @@ where
         str_list: &ir::StrList,
         typed_symbols: &helo_parse::typed::Symbols<'_>,
     ) -> miette::Result<bool> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::Ir.name()).into_diagnostic()?;
+        if self.need_print(Stage::Ir) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::Ir.name()).into_diagnostic()?;
+            }
+            artifect::format_ir_functions(
+                &mut self.out,
+                ir_functions,
+                ir_nodes,
+                str_list,
+                &typed_symbols.instances,
+                self.term_width,
+            )
+            .into_diagnostic()?;
         }
-        artifect::format_ir_functions(
-            &mut self.out,
-            ir_functions,
-            ir_nodes,
-            str_list,
-            &typed_symbols.instances,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(self.abort(Stage::Ir))
     }
 
@@ -128,18 +139,20 @@ where
         str_list: &ir::StrList,
         typed_symbols: &helo_parse::typed::Symbols<'_>,
     ) -> miette::Result<bool> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::AfterInline.name()).into_diagnostic()?;
+        if self.need_print(Stage::AfterInline) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::AfterInline.name()).into_diagnostic()?;
+            }
+            artifect::format_ir_functions(
+                &mut self.out,
+                ir_functions,
+                ir_nodes,
+                str_list,
+                &typed_symbols.instances,
+                self.term_width,
+            )
+            .into_diagnostic()?;
         }
-        artifect::format_ir_functions(
-            &mut self.out,
-            ir_functions,
-            ir_nodes,
-            str_list,
-            &typed_symbols.instances,
-            self.term_width,
-        )
-        .into_diagnostic()?;
 
         Ok(self.abort(Stage::AfterInline))
     }
@@ -150,17 +163,19 @@ where
         function_names: &lir::FunctionNameList,
         str_list: &ir::StrList,
     ) -> miette::Result<bool> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::FreshLir.name()).into_diagnostic()?;
+        if self.need_print(Stage::FreshLir) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::FreshLir.name()).into_diagnostic()?;
+            }
+            artifect::format_lir_functions(
+                &mut self.out,
+                lir_functions,
+                function_names,
+                str_list,
+                self.term_width,
+            )
+            .into_diagnostic()?;
         }
-        artifect::format_lir_functions(
-            &mut self.out,
-            lir_functions,
-            function_names,
-            str_list,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(self.abort(Stage::FreshLir))
     }
 
@@ -171,18 +186,20 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<()> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::FreshSsa.name()).into_diagnostic()?;
+        if self.need_print(Stage::FreshSsa) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::FreshSsa.name()).into_diagnostic()?;
+            }
+            artifect::format_ssa_blocks(
+                &mut self.out,
+                *fid,
+                f,
+                str_list,
+                function_names,
+                self.term_width,
+            )
+            .into_diagnostic()?;
         }
-        artifect::format_ssa_blocks(
-            &mut self.out,
-            *fid,
-            f,
-            str_list,
-            function_names,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(())
     }
 
@@ -193,23 +210,21 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<()> {
-        if self.print_header() {
-            write!(
+        if self.need_print(Stage::AfterConstantPropagation) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::AfterConstantPropagation.name())
+                    .into_diagnostic()?;
+            }
+            artifect::format_ssa_blocks(
                 &mut self.out,
-                "{}",
-                Stage::AfterConstantPropagation.name()
+                *fid,
+                f,
+                str_list,
+                function_names,
+                self.term_width,
             )
             .into_diagnostic()?;
         }
-        artifect::format_ssa_blocks(
-            &mut self.out,
-            *fid,
-            f,
-            str_list,
-            function_names,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(())
     }
 
@@ -220,23 +235,21 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<()> {
-        if self.print_header() {
-            write!(
+        if self.need_print(Stage::AfterDeadCodeElimination) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::AfterDeadCodeElimination.name())
+                    .into_diagnostic()?;
+            }
+            artifect::format_ssa_blocks(
                 &mut self.out,
-                "{}",
-                Stage::AfterDeadCodeElimination.name()
+                *fid,
+                f,
+                str_list,
+                function_names,
+                self.term_width,
             )
             .into_diagnostic()?;
         }
-        artifect::format_ssa_blocks(
-            &mut self.out,
-            *fid,
-            f,
-            str_list,
-            function_names,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(())
     }
 
@@ -247,23 +260,25 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<()> {
-        if self.print_header() {
-            write!(
+        if self.need_print(Stage::AfterCommonExpressionElimination) {
+            if self.print_header() {
+                write!(
+                    &mut self.out,
+                    "{}",
+                    Stage::AfterCommonExpressionElimination.name()
+                )
+                .into_diagnostic()?;
+            }
+            artifect::format_ssa_blocks(
                 &mut self.out,
-                "{}",
-                Stage::AfterCommonExpressionElimination.name()
+                *fid,
+                f,
+                str_list,
+                function_names,
+                self.term_width,
             )
             .into_diagnostic()?;
         }
-        artifect::format_ssa_blocks(
-            &mut self.out,
-            *fid,
-            f,
-            str_list,
-            function_names,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(())
     }
 
@@ -274,18 +289,20 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<()> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::BackToLir.name()).into_diagnostic()?;
+        if self.need_print(Stage::BackToLir) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::BackToLir.name()).into_diagnostic()?;
+            }
+            artifect::format_lir_function_optimized(
+                &mut self.out,
+                f,
+                *fid,
+                function_names,
+                str_list,
+                self.term_width,
+            )
+            .into_diagnostic()?;
         }
-        artifect::format_lir_function_optimized(
-            &mut self.out,
-            f,
-            *fid,
-            function_names,
-            str_list,
-            self.term_width,
-        )
-        .into_diagnostic()?;
 
         Ok(())
     }
@@ -296,31 +313,35 @@ where
         str_list: &ir::StrList,
         function_names: &lir::FunctionNameList,
     ) -> miette::Result<bool> {
-        if self.print_header() {
-            write!(
+        if self.need_print(Stage::AfterControlFlowOptimization) {
+            if self.print_header() {
+                write!(
+                    &mut self.out,
+                    "{}",
+                    Stage::AfterControlFlowOptimization.name()
+                )
+                .into_diagnostic()?;
+            }
+            artifect::format_lir_functions_optimized(
                 &mut self.out,
-                "{}",
-                Stage::AfterControlFlowOptimization.name()
+                lir_functions,
+                function_names,
+                str_list,
+                self.term_width,
             )
             .into_diagnostic()?;
         }
-        artifect::format_lir_functions_optimized(
-            &mut self.out,
-            lir_functions,
-            function_names,
-            str_list,
-            self.term_width,
-        )
-        .into_diagnostic()?;
         Ok(self.abort(Stage::AfterControlFlowOptimization))
     }
 
     fn byte_code<'s>(&mut self, exe: &executable::Executable) -> miette::Result<()> {
-        if self.print_header() {
-            write!(&mut self.out, "{}", Stage::ByteCode.name()).into_diagnostic()?;
+        if self.need_print(Stage::ByteCode) {
+            if self.print_header() {
+                write!(&mut self.out, "{}", Stage::ByteCode.name()).into_diagnostic()?;
+            }
+            let pretty_table = disassembler::disassemble(exe);
+            write!(&mut self.out, "{pretty_table}\n").into_diagnostic()?;
         }
-        let pretty_table = disassembler::disassemble(exe);
-        write!(&mut self.out, "{pretty_table}").into_diagnostic()?;
         Ok(())
     }
 }
