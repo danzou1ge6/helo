@@ -80,7 +80,7 @@ impl InlineContext {
             &|e, nodes| {
                 use ExprNode::*;
                 match nodes[e].node() {
-                    LetBind { .. } | Local(..) | VariantField(..) | TupleField(..) => true,
+                    LetBind { .. } | Local(..) | VariantField(..) | TupleField(..) | MakeClosure(..) => true,
                     _ => false,
                 }
             },
@@ -95,6 +95,10 @@ impl InlineContext {
                     Local(local) => Local(self.get_new_local(local)),
                     VariantField(local, i) => VariantField(self.get_new_local(local), i),
                     TupleField(local, i) => TupleField(self.get_new_local(local), i),
+                    MakeClosure(fid, locals) => MakeClosure(
+                        fid,
+                        locals.into_iter().map(|i| self.get_new_local(i)).collect(),
+                    ),
                     _ => unreachable!(),
                 };
 
