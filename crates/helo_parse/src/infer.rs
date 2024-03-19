@@ -1743,9 +1743,6 @@ pub fn infer_function<'s>(
 ) -> Option<typed::Function<'s>> {
     let f = &symbols.functions[&id];
 
-    dbg!(&id);
-    dbg!(&captured_types);
-
     if f.arity > u8::MAX as usize {
         e.push(errors::TooManyParameters::new(&f.meta, f.arity));
     }

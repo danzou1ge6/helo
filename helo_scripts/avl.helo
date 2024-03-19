@@ -1,4 +1,6 @@
 use ops
+use result
+use str
 
 infix :: 10 9
 infix // 9 10
@@ -111,6 +113,8 @@ fn str_repeat c,n: [Char, Int] -> Str =
 fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
     case t of
     | Empty -> (str_repeat ' ',indent) * "()\n"
+    | Node v,Empty,Empty,h ->
+        (str_repeat ' ',indent) * (fmt.to_string v) * ", h = " * (fmt.to_string h) * "\n"
     | Node v,left,right,h ->
         (str_repeat ' ',indent) * (fmt.to_string v) * ", h = " * (fmt.to_string h) * "\n"
         * (debug left, (indent + 1))
@@ -120,13 +124,57 @@ fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
 fn :: x,t = insert x,t
 fn // t,x = delete x,t
 
+data Command = Insert Int | Delete Int
+data ParseError = ParseError Str,Str
+
+fn parse_digit s: [Str] -> (Str, Result[Int, ParseError]) =
+    if str_some s then
+        case str_head s of
+        | '0' -> ((str_tail s), Ok 0)
+        | '1' -> ((str_tail s), Ok 1)
+        | '2' -> ((str_tail s), Ok 2)
+        | '3' -> ((str_tail s), Ok 3)
+        | '4' -> ((str_tail s), Ok 4)
+        | '5' -> ((str_tail s), Ok 5)
+        | '6' -> ((str_tail s), Ok 6)
+        | '7' -> ((str_tail s), Ok 7)
+        | '8' -> ((str_tail s), Ok 8)
+        | '9' -> ((str_tail s), Ok 9)
+        | _   -> (s, Err ParseError s,"digit")
+        end
+    else (s, Err ParseError s,"digit")
+
+fn parse_int s,x: [Str, Int] -> (Str, Int) =
+    case parse_digit s of
+    | (s1, Ok digit) ->
+        parse_int s1,(x * 10 + digit)
+    | (s1, Err e   ) ->
+        (s1, x)
+    end
+
+fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
+    if str_some s then
+        case str_head s of
+        | 'i' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Insert x)
+        | 'd' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Delete x)
+        end
+    else (s, Err ParseError s,"command")
 
 routine main =
-    let tree1 = 1::4::2::6::5::Empty in
-    let tree2 = tree1 // 1 // 6 in begin
-        io.println (fmt.to_string (contains 4,tree1));
-        io.println (debug tree1,0);
-        io.println (fmt.to_string (contains 1,tree2));
-        io.println (debug tree2,0)
+    let mut tree1 = 1::4::2::6::5::Empty // 1 // 6 in begin
+    while true then begin
+        let line = io.readline ();
+        case parse_command line of
+        | (_, Ok Insert x) -> begin
+            tree1 <- insert x,tree1;
+            io.println (debug tree1,0)
+            end
+        | (_, Ok Delete x) -> begin
+            tree1 <- delete x,tree1;
+            io.println (debug tree1,0)
+            end
+        | (_, Err e) -> io.println "Bad command"
+        end
+    end
     end
 

@@ -1099,7 +1099,7 @@ fn build_infix_expr<'s>(
     Ok((
         s1,
         tast::Expr::new_untyped(
-            if op_id == "=" {
+            if op_id == "<-" {
                 tast::ExprNode::Assign(Box::new(lhs), Box::new(rhs))
             } else if op_id == "." {
                 tast::ExprNode::Access(Box::new(lhs), Box::new(rhs))

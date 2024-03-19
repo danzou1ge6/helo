@@ -767,7 +767,7 @@ fn lower_assign<'s, 'sy, B, F, C, R: tast::RelationArity>(
 ) -> ast::ExprId {
     let to = lower_expr(to, resolver, functions, ast_heap, e);
     let from = lower_expr(from, resolver, functions, ast_heap, e);
-    let expr = ast::Expr::new_untyped(ast::ExprNode::Assign(from, to), meta);
+    let expr = ast::Expr::new_untyped(ast::ExprNode::Assign(to, from), meta);
     ast_heap.push(expr)
 }
 

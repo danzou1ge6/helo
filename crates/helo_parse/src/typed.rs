@@ -204,6 +204,12 @@ impl<'s> ExprHeap<'s> {
                     self.walk(r, f);
                 }
             }
+            AssignLocal(_, from) => {
+                self.walk(from, f);
+            }
+            AssignCaptured(_, from) => {
+                self.walk(from, f);
+            }
             _ => {}
         };
     }

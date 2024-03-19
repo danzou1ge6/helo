@@ -1329,8 +1329,6 @@ fn lower_user_function<'s>(
         )
     });
 
-    dbg!(&f_type);
-
     let ir_fid = lower_function(
         id,
         &inferer,
@@ -1439,9 +1437,6 @@ fn lower_make_closure<'s>(
 ) -> ir::ExprId {
     let f = symbols.function(fid);
 
-    dbg!(&type_);
-    dbg!(&inferer);
-
     let type_ = inferer.resolve(type_, closure_meta).unwrap();
     let inferer_sub = unify_simple(&f.type_, &type_, f.var_cnt).unwrap_or_else(|_| {
         panic!(
@@ -1544,7 +1539,7 @@ fn lower_unresolved_method<'s>(
     ) {
         Ok((ins, _)) => lower_user_function(
             &ast::FunctionId::of_method(ins, f_name.id()),
-            &inferer.resolve(type_, meta).unwrap(),
+            type_,
             inferer,
             meta,
             symbols,
