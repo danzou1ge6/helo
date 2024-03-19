@@ -163,6 +163,15 @@ impl<'p> Ref<'p, ObjCallable> {
 
         Ok(())
     }
+    /// Allocate a new `ObjCallable` with same env
+    pub fn clone_new_callable(self, pool: &mut GcPool, lock: &'p Lock) -> Result<Ref<'p, ObjCallable>, ()> {
+        let env = unsafe {
+            Pointer::from_ref(self).env()
+        };
+        let env_len = self.env_len();
+        let callable = pool.allocate_callable_with_env(self.routine(), self.arity(), env, env_len, lock)?;
+        Ok(callable)
+    }
     pub fn push_env(
         self,
         values: impl Iterator<Item = ValueSafe<'p>>,

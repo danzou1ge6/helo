@@ -1039,8 +1039,11 @@ where
             .read_register(&registers, from, lock)
             .unwrap_obj()
             .cast::<mem::ObjCallable>();
-        let new_callable = callable
-            .push_env(
+        let backup = callable
+            .clone_new_callable(pool, lock)
+            .map_err(|_| errors::RunTimeError::OutOfMemory(()))?;
+        callable
+            .push_env_in_place(
                 args.into_iter()
                     .map(|arg| call_stack.read_register(&registers, arg, lock)),
                 pool,
@@ -1049,8 +1052,13 @@ where
             .map_err(|_| errors::RunTimeError::OutOfMemory(()))?;
         call_stack.write_register(
             registers,
+            from,
+            ValueSafe::from_obj_ref(backup.cast_obj_ref()),
+        );
+        call_stack.write_register(
+            registers,
             to,
-            ValueSafe::from_obj_ref(new_callable.cast_obj_ref()),
+            ValueSafe::from_obj_ref(callable.cast_obj_ref()),
         );
         self.ip_inc_8bytes();
         Ok(())
