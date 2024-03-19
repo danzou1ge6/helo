@@ -569,33 +569,32 @@ fn lower_add_to_env(
     _functions: &mut FunctionRelocations,
 ) {
     let to = to.register();
-    let from = from.register();
+    let mut from = from.register();
 
-    while args.len() > 6 {
-        Instruction::AddToEnv6(
+    while args.len() > 5 {
+        Instruction::AddToEnv5(
+            to,
             from,
-            collect_to_array(args[0..6].iter().map(|a| a.register())),
+            collect_to_array(args[0..5].iter().map(|a| a.register())),
         )
         .emit(chunk);
-        args = &args[6..]
+        args = &args[5..];
+        // After first loop, the result closure is already in `to`
+        from = to;
     }
 
     let args = args.iter().map(|a| a.register());
     let inst = match args.len() {
         0 => return,
-        1 => Instruction::AddToEnv1(from, collect_to_array(args)),
-        2 => Instruction::AddToEnv2(from, collect_to_array(args)),
-        3 => Instruction::AddToEnv3(from, collect_to_array(args)),
-        4 => Instruction::AddToEnv4(from, collect_to_array(args)),
-        5 => Instruction::AddToEnv5(from, collect_to_array(args)),
-        6 => Instruction::AddToEnv6(from, collect_to_array(args)),
+        1 => Instruction::AddToEnv1(to, from, collect_to_array(args)),
+        2 => Instruction::AddToEnv2(to, from, collect_to_array(args)),
+        3 => Instruction::AddToEnv3(to, from, collect_to_array(args)),
+        4 => Instruction::AddToEnv4(to, from, collect_to_array(args)),
+        5 => Instruction::AddToEnv5(to, from, collect_to_array(args)),
         _ => unreachable!(),
     };
 
     inst.emit(chunk);
-    if from != to {
-        Instruction::Mov(to, from).emit(chunk);
-    }
 }
 
 fn lower_push(

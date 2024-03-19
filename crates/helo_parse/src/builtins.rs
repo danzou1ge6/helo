@@ -243,6 +243,16 @@ const BUILTIN_SIGS: &'static str = r#"
         relation Ge 'a
             fn >= a,b : ['a, 'a] -> Bool
         end
+
+        relation Ord 'a where Eq 'a + Ne 'a + Lt 'a + Gt 'a + Ge 'a + Le 'a
+        end
+
+        fn max 'a a,b : ['a, 'a] -> 'a where Ord 'a =
+            if a > b then a else b
+        
+        fn min 'a a,b : ['a, 'a] -> 'a where Ord 'a =
+            if a > b then b else a
+        
     end
 
     module convert

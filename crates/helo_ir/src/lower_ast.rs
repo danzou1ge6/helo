@@ -350,6 +350,7 @@ fn lower_expr<'s>(
         UserFunction(fid) => lower_user_function(
             fid,
             &expr.type_,
+            inferer,
             &expr.meta,
             symbols,
             typed_nodes,
@@ -931,7 +932,7 @@ mod lower_case {
         lower_ctx: &mut Context,
         e: &mut ManyError,
     ) -> ir::ExprId {
-        let operand = lower_expr(
+        let ir_operand = lower_expr(
             operand,
             inferer,
             symbols,
@@ -942,7 +943,15 @@ mod lower_case {
             lower_ctx,
             e,
         );
-        let header = VecDeque::from([operand]);
+        // To prevent evaluating `operand` too many times, we first store evaluate it and
+        // store it in a local
+        let operand_store = lower_ctx.new_local();
+        let stored_operand = ir_nodes.push(ir::Expr::new(
+            ir::ExprNode::Local(operand_store),
+            (&typed_nodes[operand].meta).into(),
+        ));
+
+        let header = VecDeque::from([stored_operand]);
 
         let rows = amrs
             .iter()
@@ -976,7 +985,7 @@ mod lower_case {
             })
             .collect();
 
-        lower_table(
+        let case_of_body = lower_table(
             header,
             rows,
             case_meta,
@@ -987,7 +996,16 @@ mod lower_case {
             str_table,
             lower_ctx,
             e,
-        )
+        );
+
+        ir_nodes.push(ir::Expr::new(
+            ir::ExprNode::LetBind {
+                local: operand_store,
+                value: ir_operand,
+                in_: case_of_body,
+            },
+            case_meta.into(),
+        ))
     }
 
     pub fn lower_let_pat<'s>(
@@ -1289,6 +1307,7 @@ fn lower_builtin<'s>(
 fn lower_user_function<'s>(
     id: &ast::FunctionId<'s>,
     type_: &ast::Type<'s>,
+    inferer: &Inferer<'s>,
     global_meta: &ast::Meta,
     symbols: &typed::Symbols<'s>,
     typed_nodes: &typed::ExprHeap<'s>,
@@ -1301,6 +1320,7 @@ fn lower_user_function<'s>(
         ast::TypeNode::Callable(t) | ast::TypeNode::ImpureCallable(t) => t,
         _ => panic!("UserFunction nodes must have callable types"),
     };
+    let f_type = inferer.resolve(f_type, global_meta).unwrap();
     let f = symbols.function(id);
     let inferer = unify_simple(&f.type_, &f_type.clone().into(), f.var_cnt).unwrap_or_else(|_| {
         panic!(
@@ -1308,6 +1328,8 @@ fn lower_user_function<'s>(
             f.type_, f_type
         )
     });
+
+    dbg!(&f_type);
 
     let ir_fid = lower_function(
         id,
@@ -1417,6 +1439,9 @@ fn lower_make_closure<'s>(
 ) -> ir::ExprId {
     let f = symbols.function(fid);
 
+    dbg!(&type_);
+    dbg!(&inferer);
+
     let type_ = inferer.resolve(type_, closure_meta).unwrap();
     let inferer_sub = unify_simple(&f.type_, &type_, f.var_cnt).unwrap_or_else(|_| {
         panic!(
@@ -1520,6 +1545,7 @@ fn lower_unresolved_method<'s>(
         Ok((ins, _)) => lower_user_function(
             &ast::FunctionId::of_method(ins, f_name.id()),
             &inferer.resolve(type_, meta).unwrap(),
+            inferer,
             meta,
             symbols,
             typed_nodes,

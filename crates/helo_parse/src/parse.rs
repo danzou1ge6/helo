@@ -193,20 +193,24 @@ fn num_literal_expr<'s>(s: &'s str, ctx: &Context<'s>) -> EResult<'s> {
 
 fn num_literal_a<'s>(s: &'s str, ctx: &Context<'s>) -> MResult<'s, tast::Constant<'s>> {
     let parse = |s| {
-        let (s1, d1): (_, &str) = nchar::digit1(s)?;
+        let (s1, sign) = ncomb::opt(nbyte::tag("-"))(s)?;
+        let (s1, d1): (_, &str) = nchar::digit1(s1)?;
         let (s2, d2) = ncomb::opt(nseq::preceded(nbyte::tag("."), nchar::digit1))(s1)?;
         if let Some(d2) = d2 {
             Ok((
                 s2,
                 (
-                    tast::Constant::Float(&s[0..d1.len() + 1 + d2.len()]),
+                    tast::Constant::Float(&s[0..sign.map_or(0, |_| 1) + d1.len() + 1 + d2.len()]),
                     ctx.meta(s, s2),
                 ),
             ))
         } else {
             Ok((
                 s2,
-                (tast::Constant::Int(d1.parse().unwrap()), ctx.meta(s, s2)),
+                (
+                    tast::Constant::Int(d1.parse::<i64>().unwrap() * sign.map_or(1, |_| -1)),
+                    ctx.meta(s, s2),
+                ),
             ))
         }
     };
@@ -986,8 +990,8 @@ fn expression_item<'s>(s: &'s str, ctx: &Context<'s>) -> EResult<'s> {
         "identifier, number literal, char literal or string literal",
         nbr::alt((
             |s| bool_literal_expr(s, ctx),
-            |s| identifier_expr(s, ctx),
             |s| num_literal_expr(s, ctx),
+            |s| identifier_expr(s, ctx),
             |s| string_literal_expr(s, ctx),
             |s| char_literal_expr(s, ctx),
         )),

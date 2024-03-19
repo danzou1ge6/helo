@@ -245,9 +245,10 @@ impl<'c> Iterator for RowIter<'c> {
 
         macro_rules! arm_add_to_env {
             ($f:ident, $rows:ident) => {{
-                let (to, args) = reader.$f();
-                $rows.push(mk_row1(
-                    format!("{}, {}", to, RegisterArray::from(args)),
+                let (to, from, args) = reader.$f();
+                $rows.push(mk_row(
+                    to,
+                    format!("{}, {}", from, RegisterArray::from(args)),
                     es(),
                 ));
             }};
@@ -382,7 +383,6 @@ impl<'c> Iterator for RowIter<'c> {
             ADD_TO_ENV3 => arm_add_to_env!(add_to_env3, rows),
             ADD_TO_ENV4 => arm_add_to_env!(add_to_env4, rows),
             ADD_TO_ENV5 => arm_add_to_env!(add_to_env5, rows),
-            ADD_TO_ENV6 => arm_add_to_env!(add_to_env6, rows),
             PUSH1 => arm_push!(push1, rows),
             PUSH2 => arm_push!(push2, rows),
             PUSH3 => arm_push!(push3, rows),

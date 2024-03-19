@@ -918,6 +918,25 @@ impl<'s> TypeApply<'s> for FunctionType<'s> {
     }
 }
 
+impl<'s> TypeApplyResult<'s> for CallableType<'s> {
+    fn apply_result<E>(
+        &self,
+        selector: &impl Fn(&Type<'s>) -> bool,
+        f: &mut impl FnMut(&Type<'s>) -> Result<Type<'s>, E>,
+    ) -> Result<Self, E>
+    where
+        Self: Sized,
+    {
+        let params = Type::apply_many_result(self.params.iter(), selector, f)?;
+        let ret = Box::new(self.ret.apply_result(selector, f)?);
+        Ok(CallableType {
+            params,
+            ret,
+        })
+    }
+}
+
+
 impl<'s> TypeApplyResult<'s> for FunctionType<'s> {
     fn apply_result<E>(
         &self,

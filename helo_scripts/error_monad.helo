@@ -1,0 +1,40 @@
+infix >>= 9 10
+
+use result
+use ops
+
+fn >>= x,f = case x of
+    | Ok x -> f x
+    | Err e -> Err e
+end
+
+fn return x = Ok x
+
+fn plus1_conditioned x: [Int] -> Result[Int,Str] =
+    if x < 10 then
+        Err "too small"
+    else if x > 15 then
+        Err "too big"
+    else
+        Ok (x + 1)
+
+fn f x = 
+    (plus1_conditioned x) >>= \y ->
+    (plus1_conditioned x) >>= \x ->
+    (plus1_conditioned y) >>= \x ->
+    return x
+
+routine main =
+    let x = 9 in
+    let y = 13 in begin
+        case f x of
+        | Ok r -> io.println "Ok " * (fmt.to_string r)
+        | Err e -> io.println "Err " * e
+        end ;
+        case f y of
+        | Ok r -> io.println "Ok " * (fmt.to_string r)
+        | Err e -> io.println "Err " * e
+        end ;
+    end
+
+

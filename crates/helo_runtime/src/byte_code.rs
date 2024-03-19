@@ -247,20 +247,18 @@ pub enum Instruction {
     /// 2 of 8 bytes
     Float(RegisterId),
 
-    /// Add .1 to closure at .0
+    /// Add .2 to closure at .1 , storing the result at .0
     ///
-    /// 3 of 8 bytes
-    AddToEnv1(RegisterId, [RegisterId; 1]),
     /// 4 of 8 bytes
-    AddToEnv2(RegisterId, [RegisterId; 2]),
+    AddToEnv1(RegisterId, RegisterId, [RegisterId; 1]),
     /// 5 of 8 bytes
-    AddToEnv3(RegisterId, [RegisterId; 3]),
+    AddToEnv2(RegisterId, RegisterId, [RegisterId; 2]),
     /// 6 of 8 bytes
-    AddToEnv4(RegisterId, [RegisterId; 4]),
+    AddToEnv3(RegisterId, RegisterId, [RegisterId; 3]),
     /// 7 of 8 bytes
-    AddToEnv5(RegisterId, [RegisterId; 5]),
+    AddToEnv4(RegisterId, RegisterId, [RegisterId; 4]),
     /// 8 of 8 bytes
-    AddToEnv6(RegisterId, [RegisterId; 6]),
+    AddToEnv5(RegisterId, RegisterId, [RegisterId; 5]),
 
     /// Push .1 to array at .0. Variants, tuples are both represented by arrays.
     ///
@@ -371,7 +369,6 @@ pub enum OpCode {
     ADD_TO_ENV3,
     ADD_TO_ENV4,
     ADD_TO_ENV5,
-    ADD_TO_ENV6,
     PUSH1,
     PUSH2,
     PUSH3,

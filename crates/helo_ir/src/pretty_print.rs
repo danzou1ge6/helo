@@ -375,7 +375,7 @@ where
         }
         Char(ret, value) => allocator.text(format!("x{:<3} <- '{}'", ret, value)),
         AddToEnv(to, fid, args) => allocator
-            .text(format!("x{:<3} <- ADD_TO_ENV f{} ", to, fid))
+            .text(format!("x{:<3} <- ADD_TO_ENV x{} ", to, fid))
             .append(
                 allocator.intersperse(args.iter().map(|r| format!("x{}", r)), allocator.text(",")),
             ),

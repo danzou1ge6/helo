@@ -39,7 +39,7 @@
                 }
             },
             "args": [
-                "helo_scripts/test.helo",
+                "helo_scripts/error_monad.helo",
                 "--print-all",
                 "--no-save",
                 "--run"

@@ -454,7 +454,7 @@ pub fn compile(
     }
 
     // Do inline optimization
-    let ir_functions = artifect::inline_ir(ir_functions, &mut ir_nodes, 16, [main.clone()].iter());
+    let ir_functions = artifect::inline_ir(ir_functions, &mut ir_nodes, 8, [main.clone()].iter());
 
     if controller.after_inline(&ir_functions, &ir_nodes, &str_list, &typed_symbols)? {
         return Ok(None);

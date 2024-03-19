@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::ast::{self, Relation, RelationName, Trie};
+use crate::ast::{self, Relation, RelationName, Trie, TypeApply};
 use crate::errors::InfiniteType;
 use crate::inferer::Inferer;
 use ast::{Constrain, InstanceId, InstanceIdTable};
@@ -19,7 +19,40 @@ pub enum Error<'s> {
     TooManyHit(Vec<InstanceId<'s>>),
 }
 
+fn expand_constrain<'s>(
+    constrain: Constrain<'s>,
+    relations: &Trie<RelationName<'s>, Relation<'s>, &'s str>,
+    depth: usize,
+) -> Vec<Constrain<'s>> {
+    if depth == 2 {
+        return Vec::new();
+    }
+    let mut expanded = relations
+        .get(&constrain.rel_name)
+        .unwrap()
+        .constrains
+        .iter()
+        .map(|c| {
+            let c1 = c.substitute_vars(|id| constrain.args[id.0].clone());
+            let c1_expanded = expand_constrain(c1, relations, depth + 1);
+            c1_expanded.into_iter()
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    expanded.push(constrain);
+    expanded
+}
+
 impl<'s> Assumptions<'s> {
+    pub fn expanded(self, relations: &Trie<RelationName<'s>, Relation<'s>, &'s str>) -> Self {
+        let mut new = HashSet::new();
+        self.0.into_iter().for_each(|c| {
+            expand_constrain(c, relations, 0).into_iter().for_each(|c| {
+                new.insert(c);
+            })
+        });
+        Self(new)
+    }
     pub fn contains(
         &self,
         c: &Constrain<'s>,

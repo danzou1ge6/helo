@@ -640,66 +640,60 @@ where
                         self.ip_inc_8bytes();
                     }
                     ADD_TO_ENV1 => {
-                        let (to, args) = reader.add_to_env1();
+                        let (to, from, args) = reader.add_to_env1();
                         self.do_add_to_env(
                             &mut call_stack,
                             &mut registers,
                             to,
+                            from,
                             args,
                             &mut pool,
                             &lock,
                         )?;
                     }
                     ADD_TO_ENV2 => {
-                        let (to, args) = reader.add_to_env2();
+                        let (to, from, args) = reader.add_to_env2();
                         self.do_add_to_env(
                             &mut call_stack,
                             &mut registers,
                             to,
+                            from,
                             args,
                             &mut pool,
                             &lock,
                         )?;
                     }
                     ADD_TO_ENV3 => {
-                        let (to, args) = reader.add_to_env3();
+                        let (to, from, args) = reader.add_to_env3();
                         self.do_add_to_env(
                             &mut call_stack,
                             &mut registers,
                             to,
+                            from,
                             args,
                             &mut pool,
                             &lock,
                         )?;
                     }
                     ADD_TO_ENV4 => {
-                        let (to, args) = reader.add_to_env4();
+                        let (to, from, args) = reader.add_to_env4();
                         self.do_add_to_env(
                             &mut call_stack,
                             &mut registers,
                             to,
+                            from,
                             args,
                             &mut pool,
                             &lock,
                         )?;
                     }
                     ADD_TO_ENV5 => {
-                        let (to, args) = reader.add_to_env5();
+                        let (to, from, args) = reader.add_to_env5();
                         self.do_add_to_env(
                             &mut call_stack,
                             &mut registers,
                             to,
-                            args,
-                            &mut pool,
-                            &lock,
-                        )?;
-                    }
-                    ADD_TO_ENV6 => {
-                        let (to, args) = reader.add_to_env6();
-                        self.do_add_to_env(
-                            &mut call_stack,
-                            &mut registers,
-                            to,
+                            from,
                             args,
                             &mut pool,
                             &lock,
@@ -1036,22 +1030,28 @@ where
         call_stack: &mut CallStack,
         registers: &mut mem::ValueVec,
         to: RegisterId,
+        from: RegisterId,
         args: [RegisterId; N],
         pool: &mut mem::GcPool,
         lock: &'p mem::Lock,
     ) -> Result<(), errors::RunTimeError> {
         let callable = call_stack
-            .read_register(&registers, to, lock)
+            .read_register(&registers, from, lock)
             .unwrap_obj()
             .cast::<mem::ObjCallable>();
-        callable
-            .push_env_in_place(
+        let new_callable = callable
+            .push_env(
                 args.into_iter()
                     .map(|arg| call_stack.read_register(&registers, arg, lock)),
                 pool,
                 lock,
             )
             .map_err(|_| errors::RunTimeError::OutOfMemory(()))?;
+        call_stack.write_register(
+            registers,
+            to,
+            ValueSafe::from_obj_ref(new_callable.cast_obj_ref()),
+        );
         self.ip_inc_8bytes();
         Ok(())
     }

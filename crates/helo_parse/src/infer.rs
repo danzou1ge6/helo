@@ -1028,6 +1028,7 @@ fn infer_constant<'s>(constant: &ast::Constant<'s>, constant_meta: &ast::Meta) -
     }
 }
 
+#[derive(Debug)]
 pub struct CapturedTypeInfo<'s> {
     types: Vec<ast::Type<'s>>,
     var_cnt: usize,
@@ -1565,16 +1566,17 @@ fn init_inferer_for_function_inference<'s>(
 ) -> (ast::Type<'s>, Vec<ast::Constrain<'s>>, TypeMapping) {
     // If this is a closure, number of generic type variables is stored in
     // `captured_types`;
-    // Otherwise `f` knows it
-    let var_cnt = if f.capture_cnt == 0 {
-        f.var_cnt
-    } else {
-        captured_types.var_cnt
-    };
-
+    // Otherwise `f` knows it.
     // Allocate type-vars for those in user provided function signature and rename.
     // Those type-vars cannot be modified to have concrete type
-    let _ = inferer.alloc_locked_vars(var_cnt);
+    if f.capture_cnt == 0 {
+        let var_cnt = f.var_cnt;
+        let _ = inferer.alloc_locked_vars(var_cnt);
+    } else {
+        let var_cnt = captured_types.var_cnt;
+        let _ = inferer.alloc_free_vars(var_cnt);
+    };
+
     // allocate type-vars for locals and return-value and captures
     let _ = inferer.alloc_free_vars(f.local_cnt + 1 + f.capture_cnt);
 
@@ -1741,6 +1743,9 @@ pub fn infer_function<'s>(
 ) -> Option<typed::Function<'s>> {
     let f = &symbols.functions[&id];
 
+    dbg!(&id);
+    dbg!(&captured_types);
+
     if f.arity > u8::MAX as usize {
         e.push(errors::TooManyParameters::new(&f.meta, f.arity));
     }
@@ -1760,7 +1765,10 @@ pub fn infer_function<'s>(
     };
     let (ret_type, assumptions, type_mapping) =
         init_inferer_for_function_inference(f, &mut inferer, &captured_types, assumptions);
-    let assumptions = assumptions.into_iter().collect();
+    let assumptions = assumptions
+        .into_iter()
+        .collect::<constrain::Assumptions>()
+        .expanded(&symbols.relations);
 
     typed_functions.begin_infering(id.clone());
     // Resolve type of function body
@@ -1845,6 +1853,18 @@ pub fn infer_function<'s>(
                         primary_constrain.clone()
                     });
                 *primary_constrain = primary_constrain1.substitute_vars_with_nodes(get_subst!());
+            }
+            typed::ExprNode::MakeClosure { type_, ..} | typed::ExprNode::MakeClosureAt { type_ , ..} => {
+                let resolved = inferer.resolve(type_, &expr.meta)
+                    .unwrap_or_else(|err| {
+                        e.push(err);
+                        ast::FunctionType {
+                            params: vec![ast::Type::new_never(); type_.params.len()],
+                            ret: Box::new(ast::Type::new_never()),
+                            captures: vec![ast::Type::new_never(); type_.captures.len()]
+                        }
+                    });
+                *type_ = resolved;
             }
             _ => {}
         };
