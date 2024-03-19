@@ -336,8 +336,15 @@ impl Instruction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AltIdxVec<T, I>(Vec<T>, PhantomData<I>);
+
+
+impl<T, I> std::fmt::Debug for AltIdxVec<T, I> where T: std::fmt::Debug, I: std::fmt::Debug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(self.iter().enumerate()).finish()
+    }
+}
 
 pub type BlockIdVec<T> = AltIdxVec<T, BlockId>;
 

@@ -345,7 +345,7 @@ mod constant_propagation {
 
     use super::Site;
 
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Value {
         Top,
         Bottom,
@@ -446,8 +446,8 @@ mod constant_propagation {
     ) {
         if values[temp].lower_then(&value) {
             temps_worklist.insert(temp);
+            values[temp] = value;
         }
-        values[temp] = value;
     }
 
     fn process_inst(
@@ -481,8 +481,12 @@ mod constant_propagation {
                     |op: fn(i64, i64) -> i64,
                      values: &mut lir::AltIdxVec<Value, TempId>,
                      temps_worklist: &mut HashSet<TempId>| {
-                        if let (CInt(a), CInt(b)) = (values[a], values[b]) {
-                            set_value(*ret, CInt(op(a, b)), values, temps_worklist);
+                        match (values[a], values[b]) {
+                            (CInt(a), CInt(b)) => {
+                                set_value(*ret, CInt(op(a, b)), values, temps_worklist)
+                            }
+                            (Bottom, Bottom) => {}
+                            _ => set_value(*ret, Top, values, temps_worklist),
                         }
                     };
 
@@ -490,8 +494,12 @@ mod constant_propagation {
                     |op: fn(&i64, &i64) -> bool,
                      values: &mut lir::AltIdxVec<Value, TempId>,
                      temps_worklist: &mut HashSet<TempId>| {
-                        if let (CInt(a), CInt(b)) = (values[a], values[b]) {
-                            set_value(*ret, CBool(op(&a, &b)), values, temps_worklist);
+                        match (values[a], values[b]) {
+                            (CInt(a), CInt(b)) => {
+                                set_value(*ret, CBool(op(&a, &b)), values, temps_worklist)
+                            }
+                            (Bottom, Bottom) => {}
+                            _ => set_value(*ret, Top, values, temps_worklist),
                         }
                     };
 
@@ -499,8 +507,12 @@ mod constant_propagation {
                     |op: fn(bool, bool) -> bool,
                      values: &mut lir::AltIdxVec<Value, TempId>,
                      temps_worklist: &mut HashSet<TempId>| {
-                        if let (CBool(a), CBool(b)) = (values[a], values[b]) {
-                            set_value(*ret, CBool(op(a, b)), values, temps_worklist);
+                        match (values[a], values[b]) {
+                            (CBool(a), CBool(b)) => {
+                                set_value(*ret, CBool(op(a, b)), values, temps_worklist)
+                            }
+                            (Bottom, Bottom) => {}
+                            _ => set_value(*ret, Top, values, temps_worklist),
                         }
                     };
 
@@ -528,8 +540,8 @@ mod constant_propagation {
                 use helo_runtime::builtins;
                 use Value::*;
 
-                match builtins::ident(*builtin) {
-                    "not" => {
+                match (builtins::module_str(*builtin), builtins::ident(*builtin)) {
+                    ("arith.bool", "not") => {
                         if let CBool(a) = values[a] {
                             set_value(*ret, CBool(!a), values, temps_worklist);
                         }

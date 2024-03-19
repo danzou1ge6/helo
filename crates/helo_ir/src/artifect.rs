@@ -199,19 +199,6 @@ pub fn deconstruct_ssa(f: ssa::Function) -> lir::FunctionOptimized {
     f
 }
 
-pub fn optimize_lir<'s>(
-    lir_functions: lir::FunctionList<lir::Function>,
-) -> lir::FunctionList<lir::FunctionOptimized> {
-    lir_functions
-        .into_iter()
-        .map(|f| compile_ssa(f))
-        .map(|(f, dom_tree)| (constant_propagation(f), dom_tree))
-        .map(|(f, dom_tree)| (dead_code_elimination(f), dom_tree))
-        .map(|(f, dom_tree)| common_expression_elimination(f, &dom_tree))
-        .map(|f| deconstruct_ssa(f))
-        .map(|f| control_flow_simplification(f))
-        .collect()
-}
 
 pub fn compile_byte_code(
     lir_functions: lir::FunctionList<lir::FunctionOptimized>,
