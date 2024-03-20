@@ -725,7 +725,7 @@ fn reduce_to_path<'s>(
             }),
             tast::ExprNode::Access(llhs, lrhs) => {
                 let tast::Path { mut path, .. } = reduce_to_path(*llhs, *lrhs, lhs.meta)?;
-                path.insert(0, rhs);
+                path.push(rhs);
                 Ok(tast::Path { path, meta })
             }
             _ => Err(errors::BadAccessOperands::new(&meta)),

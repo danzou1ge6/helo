@@ -179,10 +179,9 @@ impl Src {
     pub fn insert(&mut self, parent: Vec<String>, file_name: String, src: String) -> bool {
         let mut path_string = String::new();
         for item in parent.iter() {
-            path_string.push('/');
             path_string.push_str(item);
+            path_string.push('/');
         }
-        path_string.push('/');
         path_string.push_str(&file_name);
         path_string.push_str(".helo");
 
@@ -199,6 +198,11 @@ impl Src {
     }
     pub fn set_root_file_name(&mut self, name: String) {
         self.tree.set_root_file_name(name)
+    }
+    pub fn clone(&self) -> Self {
+        Self {
+            tree: self.tree.clone(),
+        }
     }
 }
 

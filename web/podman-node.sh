@@ -1,1 +1,1 @@
-podman run -it -v ./:/work --network=host  node:lts bash -c "cd /work; bash"
+podman run -it -v ../:/work --network=host  node:lts bash -c "cd /work/web; bash"
