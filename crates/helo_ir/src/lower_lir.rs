@@ -517,6 +517,7 @@ fn lower_call(
 
     if args_len <= 2 {
         let inst = match args_len {
+            0 => Instruction::Call0(ret, callee_addr, []),
             1 => Instruction::Call1(ret, callee_addr, collect_to_array(args)),
             2 => Instruction::Call2(ret, callee_addr, collect_to_array(args)),
             _ => unreachable!(),

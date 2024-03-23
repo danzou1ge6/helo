@@ -1,15 +1,4 @@
+fn f = 1
 
-fn str_repeat c,n: [Char, Int] -> Str =
-    use ops in
-    let fn helper s,c,n: [Str, Char, Int] -> Str =
-        if n == 0 then
-            s
-        else
-            helper ((fmt.to_string c) * s),c,(n - 1)
-    in
-        helper "",c,n
-
-routine main =
-    let s = str_repeat '1',10 in
-    io.println s
+routine main = f
 

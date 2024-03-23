@@ -176,6 +176,8 @@ pub enum Instruction {
 
     /// Call .1 with .2 and store result to .0
     ///
+    /// 6 of 8 bytes
+    Call0(RegisterId, Addr, [RegisterId; 0]),
     /// 7 of 8 bytes
     Call1(RegisterId, Addr, [RegisterId; 1]),
     /// 8 of 8 bytes
@@ -339,6 +341,7 @@ pub enum OpCode {
     APPLY4,
     APPLY5,
     APPLY_MANY,
+    CALL0,
     CALL1,
     CALL2,
     CALL_MANY,

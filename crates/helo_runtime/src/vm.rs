@@ -486,6 +486,10 @@ where
                             &mut lock,
                         )?;
                     }
+                    CALL0 => {
+                        let (ret, f_addr, args) = reader.call0();
+                        self.do_call(&mut call_stack, &mut registers, ret, f_addr, args, &lock);
+                    }
                     CALL1 => {
                         let (ret, f_addr, args) = reader.call1();
                         self.do_call(&mut call_stack, &mut registers, ret, f_addr, args, &lock);

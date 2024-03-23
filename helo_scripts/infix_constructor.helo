@@ -1,6 +1,6 @@
-data List2['a] = :: 'a, List2['a]
-               | []
-            
+use list of (::) , ([])
+use ops
+
 infix :: 10 9
 
 fn head xs = case xs of
@@ -11,10 +11,15 @@ end
 routine main =
     use ops of (+) in
     let xs = 1::(1 + 1)::3:: [] in
-    let x = head xs in
-    case x of
-    | option.Some x ->
-      io.println (fmt.int_to_str x)
-    | option.None -> panic.panic "impossible"
+    let x = head xs in begin
+        case x of
+        | option.Some x ->
+          io.println "Head is " * (fmt.int_to_str x)
+        | option.None -> panic.panic "impossible"
+        end ;
+        case xs of
+        | 1::2::x:: [] -> io.println "Third is " * (fmt.to_string x)
+        | _ -> panic.panic "impossible"
+        end
     end
 

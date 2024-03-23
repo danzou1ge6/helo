@@ -39,16 +39,13 @@ pub fn infer_type<'s>(
         if !typed_functions.contains(&f_id) && !f_id.is_closure() {
             let f = infer::infer_function(
                 f_id.clone(),
-                &infer::CapturedTypeInfo::empty(),
                 &symbols,
                 &ast_nodes,
                 &mut typed_nodes,
                 &mut typed_functions,
                 e,
             );
-            if let Some(f) = f {
-                typed_functions.insert(f_id.clone(), f);
-            }
+            typed_functions.insert(f_id.clone(), f);
         }
     }
 
@@ -198,7 +195,6 @@ pub fn deconstruct_ssa(f: ssa::Function) -> lir::FunctionOptimized {
     };
     f
 }
-
 
 pub fn compile_byte_code(
     lir_functions: lir::FunctionList<lir::FunctionOptimized>,

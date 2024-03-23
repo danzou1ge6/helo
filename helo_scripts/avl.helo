@@ -53,7 +53,7 @@ fn insert 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
         if x < v then
             let new_left = insert x,left in
             balance (node v,new_left,right)
-        else if x > v then
+        else if v < x then
             let new_right = insert x,right in
             balance (node v,left,new_right)
         else
@@ -72,7 +72,7 @@ fn delete 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
         if x < v then
             let new_left = delete x,left in
             balance (node v,new_left,right)
-        else if x > v then
+        else if v < x then
             let new_right = delete x,right in
             balance (node v,left,new_right)
         else
@@ -95,7 +95,7 @@ fn contains 'a x,t: ['a, Avl['a]] -> Bool where Ord 'a =
     | Node v,left,right,_ ->
         if x < v then
             contains x,left
-        else if x > v then
+        else if v < x then
             contains x,right
         else
             x == v

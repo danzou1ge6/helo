@@ -616,21 +616,6 @@ fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
         lower_expr(*f.body, resolver, functions, ast_heap, e)
     });
 
-    let constrains = f
-        .constrains
-        .into_iter()
-        .filter_map(|c| {
-            lower_constrain(
-                c,
-                &resolver.global,
-                e,
-                resolver.symbols.datas,
-                resolver.symbols.relations,
-            )
-            .ok()
-        })
-        .collect();
-
     let f_type = f
         .type_
         .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
@@ -652,7 +637,7 @@ fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
         param_metas: f.param_metas,
         capture_cnt: cinfo.captures.len(),
         pure: f.pure,
-        constrains,
+        constrains: Vec::new(), // f.constrains must be empty as well
     };
     let closure_fid = ast::FunctionId::of_closure_at(&f.meta);
     functions.insert(closure_fid.clone(), ast_f);
@@ -1078,14 +1063,7 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     let r = resolver.with_scope(|resolver| {
         let local_id = resolver.define_local(id, false, id_meta);
 
-        let (cinfo, closure_fid) = lower_closure_function(
-            "<this closure is not bound to any local>",
-            f,
-            resolver,
-            functions,
-            ast_heap,
-            e,
-        );
+        let (cinfo, closure_fid) = lower_closure_function(id, f, resolver, functions, ast_heap, e);
 
         let in_ = lower_expr(in_, resolver, functions, ast_heap, e);
 

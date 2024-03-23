@@ -42,8 +42,6 @@ const BUILTIN_SIGS: &'static str = r#"
 
         instance ops.Eq Int
             fn == a,b = a == b
-        end
-        instance ops.Ne Int
             fn /= a,b = a /= b
         end
         instance ops.Gt Int
@@ -57,6 +55,8 @@ const BUILTIN_SIGS: &'static str = r#"
         end
         instance ops.Le Int
             fn <= a,b = a <= b
+        end
+        instance ops.Ord Int
         end
 
     end
@@ -98,8 +98,6 @@ const BUILTIN_SIGS: &'static str = r#"
 
         instance ops.Eq Float
             fn == a,b = a =. b
-        end
-        instance ops.Ne Float
             fn /= a,b = a /=. b
         end
         instance ops.Gt Float
@@ -161,6 +159,7 @@ const BUILTIN_SIGS: &'static str = r#"
         
         instance ops.Eq Char
             fn == a,b = char_eq a,b
+            fn /= a,b = arith.bool.not char_eq a,b
         end
     end
 
@@ -177,6 +176,7 @@ const BUILTIN_SIGS: &'static str = r#"
         end
         instance ops.Eq Str
             fn == a,b = str_eq a,b
+            fn /= a,b = arith.bool.not str_eq a,b
         end
     end
 
@@ -193,6 +193,11 @@ const BUILTIN_SIGS: &'static str = r#"
     module option
         data Option['a] = Some 'a
                         | None
+        
+        fn unwrap x = case x of
+            | Some x -> x
+            | _ -> panic.panic "called unwrap on `None`"
+        end
     end
 
     module result
@@ -201,8 +206,32 @@ const BUILTIN_SIGS: &'static str = r#"
     end
 
     module list
-        data List['a] = Con 'a, List['a] 
-                      | Nil
+        data List['a] = :: 'a, List['a] 
+                      | []
+        
+        fn head xs = case xs of
+            | x::xs -> option.Some x
+            | [] -> option.None
+        end
+
+        fn tail xs = case xs of
+            | x::xs -> option.Some xs
+            | [] -> option.None
+        end
+
+        fn is_empty xs = case xs of
+            | [] -> true
+            | _ -> false
+        end
+
+        fn rev 'a xs: [List['a]] -> List['a] =
+            let fn helper as, bs: [List['a], List['a]] -> List['a] =
+                case as of
+                | [] -> bs
+                | a :: as -> helper as, a :: bs
+                end
+            in
+            helper xs,[]
     end
 
     module ops
@@ -226,10 +255,8 @@ const BUILTIN_SIGS: &'static str = r#"
         end
 
         relation Eq 'a
-            fn == a,b : ['a, 'a] -> Bool
-        end
-        relation Ne 'a
             fn /= a,b : ['a, 'a] -> Bool
+            fn == a,b : ['a, 'a] -> Bool
         end
         relation Lt 'a
             fn < a,b : ['a, 'a] -> Bool
@@ -244,14 +271,14 @@ const BUILTIN_SIGS: &'static str = r#"
             fn >= a,b : ['a, 'a] -> Bool
         end
 
-        relation Ord 'a where Eq 'a + Ne 'a + Lt 'a + Gt 'a + Ge 'a + Le 'a
+        relation Ord 'a where Eq 'a + Lt 'a
         end
 
         fn max 'a a,b : ['a, 'a] -> 'a where Ord 'a =
-            if a > b then a else b
+            if a < b then b else a
         
         fn min 'a a,b : ['a, 'a] -> 'a where Ord 'a =
-            if a > b then b else a
+            if a < b then a else b
         
     end
 

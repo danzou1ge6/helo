@@ -328,6 +328,7 @@ impl<'c> Iterator for RowIter<'c> {
             APPLY4 => arm_apply!(apply4, rows),
             APPLY5 => arm_apply!(apply5, rows),
             APPLY_MANY => arm_apply_many!(apply_many, rows),
+            CALL0 => arm_call!(call0, rows),
             CALL1 => arm_call!(call1, rows),
             CALL2 => arm_call!(call2, rows),
             CALL_MANY => arm_call_local_many!(call_many, rows),
