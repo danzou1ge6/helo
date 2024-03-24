@@ -10,7 +10,7 @@ use inferer::Inferer;
 
 use ast::TypeVarId;
 
-const DEBUG: bool = false;
+const DEBUG: bool = true;
 
 struct TypeMapping {
     generics: Vec<TypeVarId>,
@@ -1448,23 +1448,6 @@ fn infer_captured<'s>(
     }
 }
 
-fn current_inferred_renamed<'s>(
-    f: &ast::Function<'s>,
-    inferer: &mut Inferer<'s>,
-    captured_types: &CapturedTypeInfo,
-    type_mapping: &TypeMapping,
-    e: &mut ManyError,
-) -> (ast::FunctionType<'s>, bool) {
-    let currently_infered = construct_function_type(f, inferer, captured_types, type_mapping, e);
-    // Discretize type of function such that variables are the first few unsigned integers
-    // e.g. from 2, 3 -> 4 to 0, 1 -> 2
-    let (map, _var_cnt) = inferer.discretization(&currently_infered);
-    (
-        currently_infered.substitute_vars_with_nodes(|i| ast::TypeNode::Var(map[&i])),
-        f.pure,
-    )
-}
-
 /// Infer type of a function and return its signature renamed
 fn infer_function_type_renamed<'s>(
     id: ast::FunctionId<'s>,
@@ -1517,8 +1500,8 @@ fn infer_function_type_renamed<'s>(
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
     if *typed_functions.currently_infering().unwrap() == id {
-        let (currently_infered, _) =
-            current_inferred_renamed(f, inferer, &captured_types, type_mapping, e);
+        let currently_infered =
+            construct_function_type(f, inferer, &captured_types, type_mapping, e);
 
         return Some(currently_infered);
     }
