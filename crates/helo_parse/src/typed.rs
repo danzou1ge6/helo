@@ -103,6 +103,7 @@ impl Stmt {
 
 pub type CaseArm<'s> = ast::CaseArm_<'s, ExprId>;
 
+#[derive(Debug)]
 pub struct Function<'s> {
     pub var_cnt: usize,
     pub type_: ast::FunctionType<'s>,

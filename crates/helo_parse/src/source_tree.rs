@@ -24,6 +24,7 @@ pub struct SourceTree {
     nodes: Vec<SourceTreeNode>,
     root_file_name: String,
     root_dir: String,
+    module_root: String,
 }
 
 impl SourceFile {
@@ -207,13 +208,13 @@ impl SourceTree {
     pub fn walk<'s, 'a: 's>(&'a self, symbols: &mut tast::Symbols<'s>, e: &mut ManyError) {
         // If root file is called "mod", then its sibling files are its children modules
         if self.root_file_name == "mod" {
-            let path = ast::Path::new([]);
+            let path = ast::Path::new([&self.root_dir]);
             for node in self.nodes.iter() {
                 node.walk(symbols, &path, e);
             }
         // Otherwise, root module's children resides in a direcotry with the same name
         } else {
-            let root = ast::Path::new([]);
+            let root = ast::Path::new([&self.root_file_name]);
             for node in self.nodes.iter() {
                 match node {
                     SourceTreeNode::File(f) if f.file_name == self.root_file_name => {
@@ -242,13 +243,19 @@ impl SourceTree {
 
             let parent = fp.parent().unwrap();
             let items = dir_items(parent.to_path_buf())?;
+            let parent_dir_name = parent
+                .to_str()
+                .ok_or_else(|| Error::NonUtf8FileName(fp.clone()))?
+                .to_string();
             Ok(Self {
                 nodes: items,
                 root_file_name: root_file_name.to_string(),
-                root_dir: parent
-                    .to_str()
-                    .ok_or_else(|| Error::NonUtf8FileName(fp.clone()))?
-                    .to_string(),
+                root_dir: parent_dir_name.clone(),
+                module_root: if root_file_name == "mod" {
+                    parent_dir_name
+                } else {
+                    root_file_name.to_string()
+                },
             })
         } else {
             Err(Error::NotFile(fp))
@@ -260,6 +267,7 @@ impl SourceTree {
             nodes: Vec::new(),
             root_file_name: String::new(),
             root_dir: String::new(),
+            module_root: String::new(),
         }
     }
 
@@ -277,5 +285,9 @@ impl SourceTree {
 
     pub fn set_root_file_name(&mut self, name: String) {
         self.root_file_name = name
+    }
+
+    pub fn module_root(&self) -> &str {
+        &self.module_root
     }
 }

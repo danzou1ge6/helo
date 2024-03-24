@@ -16,14 +16,9 @@ impl<'s> std::fmt::Display for Path<'s> {
 
 impl<'s> Path<'s> {
     pub fn absolute(&self, at: &ast::Path<'s>) -> Result<ast::Path<'s>, ()> {
-        let mut iter = self.path.iter();
-        let (iter, mut mp) = if iter.next().is_some_and(|x| *x == "root") {
-            (iter, Vec::new())
-        } else {
-            (self.path.iter(), at.0.clone())
-        };
+        let mut mp = at.0.clone();
 
-        for &item in iter {
+        for &item in self.path.iter() {
             match item {
                 "super" => mp.pop().map_or_else(|| Err(()), |_| Ok(()))?,
                 _ => mp.push(item),
@@ -36,9 +31,7 @@ impl<'s> Path<'s> {
     pub fn no_super_root(&self) -> bool {
         self.path.iter().all(|x| *x != "super" && *x != "root")
     }
-}
 
-impl<'s> Path<'s> {
     pub fn len(&self) -> usize {
         self.path.len()
     }

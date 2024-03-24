@@ -431,7 +431,7 @@ pub fn compile(
     }
 
     // Check existence and type of main
-    let main = ast::FunctionId::Standard(ast::Path::new(["main"]));
+    let main = ast::FunctionId::Standard(ast::Path::new([src_tree.module_root(), "main"]));
     if let Some(f) = typed_symbols.functions.get(&main) {
         let ast::FunctionType {
             params, captures, ..

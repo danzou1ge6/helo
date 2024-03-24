@@ -446,20 +446,23 @@ fn pattern_with_precedence<'s>(
 
         let (s1, r) = ncomb::opt(infix_identifier_str)(s)?;
         if let Some(op_id) = r {
-            if precedence_table.priority_left(op_id) < prec {
-                break;
+            if let (_, None) = ncomb::opt(expression_boundary)(s1)? {
+                if precedence_table.priority_left(op_id) < prec {
+                    break;
+                }
+                (s, lhs) = build_infix_pattern(
+                    lhs,
+                    op_id,
+                    ctx.meta(s, s1),
+                    ctx,
+                    s1,
+                    lhs_begin,
+                    precedence_table,
+                )?;
+                continue;
             }
-            (s, lhs) = build_infix_pattern(
-                lhs,
-                op_id,
-                ctx.meta(s, s1),
-                ctx,
-                s1,
-                lhs_begin,
-                precedence_table,
-            )?;
-            continue;
         }
+        let s1 = s;
 
         if prec > precedence_table.priority_left("<apply>") {
             break;
@@ -1214,21 +1217,25 @@ fn experssion_with_precedence<'s>(
         // Infix operator
         let (s1, r) = ncomb::opt(infix_identifier_str)(s)?;
         if let Some(op_id) = r {
-            if precedence_table.priority_left(op_id) < prec {
-                break;
+            if let (_, None) = ncomb::opt(expression_boundary)(s1)? {
+                if precedence_table.priority_left(op_id) < prec {
+                    break;
+                }
+                (s, lhs) = build_infix_expr(
+                    lhs,
+                    op_id,
+                    ctx.meta(s, s1),
+                    ctx,
+                    s1,
+                    lhs_begin,
+                    precedence_table,
+                    generic_params,
+                )?;
+                continue;
             }
-            (s, lhs) = build_infix_expr(
-                lhs,
-                op_id,
-                ctx.meta(s, s1),
-                ctx,
-                s1,
-                lhs_begin,
-                precedence_table,
-                generic_params,
-            )?;
-            continue;
         }
+
+        let s1 = s;
 
         if prec > precedence_table.priority_left("<apply>") {
             break;

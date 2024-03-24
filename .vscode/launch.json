@@ -39,7 +39,7 @@
                 }
             },
             "args": [
-                "helo_scripts/avl.helo",
+                "helo_scripts/binomial_heap.helo",
                 "--print-all",
                 "--no-save",
                 "--run"

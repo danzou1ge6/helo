@@ -356,8 +356,6 @@ pub struct ArgumentUnificationFailure {
     pub b: String,
     #[source_code]
     pub src: NamedSource,
-    #[label("Unification in this expression")]
-    pub span: SourceSpan,
     #[label("Argument here")]
     pub arg_span: SourceSpan,
     #[label("Callee here")]
@@ -383,7 +381,6 @@ impl ArgumentUnificationFailure {
             a: type_to_string(a, inferer, callee_meta),
             b: type_to_string(b, inferer, arg_meta),
             src: meta.named_source(),
-            span: meta.span(),
             callee_span: callee_meta.span(),
             arg_span: arg_meta.span(),
         }

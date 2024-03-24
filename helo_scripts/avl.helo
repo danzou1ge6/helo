@@ -157,6 +157,7 @@ fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
         case str_head s of
         | 'i' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Insert x)
         | 'd' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Delete x)
+        | _ -> (s, Err ParseError s, "command")
         end
     else (s, Err ParseError s,"command")
 

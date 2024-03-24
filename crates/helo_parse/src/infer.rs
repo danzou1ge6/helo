@@ -1496,17 +1496,17 @@ fn infer_function_type_renamed<'s>(
     // Not in infering tree
     if !typed_functions.is_infering(&id) {
         let assumptions = get_function_assumptions(&id, f, symbols);
-        let mut inferer = Inferer::new();
-        let type_mapping = init_inferer_for_function_inference(&mut inferer, f);
+        let mut inferer1 = Inferer::new();
+        let type_mapping = init_inferer_for_function_inference(&mut inferer1, f);
         let (_, infered_f) = infer_function_(
             id.clone(),
-            captured_types,
+            &CapturedTypeInfo::empty(),
             symbols,
             ast_nodes,
             typed_nodes,
             typed_functions,
             &assumptions,
-            &mut inferer,
+            &mut inferer1,
             &type_mapping,
             e,
         );
@@ -1533,7 +1533,6 @@ fn infer_function_type_renamed<'s>(
 /// `0..f.var_cnt` are assigned to generic type variables
 /// Next `f.locals_cnt ` are assigned to locals of f. Actually, `f`'s parameters are exactly the first few locals
 /// `f.var_cnt + f.locals_cnt` is assigned to return value of `f`
-/// Next `f.captures_cnt are assigned to captured values of `f`
 ///
 /// This function allocate locals, unify user provided function signature and returns the type variable representing
 /// Returning the a mapping  that maps locals, and captureds to type variables
