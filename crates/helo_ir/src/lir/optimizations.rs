@@ -434,6 +434,8 @@ mod constant_propagation {
         if let Some((_, first)) = constants.next() {
             if constants.all(|(_, temp)| values[*temp] == values[*first]) {
                 set_value(*to, values[*first], values, temps_worklist);
+            } else {
+                set_value(*to, Value::Top, values, temps_worklist);
             }
         }
     }
@@ -447,6 +449,19 @@ mod constant_propagation {
         if values[temp].lower_then(&value) {
             temps_worklist.insert(temp);
             values[temp] = value;
+            return;
+        }
+        use Value::*;
+        let different = match (values[temp], value) {
+            (CInt(a), CInt(b)) if a != b => true,
+            (CBool(a), CBool(b)) if a != b  => true,
+            (CChar(a), CChar(b)) if a != b => true,
+            (CTag(a), CTag(b)) if a != b => true,
+            _ => false
+        };
+        if different {
+            temps_worklist.insert(temp);
+            values[temp] = Top;
         }
     }
 
@@ -630,18 +645,52 @@ mod constant_propagation {
         }
     }
 
-    fn realize_value(blocks: &mut ssa::SsaBlockHeap, def_site: &Site, temp: TempId, value: Value) {
-        if let Some(inst) = value.inst(temp) {
-            match def_site {
-                Site::Phi(block_id, phi_idx) => {
-                    blocks[*block_id].phis.remove(*phi_idx);
-                    blocks[*block_id].body.push_front(inst);
+    fn realize_values(
+        blocks: &mut ssa::SsaBlockHeap,
+        values: &lir::TempIdVec<Value>,
+        temp_cnt: usize,
+        def_sites: &lir::TempIdVec<Option<Site>>,
+    ) {
+        let mut phi_removes = HashSet::new();
+        let mut inst_inserts = Vec::new();
+
+        for temp in (0..temp_cnt).map(|i| TempId::from(i)) {
+            let value = values[temp];
+
+            if let Some(ref def_site) = def_sites[temp] {
+                if let Some(inst) = value.inst(temp) {
+                    match def_site {
+                        Site::Phi(block_id, phi_idx) => {
+                            phi_removes.insert((*block_id, *phi_idx));
+                            inst_inserts.push((*block_id, inst));
+                        }
+                        Site::Inst(block_id, inst_idx) => {
+                            blocks[*block_id].body[*inst_idx] = inst;
+                        }
+                        Site::Exit(_) => unreachable!(),
+                    }
                 }
-                Site::Inst(block_id, inst_idx) => {
-                    blocks[*block_id].body[*inst_idx] = inst;
-                }
-                Site::Exit(_) => unreachable!(),
             }
+        }
+
+        for block_id in blocks.iter_id() {
+            blocks[block_id].phis = blocks[block_id]
+                .phis
+                .clone()
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, phi)| {
+                    if phi_removes.contains(&(block_id, i)) {
+                        None
+                    } else {
+                        Some(phi)
+                    }
+                })
+                .collect();
+        }
+
+        for (block_id, inst) in inst_inserts {
+            blocks[block_id].body.push_front(inst);
         }
     }
 
@@ -771,11 +820,7 @@ mod constant_propagation {
             }
         }
 
-        for temp in (0..temp_cnt).map(|i| TempId::from(i)) {
-            if let Some(def_site) = defs[temp] {
-                realize_value(blocks, &def_site, temp, values[temp]);
-            }
-        }
+        realize_values(blocks, &values, temp_cnt, &defs);
         for block_id in blocks.iter_id() {
             realize_jump(blocks, block_id, &block_run);
         }
