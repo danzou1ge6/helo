@@ -521,7 +521,7 @@ fn case_expr<'s>(
             case_arm(s, ctx, precedence_table, generic_params)
         })(s3)?;
 
-        let (s5, _) = trailing_space1_tag("end")(s4)?;
+        let (s5, _) = trailing_space_tag("end")(s4)?;
 
         Ok((
             s5,
@@ -1176,6 +1176,7 @@ fn expression_boundary<'s>(s: &'s str) -> PResult<'s, &'s str> {
         trailing_space1_tag("fn"),
         trailing_space1_tag("routine"),
         trailing_space1_tag("data"),
+        trailing_space_tag("end;"),
         trailing_space1_tag("end"),
         trailing_space1_tag("relation"),
         trailing_space1_tag("instance"),
