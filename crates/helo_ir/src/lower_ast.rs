@@ -347,7 +347,7 @@ fn lower_expr<'s>(
             let expr = ir::Expr::new(ir::ExprNode::MakeTagged(tag, vec![]), (&expr.meta).into());
             ir_nodes.push(expr)
         }
-        UserFunction(fid) => lower_user_function(
+        UserFunction(fid, ..) => lower_user_function(
             fid,
             &expr.type_,
             inferer,

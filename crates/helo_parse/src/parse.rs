@@ -1062,10 +1062,10 @@ fn prefix_expression<'s>(
             let_in_expr(s1, ctx, precedence_table, generic_params)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("begin"))(s)? {
             seq_expr(s1, ctx, precedence_table, generic_params)
-        } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\"))(s)? {
-            anonymous_closure_expr(s1, true, ctx, precedence_table, generic_params)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\'"))(s)? {
             anonymous_closure_expr(s1, false, ctx, precedence_table, generic_params)
+        } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\"))(s)? {
+            anonymous_closure_expr(s1, true, ctx, precedence_table, generic_params)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("use"))(s)? {
             let (s2, ns_ops) = use_decl(s1, ctx)?;
             let (s2, _) = trailing_space1_tag("in")(s2)?;
@@ -1385,7 +1385,10 @@ fn seq_expr<'s>(
         (s1, stmts, None)
     };
 
-    let (s3, _) = trailing_space1_tag("end")(s2)?;
+    let (s3, _) = nseq::preceded(
+        ncomb::opt(nseq::preceded(nbyte::tag("/*"), comments)),
+        trailing_space_tag("end"),
+    )(s2)?;
 
     Ok((
         s3,

@@ -45,7 +45,7 @@ pub enum ExprNode<'s> {
         captures: Vec<ast::Capture>,
     },
     Constructor(ConstructorName<'s>),
-    UserFunction(FunctionId<'s>),
+    UserFunction(FunctionId<'s>, Vec<ast::Constrain<'s>>),
     UnresolvedMethod {
         rel_name: RelationName<'s>,
         f_name: FunctionName<'s>,

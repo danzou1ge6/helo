@@ -362,13 +362,32 @@ impl<'s> Inferer<'s> {
         self.rename_type_vars(type_, var_cnt, false)
     }
 
-    pub fn rename_type_vars_locked<T1: ast::TypeApply<'s>, T2: ast::TypeApply<'s>>(
+    pub fn rename_type_vars_locked2<T1: ast::TypeApply<'s>, T2: ast::TypeApply<'s>>(
         &mut self,
         t1: &T1,
         t2: &T2,
         var_cnt: usize,
     ) -> (T1, T2) {
-        let offset = self.uf.new_slots(var_cnt, true);
+        self.rename_type_vars2(t1, t2, var_cnt, true)
+    }
+
+    pub fn rename_type_vars_free2<T1: ast::TypeApply<'s>, T2: ast::TypeApply<'s>>(
+        &mut self,
+        t1: &T1,
+        t2: &T2,
+        var_cnt: usize,
+    ) -> (T1, T2) {
+        self.rename_type_vars2(t1, t2, var_cnt, false)
+    }
+
+    pub fn rename_type_vars2<T1: ast::TypeApply<'s>, T2: ast::TypeApply<'s>>(
+        &mut self,
+        t1: &T1,
+        t2: &T2,
+        var_cnt: usize,
+        lock: bool,
+    ) -> (T1, T2) {
+        let offset = self.uf.new_slots(var_cnt, lock);
         let selector =
             &|t: &ast::Type<'s>| matches!(t.node, ast::TypeNode::Var(_) | ast::TypeNode::WildCard);
         let f = &mut |t: &ast::Type<'s>| match t.node {

@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::ast::Constrain;
 use crate::ast::TypeApply;
 use crate::constrain;
 use crate::constrain::Assumptions;
@@ -800,7 +801,7 @@ fn infer_user_function<'s>(
 ) -> typed::Expr<'s> {
     let id = ast::FunctionId::of_standard(name.clone());
     if let Some(f) = symbols.functions.get(&id) {
-        if let Some(renamed_f_type) = infer_function_type_renamed(
+        if let Some((renamed_f_type, renamed_constrains)) = infer_function_type_renamed(
             id.clone(),
             &CapturedTypeInfo::empty(),
             meta,
@@ -820,7 +821,7 @@ fn infer_user_function<'s>(
 
             let return_type = *renamed_f_type.ret.clone();
             let callable_expr = typed::Expr {
-                node: typed::ExprNode::UserFunction(id),
+                node: typed::ExprNode::UserFunction(id, renamed_constrains),
                 type_: ast::Type {
                     node: type_constructor(renamed_f_type.into()),
                 },
@@ -1460,20 +1461,21 @@ fn infer_function_type_renamed<'s>(
     inferer: &mut Inferer<'s>,
     type_mapping: &TypeMapping,
     e: &mut ManyError,
-) -> Option<ast::FunctionType<'s>> {
-    // Already infered its type
-    if let Some(infered_f) = typed_functions.get(&id) {
-        let renamed_type = inferer.rename_type_vars_free(&infered_f.type_, infered_f.var_cnt);
-        return Some(renamed_type);
-    }
-
+) -> Option<(ast::FunctionType<'s>, Vec<Constrain<'s>>)> {
     // Type annotated by programmer, but is not a closure.
-    // This is because a closure must be typed at a `MakeClosure` node, so that we get types for captures
     let f = &symbols.functions[&id];
     if let Some(f_type) = &f.type_ {
         if !id.is_closure() {
-            return Some(inferer.rename_type_vars_free(&f_type.clone().into(), f.var_cnt));
+            let (f_type, constrains) =
+                inferer.rename_type_vars_free2(f_type, &f.constrains, f.var_cnt);
+            return Some((f_type.into(), constrains));
         }
+    }
+
+    // Already infered its type
+    if let Some(infered_f) = typed_functions.get(&id) {
+        let rename_type = inferer.rename_type_vars_free(&infered_f.type_, infered_f.var_cnt);
+        return Some((rename_type.into(), Vec::new()));
     }
 
     // Not in infering tree
@@ -1495,7 +1497,7 @@ fn infer_function_type_renamed<'s>(
         );
         let renamed_type = inferer.rename_type_vars_free(&infered_f.type_, infered_f.var_cnt);
         typed_functions.insert(id, infered_f);
-        return Some(renamed_type);
+        return Some((renamed_type, Vec::new()));
     }
 
     // In infering tree, but is a self-recursion. This is a common case worth special treatment.
@@ -1503,7 +1505,7 @@ fn infer_function_type_renamed<'s>(
         let currently_infered =
             construct_function_type(f, inferer, &captured_types, type_mapping, e);
 
-        return Some(currently_infered);
+        return Some((currently_infered, Vec::new()));
     }
 
     e.push(errors::CircularInference::new(id, name_meta));
@@ -1665,6 +1667,34 @@ fn construct_function_type<'s, 'a>(
     }
 }
 
+fn check_constrains<'s>(
+    constrains: &[Constrain<'s>],
+    expr_meta: &ast::Meta,
+    symbols: &ast::Symbols<'s>,
+    inferer: &mut Inferer<'s>,
+    assumptions: &Assumptions<'s>,
+    e: &mut ManyError,
+) {
+    for c in constrains.iter() {
+        match assumptions.which_instance(inferer.clone(), c, &symbols.instances, &symbols.relations)
+        {
+            // We don't care which instance makes the constrain hold
+            Ok((_, inferer1)) => *inferer = inferer1,
+            Err(constrain::Error::Fail) => e.push(errors::ConstrainProofFailed::new(
+                &expr_meta,
+                &inferer.resolve(c, &c.meta).unwrap_or_else(|_| c.clone()),
+            )),
+            Err(constrain::Error::TooManyHit(hits)) => {
+                let instance_metas = hits
+                    .iter()
+                    .map(|id| symbols.instances.get(id).unwrap().meta.clone());
+                e.push(errors::TooManyHitMatchingInstance::new(instance_metas, c));
+            }
+            Err(constrain::Error::Resolve(err)) => e.push(err),
+        }
+    }
+}
+
 fn check_and_resolve_constrains<'s>(
     body: typed::ExprId,
     symbols: &ast::Symbols<'s>,
@@ -1674,6 +1704,10 @@ fn check_and_resolve_constrains<'s>(
     e: &mut ManyError,
 ) {
     typed_nodes.walk(body, &mut |expr| match expr.node.clone() {
+        typed::ExprNode::UserFunction(id, constrains) => {
+            check_constrains(&constrains, &expr.meta, symbols, inferer, assumptions, e);
+            expr.node = typed::ExprNode::UserFunction(id, Vec::new());
+        }
         // Unwrap a unresolved method
         typed::ExprNode::UnresolvedMethod {
             f_name,
@@ -1690,8 +1724,10 @@ fn check_and_resolve_constrains<'s>(
             ) {
                 Ok((Some(ins_id), inferer1)) => {
                     // A single hit tells us which instance method implementation
-                    expr.node =
-                        typed::ExprNode::UserFunction(ast::FunctionId::Method(ins_id, f_name.id()));
+                    expr.node = typed::ExprNode::UserFunction(
+                        ast::FunctionId::Method(ins_id, f_name.id()),
+                        Vec::new(),
+                    );
                     *inferer = inferer1;
                 }
                 // The relation is proved to hold, but which instance it is
@@ -1715,33 +1751,7 @@ fn check_and_resolve_constrains<'s>(
                 Err(constrain::Error::Resolve(err)) => e.push(err),
             }
             // Try prove each constrain
-            for c in constrains.iter() {
-                match assumptions.which_instance(
-                    inferer.clone(),
-                    c,
-                    &symbols.instances,
-                    &symbols.relations,
-                ) {
-                    // We don't care which instance makes the constrain hold
-                    Ok((_, inferer1)) => *inferer = inferer1,
-                    Err(constrain::Error::Fail) => e.push(errors::ConstrainProofFailed::new(
-                        &expr.meta,
-                        &inferer
-                            .resolve(&primary_constrain, &primary_constrain.meta)
-                            .unwrap_or_else(|_| primary_constrain.clone()),
-                    )),
-                    Err(constrain::Error::TooManyHit(hits)) => {
-                        let instance_metas = hits
-                            .iter()
-                            .map(|id| symbols.instances.get(id).unwrap().meta.clone());
-                        e.push(errors::TooManyHitMatchingInstance::new(
-                            instance_metas,
-                            &primary_constrain,
-                        ));
-                    }
-                    Err(constrain::Error::Resolve(err)) => e.push(err),
-                }
-            }
+            check_constrains(&constrains, &expr.meta, symbols, inferer, assumptions, e);
         }
         _ => {}
     });
