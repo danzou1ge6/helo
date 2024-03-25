@@ -278,14 +278,14 @@ pub const BUILTIN_NAMES: [(&'static str, &'static str, usize); 46] = [
     ("arith.bool", "or", 2),
     ("arith.bool", "not", 1),
     // Char
-    ("arith.char", "char_eq", 2),
+    ("arith.char", "eq", 2),
     // String operations
-    ("str", "str_cat", 2),
-    ("str", "str_some", 1),
-    ("str", "str_len", 1),
-    ("str", "str_eq", 2),
-    ("str", "str_head", 1),
-    ("str", "str_tail", 1),
+    ("str", "cat", 2),
+    ("str", "some", 1),
+    ("str", "len", 1),
+    ("str", "eq", 2),
+    ("str", "head", 1),
+    ("str", "tail", 1),
     // Routines
     ("io", "println", 1),
     ("io", "print", 1),
