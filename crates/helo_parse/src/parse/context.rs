@@ -28,12 +28,12 @@ impl<'s> PrecedenceTable<'s> {
         Self(
             [
                 (".", Precedence(1000, 1001)),
-                ("and", Precedence(41, 40)),
-                ("or", Precedence(41, 40)),
-                ("+", Precedence(41, 40)),
-                ("-", Precedence(41, 40)),
-                ("*", Precedence(51, 50)),
-                ("/", Precedence(51, 50)),
+                ("and", Precedence(40, 41)),
+                ("or", Precedence(40, 41)),
+                ("+", Precedence(40, 41)),
+                ("-", Precedence(40, 41)),
+                ("*", Precedence(50, 51)),
+                ("/", Precedence(50, 51)),
                 ("**", Precedence(61, 60)),
                 ("mod", Precedence(41, 40)),
                 ("==", Precedence(31, 30)),
