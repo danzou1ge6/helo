@@ -2,5 +2,5 @@ data Mickey = Mickey Int
 
 routine mickey_consume m,inp: [Mickey, super.Input] -> () =
     let inp_str = root.fmt_input inp in
-    use str.str_cat as ^ in
+    use str.cat as ^ in
     io.println ("Mickey consumes " ^ inp_str)

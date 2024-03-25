@@ -1,8 +1,18 @@
+/* An implementation of Skew Binomial Heap as described in _Purely Functional Datastructures_ by
+ * Okasaki
+ *
+ * Usage:
+ *   There are two commands:
+ *   - `i<x>` where <x> is an integer: Insert <x> into the heap
+ *   - `p`: Pop the smallest integer from the heap, if heap is non-empty
+ *   After each command is executed, the content of the heap will be printed in increasing sequence
+ */
+
+
 use list of ([]), (::), List, rev
 use ops
 use option of Option, Some, None
 use result
-use str
 
 infix :- 10 9
 
@@ -73,7 +83,7 @@ fn insert 'a x,h: ['a, Heap['a]] -> Heap['a] where Ord 'a =
         Heap (Node 0,x,[],[]) :: ts
     end
 
-fn merge 'a h1,h2: [Heap['a], Heap['a]] -> Heap['a] =
+fn merge 'a h1,h2: [Heap['a], Heap['a]] -> Heap['a] where Ord 'a =
     let Heap h1 = h1 in
     let Heap h2 = h2 in
     Heap merge_trees (normalize h1), (normalize h2)
@@ -115,25 +125,25 @@ fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
         Some insert_all xs, (Heap merge_trees (rev c),(normalize ts1))
     end
 
-fn empty = Heap []
-fn :- x,h = insert x,h
+fn empty 'a : [] -> Heap['a] = Heap []
+fn :- 'a x,h : ['a, Heap['a]] -> Heap['a] where Ord 'a = insert x,h
 
 data Command = Insert Int | Pop
 data ParseError = ParseError Str,Str
 
 fn parse_digit s: [Str] -> (Str, Result[Int, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | '0' -> ((str_tail s), Ok 0)
-        | '1' -> ((str_tail s), Ok 1)
-        | '2' -> ((str_tail s), Ok 2)
-        | '3' -> ((str_tail s), Ok 3)
-        | '4' -> ((str_tail s), Ok 4)
-        | '5' -> ((str_tail s), Ok 5)
-        | '6' -> ((str_tail s), Ok 6)
-        | '7' -> ((str_tail s), Ok 7)
-        | '8' -> ((str_tail s), Ok 8)
-        | '9' -> ((str_tail s), Ok 9)
+    if str.some s then
+        case str.head s of
+        | '0' -> ((str.tail s), Ok 0)
+        | '1' -> ((str.tail s), Ok 1)
+        | '2' -> ((str.tail s), Ok 2)
+        | '3' -> ((str.tail s), Ok 3)
+        | '4' -> ((str.tail s), Ok 4)
+        | '5' -> ((str.tail s), Ok 5)
+        | '6' -> ((str.tail s), Ok 6)
+        | '7' -> ((str.tail s), Ok 7)
+        | '8' -> ((str.tail s), Ok 8)
+        | '9' -> ((str.tail s), Ok 9)
         | _   -> (s, Err ParseError s,"digit")
         end
     else (s, Err ParseError s,"digit")
@@ -147,10 +157,10 @@ fn parse_int s,x: [Str, Int] -> (Str, Int) =
     end
 
 fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | 'i' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Insert x)
-        | 'p' -> ((str_tail s), Ok Pop)
+    if str.some s then
+        case str.head s of
+        | 'i' -> let (s1, x) = parse_int (str.tail s),0 in (s1, Ok Insert x)
+        | 'p' -> ((str.tail s), Ok Pop)
         | _ -> (s, Err ParseError s, "command")
         end
     else (s, Err ParseError s,"command")
@@ -178,7 +188,7 @@ routine main =
             h <- case delete_min h of
                  | None -> h
                  | Some h1 -> h1
-                 end ;
+                 end;
             io.println format_heap h
             end
         | (_, Err e) -> io.println "Bad command"

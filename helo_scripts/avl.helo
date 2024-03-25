@@ -1,6 +1,19 @@
+/* An AVL tree implementation
+ * 
+ * Usage:
+ *   There are two commands
+ *   - `i<x>` where <x> is an integer: Insert <x> into the tree
+ *   - `d<x>` where <x> is an integer: Delete <x> from the tree, if one exists
+ *   After each command is executed, the structure of the tree will be printed as
+ *     ```
+ *     <root_value>, h = <tree_height>
+ *      <sub_tree>
+ *      <sub_tree>
+ *     ```
+ */
+
 use ops
 use result
-use str
 
 infix :: 10 9
 infix // 9 10
@@ -121,25 +134,25 @@ fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
         * (debug right, (indent + 1))
     end
 
-fn :: x,t = insert x,t
-fn // t,x = delete x,t
+fn :: 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a = insert x,t
+fn // 'a t,x: [Avl['a], 'a] -> Avl['a] where Ord 'a = delete x,t
 
 data Command = Insert Int | Delete Int
 data ParseError = ParseError Str,Str
 
 fn parse_digit s: [Str] -> (Str, Result[Int, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | '0' -> ((str_tail s), Ok 0)
-        | '1' -> ((str_tail s), Ok 1)
-        | '2' -> ((str_tail s), Ok 2)
-        | '3' -> ((str_tail s), Ok 3)
-        | '4' -> ((str_tail s), Ok 4)
-        | '5' -> ((str_tail s), Ok 5)
-        | '6' -> ((str_tail s), Ok 6)
-        | '7' -> ((str_tail s), Ok 7)
-        | '8' -> ((str_tail s), Ok 8)
-        | '9' -> ((str_tail s), Ok 9)
+    if str.some s then
+        case str.head s of
+        | '0' -> ((str.tail s), Ok 0)
+        | '1' -> ((str.tail s), Ok 1)
+        | '2' -> ((str.tail s), Ok 2)
+        | '3' -> ((str.tail s), Ok 3)
+        | '4' -> ((str.tail s), Ok 4)
+        | '5' -> ((str.tail s), Ok 5)
+        | '6' -> ((str.tail s), Ok 6)
+        | '7' -> ((str.tail s), Ok 7)
+        | '8' -> ((str.tail s), Ok 8)
+        | '9' -> ((str.tail s), Ok 9)
         | _   -> (s, Err ParseError s,"digit")
         end
     else (s, Err ParseError s,"digit")
@@ -153,10 +166,10 @@ fn parse_int s,x: [Str, Int] -> (Str, Int) =
     end
 
 fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | 'i' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Insert x)
-        | 'd' -> let (s1, x) = parse_int (str_tail s),0 in (s1, Ok Delete x)
+    if str.some s then
+        case str.head s of
+        | 'i' -> let (s1, x) = parse_int (str.tail s),0 in (s1, Ok Insert x)
+        | 'd' -> let (s1, x) = parse_int (str.tail s),0 in (s1, Ok Delete x)
         | _ -> (s, Err ParseError s, "command")
         end
     else (s, Err ParseError s,"command")

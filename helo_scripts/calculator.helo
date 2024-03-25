@@ -1,26 +1,31 @@
+/* An infix expression evaluator implementation
+ *
+ * Addition, subtraction, multiplication and division of float numbers are supported.
+ * Note that an naive method to parse float here is applied here, which is definitely not the most accurate.
+ */
+
 data ParseError = ParseError Str,Str
 
 use option
 use result
-use str
 use ops
 use io
 use convert
 use fmt of to_string
 
 fn parse_digit s: [Str] -> (Str, Result[Int, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | '0' -> ((str_tail s), Ok 0)
-        | '1' -> ((str_tail s), Ok 1)
-        | '2' -> ((str_tail s), Ok 2)
-        | '3' -> ((str_tail s), Ok 3)
-        | '4' -> ((str_tail s), Ok 4)
-        | '5' -> ((str_tail s), Ok 5)
-        | '6' -> ((str_tail s), Ok 6)
-        | '7' -> ((str_tail s), Ok 7)
-        | '8' -> ((str_tail s), Ok 8)
-        | '9' -> ((str_tail s), Ok 9)
+    if str.some s then
+        case str.head s of
+        | '0' -> ((str.tail s), Ok 0)
+        | '1' -> ((str.tail s), Ok 1)
+        | '2' -> ((str.tail s), Ok 2)
+        | '3' -> ((str.tail s), Ok 3)
+        | '4' -> ((str.tail s), Ok 4)
+        | '5' -> ((str.tail s), Ok 5)
+        | '6' -> ((str.tail s), Ok 6)
+        | '7' -> ((str.tail s), Ok 7)
+        | '8' -> ((str.tail s), Ok 8)
+        | '9' -> ((str.tail s), Ok 9)
         | _   -> (s, Err ParseError s,"digit")
         end
     else (s, Err ParseError s,"digit")
@@ -29,22 +34,22 @@ data Op = OpAdd | OpSub | OpMul | OpDiv
 
 fn op_precedence op: [Op] -> (Int, Int) =
     case op of
-    | OpAdd -> (4, 3)
-    | OpSub -> (4, 3)
-    | OpMul -> (8, 7)
-    | OpDiv -> (8, 7)
+    | OpAdd -> (3, 4)
+    | OpSub -> (3, 4)
+    | OpMul -> (7, 8)
+    | OpDiv -> (7, 8)
     end
 
 fn op_precedence_left op = let (left, _) = op_precedence op in left
 fn op_precedence_right op = let (_, right) = op_precedence op in right
 
 fn parse_operator s: [Str] -> (Str, Result[Op, ParseError]) =
-    if str_some s then
-        case str_head s of
-        | '+' -> ((str_tail s), Ok OpAdd)
-        | '-' -> ((str_tail s), Ok OpSub)
-        | '*' -> ((str_tail s), Ok OpMul)
-        | '/' -> ((str_tail s), Ok OpDiv)
+    if str.some s then
+        case str.head s of
+        | '+' -> ((str.tail s), Ok OpAdd)
+        | '-' -> ((str.tail s), Ok OpSub)
+        | '*' -> ((str.tail s), Ok OpMul)
+        | '/' -> ((str.tail s), Ok OpDiv)
         | _   -> (s, Err ParseError s,"operator")
         end
     else (s, Err ParseError s,"operator")
@@ -70,10 +75,10 @@ fn parse_float s: [Str] -> (Str, Result[Float, ParseError]) =
     case parse_digit s of
         | (_s, Ok _x) ->
           let (s1, x) = parse_int s,0.0 in
-          if str_some s1 then
-              case str_head s1 of
+          if str.some s1 then
+              case str.head s1 of
               | '.'       ->
-                let (s2, x) = parse_mantissa (str_tail s1),x,0.1 in
+                let (s2, x) = parse_mantissa (str.tail s1),x,0.1 in
                 (s2, Ok x)
               | otherwise ->
                 (s1, Ok x)
@@ -93,9 +98,9 @@ fn build_infix_expr lhs,op,s: [Expr, Op, Str] -> (Str, Result[Expr, ParseError])
     end
 
 fn parse_tag tag,s: [Char, Str] -> (Str, Result[Char, ParseError]) =
-    if str_some s then
-        if (str_head s) == tag then
-            ((str_tail s), Ok tag)
+    if str.some s then
+        if (str.head s) == tag then
+            ((str.tail s), Ok tag)
         else
             (s, Err ParseError s,(to_string tag))
     else
@@ -154,7 +159,7 @@ fn parse_expr s = parse_expr_precedenced s,0
 fn parse_expr_finish s: [Str] -> Result[Expr, ParseError] =
     case parse_expr s of
     | (s1, Ok expr) ->
-       if (str_len s1) /= 0 then
+       if (str.len s1) /= 0 then
            Err ParseError s1,"expression-finished"
        else
            Ok expr
@@ -188,7 +193,7 @@ fn str_repeat c,n: [Char, Int] -> Str =
 routine print_parse_error e,s: [ParseError, Str] -> () =
     let ParseError at,name = e in
     begin
-        println (str_repeat ' ',((str_len s) - (str_len at)))
+        println (str_repeat ' ',((str.len s) - (str.len at)))
                  * "| <- Error parsing "
                  * name
                  * " Here"
