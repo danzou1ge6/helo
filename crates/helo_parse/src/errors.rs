@@ -648,26 +648,6 @@ impl TooManyArguments {
     }
 }
 
-#[derive(Diagnostic, Debug, Error)]
-#[error("Type annotation required for recursive closure")]
-pub struct TypeAnnotationForRecursiveClosure {
-    #[source_code]
-    pub src: NamedSource,
-    #[label("Closure definition here")]
-    pub closure_span: SourceSpan,
-    #[label("The closure is recursive due to reference here")]
-    pub ref_span: SourceSpan,
-}
-
-impl TypeAnnotationForRecursiveClosure {
-    pub fn new(closure_meta: &ast::Meta, reference_meta: &ast::Meta) -> Self {
-        Self {
-            src: closure_meta.named_source(),
-            closure_span: closure_meta.span(),
-            ref_span: reference_meta.span(),
-        }
-    }
-}
 
 #[derive(Diagnostic, Debug, Error)]
 #[error("Too many parameters. A maximum of 256 is supported.")]

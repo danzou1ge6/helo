@@ -620,12 +620,6 @@ fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
         .type_
         .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
 
-    if f_type.is_none() && cinfo.recursive.is_some() {
-        e.push(errors::TypeAnnotationForRecursiveClosure::new(
-            &f.meta,
-            &cinfo.recursive.clone().unwrap(),
-        ));
-    }
 
     let ast_f = ast::Function {
         type_: f_type,
