@@ -8,6 +8,7 @@
           Helo
         </q-toolbar-title>
 
+        <NavigationButtons></NavigationButtons>
       </q-toolbar>
     </q-header>
 
@@ -34,24 +35,44 @@
     </q-drawer>
 
     <q-page-container>
-      <PlayGround :page-height="pageHeight" v-model="exampleCodes[selectedI][1]"
+      <PlayGround :page-height="pageHeight" v-model="exampleCodes[selectedI][1]" :show-output="true"
+        v-model:split="splitModel" :run-on-mount="runOnMount"
         :name="exampleCodes[selectedI][0]"></PlayGround>
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import avlSrc from '../../../helo_scripts/avl.helo?raw'
 import calculatorSrc from '../../../helo_scripts/calculator.helo?raw'
 import relationSrc from '../../../helo_scripts/relation.helo?raw'
 import infixConstructorSrc from '../../../helo_scripts/infix_constructor.helo?raw'
 import errorMonadSrc from '../../../helo_scripts/error_monad.helo?raw'
+import binomialHeap from '../../../helo_scripts/binomial_heap.helo?raw'
 import PlayGround from 'src/components/PlayGround.vue'
+import NavigationButtons from 'src/components/NavigationButtons.vue'
+
+const props = defineProps<{
+  exampleName?: string
+}>()
+
+onMounted(() => {
+  if (props.exampleName !== undefined) {
+    const r = exampleCodes.value.findIndex(example => example[0] === props.exampleName)
+    if (r !== -1) {
+      selectedI.value = r
+      runOnMount.value = true
+    }
+  }
+})
 
 const $q = useQuasar()
 const pageHeight = $q.screen.height - 50
+
+const splitModel = ref(50)
+const runOnMount = ref(false)
 
 defineOptions({
   name: 'EditorLayout'
@@ -59,11 +80,13 @@ defineOptions({
 
 const leftDrawerOpen = ref(false)
 const exampleCodes = ref([
-  ['AVL Tree', avlSrc],
+  ['New', ''],
+  ['AVLTree', avlSrc],
   ['Calculator', calculatorSrc],
-  ['Relation Example', relationSrc],
-  ['Infix Constructor Example', infixConstructorSrc],
-  ['Error Monad Example', errorMonadSrc]
+  ['RelationExample', relationSrc],
+  ['InfixConstructorExample', infixConstructorSrc],
+  ['ErrorMonadExample', errorMonadSrc],
+  ['SkewBinomialHeap', binomialHeap]
 ])
 const selectedI = ref(0)
 

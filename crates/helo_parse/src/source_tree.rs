@@ -287,6 +287,10 @@ impl SourceTree {
         self.root_file_name = name
     }
 
+    pub fn set_moduel_root(&mut self, root: String) {
+        self.module_root = root
+    }
+
     pub fn module_root(&self) -> &str {
         &self.module_root
     }

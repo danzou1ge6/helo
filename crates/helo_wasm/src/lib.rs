@@ -199,6 +199,9 @@ impl Src {
     pub fn set_root_file_name(&mut self, name: String) {
         self.tree.set_root_file_name(name)
     }
+    pub fn set_module_root(&mut self, name: String) {
+        self.tree.set_moduel_root(name)
+    }
     pub fn clone(&self) -> Self {
         Self {
             tree: self.tree.clone(),
