@@ -1,4 +1,4 @@
-import{Q as g}from"./QCard-BErQhV2q.js";import{V as F}from"./PlayGround-CWbEsUBC.js";import{T as u,E as s}from"./TextHeader2-DlbFR_Q1.js";import{T as y,a as l}from"./TextBody1-Cc3uXhbj.js";import{T as a}from"./TextCode-BRaHiW80.js";import{d as x,r,a as w,f as B,b as e,w as t,F as v,e as n,E as _,G as S,_ as T}from"./index-mfOJ6gAK.js";import"./QScrollObserver-B-90Bz8d.js";import"./QBtn-CVSt3djh.js";const d=`module arith.int
+import{Q as g}from"./QCard-DgAS53pM.js";import{V as F}from"./PlayGround-ByfgStqG.js";import{T as u,E as s}from"./TextHeader2-JLM94Jsm.js";import{T as y,a as l}from"./TextBody1-BweaWQnZ.js";import{T as a}from"./TextCode-CDh-EaCl.js";import{d as x,r,a as w,f as B,b as e,w as t,F as v,e as n,E as _,G as S,_ as T}from"./index-tVr8bQrc.js";import"./QScrollObserver-CNI9KVLI.js";import"./QBtn-DCnwbdmd.js";const d=`module arith.int
     builtin fn +   a,b : [Int, Int] -> Int = ..
     builtin fn -   a,b : [Int, Int] -> Int = ..
     builtin fn *   a,b : [Int, Int] -> Int = ..

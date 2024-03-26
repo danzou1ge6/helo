@@ -1,4 +1,4 @@
-import{T as c,a as u}from"./TextBody1-Cc3uXhbj.js";import{E as a,T as p}from"./TextHeader2-DlbFR_Q1.js";import{T as r}from"./TextCode-BRaHiW80.js";import{d as x,r as s,a as _,f as y,b as e,w as l,F as h,e as t,_ as v}from"./index-mfOJ6gAK.js";import"./QBtn-CVSt3djh.js";import"./QCard-BErQhV2q.js";import"./QScrollObserver-B-90Bz8d.js";import"./PlayGround-CWbEsUBC.js";const C=x({__name:"RefClosures",setup(g){const i=s(`fn f x =
+import{T as c,a as u}from"./TextBody1-BweaWQnZ.js";import{E as a,T as p}from"./TextHeader2-JLM94Jsm.js";import{T as r}from"./TextCode-CDh-EaCl.js";import{d as x,r as s,a as _,f as y,b as e,w as l,F as h,e as t,_ as v}from"./index-tVr8bQrc.js";import"./QBtn-DCnwbdmd.js";import"./QCard-DgAS53pM.js";import"./QScrollObserver-CNI9KVLI.js";import"./PlayGround-ByfgStqG.js";const C=x({__name:"RefClosures",setup(g){const i=s(`fn f x =
     use arith.int of (+) in
     let fn g y: [Int] -> Int = x + y in g
 
