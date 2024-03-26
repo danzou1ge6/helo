@@ -62,6 +62,9 @@ jobs:
     
     - name: Copy artifacts
       run: |
+        [[ -d assets ]] && rm -rf assets
+        [[ -f index.html ]] && rm index.html
+        [[ -f favicon.ico ]] && rm favicon.ico
         mv ~/web/* .
     
     - name: Add deploy changes
