@@ -1,0 +1,66 @@
+name: Web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master" ]
+  
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use minimal nightly Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build WASM
+      run: ./build.sh
+      working-directory: ./crates/helo_wasm
+      
+    - name: Use Yarn
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'yarn'
+        cache-dependency-path: web/yarn.lock
+        
+    - name: Install Node dependencies
+      run: yarn --frozen-lockfile
+      working-directory: ./web
+
+    - name: Build WebUI
+      run: yarn quasar build
+      working-directory: ./web
+
+    - name: Stash artifects
+      run: mv ./web/dist/spa ~/web
+
+    - name: Checkout deploy
+      uses: actions/checkout@v3
+      with:
+        ref: deploy
+    
+    - name: Copy artifacts
+      run: |
+        mv ~/web/* .
+    
+    - name: Add deploy changes
+      run: git add -A .
+      
+    - name: Commit & Push changes to deploy
+      uses: actions-js/push@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: deploy
