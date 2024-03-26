@@ -25,6 +25,14 @@ jobs:
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
 
+    - name: Override directory Rust channel to nightly
+      run: rustup override set nightly
+        
+    - name: Install wasm-pack
+      uses: jetli/wasm-pack-action@v0.4.0
+      with:
+        version: "v0.12.1"
+        
     - name: Build WASM
       run: ./build.sh
       working-directory: ./crates/helo_wasm
