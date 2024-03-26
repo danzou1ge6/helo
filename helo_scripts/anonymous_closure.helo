@@ -1,8 +1,0 @@
-use ops
-
-fn f x: [Int] -> [Int] -> Int = \y: [Int] -> Int -> x + y
-
-routine main =
-    let g = f 1 in
-    let x = g 2 in
-    io.println (fmt.to_string x)
