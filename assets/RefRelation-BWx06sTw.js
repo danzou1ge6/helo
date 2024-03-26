@@ -1,4 +1,4 @@
-import{Q as c}from"./QBtn-B628EINK.js";import{T as h,a as i}from"./TextBody1-edBUOYSb.js";import{E as l,T as f}from"./TextHeader2-h60F0uur.js";import{T as s}from"./TextCode-LJP9iye8.js";import{d as x,r,a as y,f as b,b as t,w as n,F as _,e,_ as I}from"./index-Cq87Jjhi.js";import"./QCard-B49l-k4v.js";import"./QScrollObserver-CRQL0R-Z.js";import"./PlayGround-Clh7w6at.js";const p=`/* 'b is dependent on 'a */
+import{Q as c}from"./QBtn-CVSt3djh.js";import{T as h,a as i}from"./TextBody1-Cc3uXhbj.js";import{E as l,T as f}from"./TextHeader2-DlbFR_Q1.js";import{T as s}from"./TextCode-BRaHiW80.js";import{d as x,r,a as y,f as b,b as t,w as n,F as _,e,_ as I}from"./index-mfOJ6gAK.js";import"./QCard-BErQhV2q.js";import"./QScrollObserver-B-90Bz8d.js";import"./PlayGround-CWbEsUBC.js";const p=`/* 'b is dependent on 'a */
 relation Iterator 'a,'b -> 'b
     fn next it: ['a] -> ('a, 'b)
 end
