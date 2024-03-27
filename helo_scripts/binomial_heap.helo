@@ -16,9 +16,9 @@ use result
 
 infix :- 10 9
 
-data Node['a] = Node Int,'a,List['a],List[Node['a]]
+data Node[T] = Node Int,T,List[T],List[Node[T]]
 
-data Heap['a] = Heap List[Node['a]]
+data Heap[T] = Heap List[Node[T]]
 
 fn is_empty h =
     let Heap ts = h in
@@ -28,7 +28,7 @@ fn rank node = let Node r,_,_,_ = node in r
 
 fn root node = let Node _,x,_,_ = node in x
 
-fn link 'a t1,t2: [Node['a], Node['a]] -> Node['a] where Ord 'a =
+fn link t1,t2: [Node[T], Node[T]] -> Node[T] where Ord T =
     let Node r,x1,xs1,c1 = t1 in
     let Node _,x2,xs2,c2 = t2 in
     if x2 < x1 then
@@ -36,14 +36,14 @@ fn link 'a t1,t2: [Node['a], Node['a]] -> Node['a] where Ord 'a =
     else
         Node r + 1, x1, xs1, t2 :: c1
 
-fn skew_link 'a x,t1,t2: ['a, Node['a], Node['a]] -> Node['a] where Ord 'a =
+fn skew_link x,t1,t2: [T, Node[T], Node[T]] -> Node[T] where Ord T =
     let Node r,y,ys,c = link t1,t2 in
     if y < x then
         Node r, y, x :: ys, c
     else
         Node r, x, y :: ys, c
 
-fn ins_tree 'a t,ts : [Node['a], List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn ins_tree t,ts : [Node[T], List[Node[T]]] -> List[Node[T]] where Ord T =
     case ts of
     | [] -> t :: []
     | t2 :: ts ->
@@ -53,7 +53,7 @@ fn ins_tree 'a t,ts : [Node['a], List[Node['a]]] -> List[Node['a]] where Ord 'a 
             ins_tree (link t, t2), ts
     end
 
-fn merge_trees 'a h1,h2: [List[Node['a]], List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn merge_trees h1,h2: [List[Node[T]], List[Node[T]]] -> List[Node[T]] where Ord T =
     case (h1, h2) of
     | (ts1, []) -> h1
     | ([], ts2) -> h2
@@ -66,13 +66,13 @@ fn merge_trees 'a h1,h2: [List[Node['a]], List[Node['a]]] -> List[Node['a]] wher
             ins_tree (link t1,t2), (merge_trees ts1,ts2)
     end
 
-fn normalize 'a h: [List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn normalize h: [List[Node[T]]] -> List[Node[T]] where Ord T =
     case h of
     | [] -> h
     | t :: ts -> ins_tree t, ts
     end
 
-fn insert 'a x,h: ['a, Heap['a]] -> Heap['a] where Ord 'a =
+fn insert x,h: [T, Heap[T]] -> Heap[T] where Ord T =
     case h of
     | Heap t1 :: t2 :: ts -> 
         if (rank t1) == (rank t2) then
@@ -83,12 +83,12 @@ fn insert 'a x,h: ['a, Heap['a]] -> Heap['a] where Ord 'a =
         Heap (Node 0,x,[],[]) :: ts
     end
 
-fn merge 'a h1,h2: [Heap['a], Heap['a]] -> Heap['a] where Ord 'a =
+fn merge h1,h2: [Heap[T], Heap[T]] -> Heap[T] where Ord T =
     let Heap h1 = h1 in
     let Heap h2 = h2 in
     Heap merge_trees (normalize h1), (normalize h2)
 
-fn find_min 'a h: [Heap['a]] -> Option['a] where Ord 'a =
+fn find_min h: [Heap[T]] -> Option[T] where Ord T =
     case h of
     | Heap [] -> None
     | Heap t :: [] -> Some root t
@@ -100,11 +100,11 @@ fn find_min 'a h: [Heap['a]] -> Option['a] where Ord 'a =
         end
     end
 
-fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
+fn delete_min h: [Heap[T]] -> Option[Heap[T]] where Ord T =
     case h of
     | Heap [] -> None
     | Heap ts ->
-        let fn get_min ts: [List[Node['a]]] -> (Node['a], List[Node['a]]) =
+        let fn get_min ts: [List[Node[T]]] -> (Node[T], List[Node[T]]) =
             case ts of
             | t :: [] -> (t, [])
             | t :: ts ->
@@ -115,7 +115,7 @@ fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
                     (t, ts)
             end
         in
-        let fn insert_all ts, h: [List['a], Heap['a]] -> Heap['a] =
+        let fn insert_all ts, h: [List[T], Heap[T]] -> Heap[T] =
             case ts of
             | [] -> h
             | t :: ts -> insert_all ts,(insert t,h)
@@ -125,8 +125,8 @@ fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
         Some insert_all xs, (Heap merge_trees (rev c),(normalize ts1))
     end
 
-fn empty 'a : [] -> Heap['a] = Heap []
-fn :- 'a x,h : ['a, Heap['a]] -> Heap['a] where Ord 'a = insert x,h
+fn empty : [] -> Heap[T] = Heap []
+fn :- x,h : [T, Heap[T]] -> Heap[T] where Ord T = insert x,h
 
 data Command = Insert Int | Pop
 data ParseError = ParseError Str,Str
@@ -165,7 +165,7 @@ fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
         end
     else (s, Err ParseError s,"command")
 
-fn format_heap 'a h: [Heap['a]] -> Str where Ord 'a + fmt.ToString 'a =
+fn format_heap h: [Heap[T]] -> Str where Ord T + fmt.ToString T =
     case find_min h of
     | None -> ""
     | Some x ->

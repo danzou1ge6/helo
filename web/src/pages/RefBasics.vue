@@ -34,7 +34,9 @@
   </TextBody1>
   <TextBody1>
     Type annotation can be supplied to a function definition.
-    Genieric type variables are led by a single quote, and is placed after function name.
+    Generic parameters do not need to be declared before they are referenced.
+    Instead, they are automatically collected from type annotation:
+    All identifier that is not a known type is considered to be a generic type variable.
   </TextBody1>
   <EmbededPlayGround v-model="typeAnnotationCode" :height="200"></EmbededPlayGround>
 
@@ -118,7 +120,7 @@ routine main = f
 const typeAnnotationCode = ref(
 `routine print_int i: [Int] -> () = io.println (fmt.to_string i)
 
-fn returns_anything 'a,'b x: ['a] -> 'b =
+fn returns_anything x: [A] -> B =
     panic.panic "don't call this"
 
 routine main = print_int 1

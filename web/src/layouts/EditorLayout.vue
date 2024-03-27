@@ -69,7 +69,13 @@ onMounted(() => {
 })
 
 const $q = useQuasar()
-const pageHeight = $q.screen.height - 50
+const pageHeight = ref($q.screen.height - 50)
+
+onMounted(() => {
+  window.addEventListener('resize', () => {
+    pageHeight.value = window.innerHeight - 50
+  })
+})
 
 const splitModel = ref(50)
 const runOnMount = ref(false)

@@ -4,15 +4,39 @@ use std::collections::VecDeque;
 use super::context::ClosureInfo;
 use super::context::GlobalSymbols;
 use super::tast;
-use super::tast::Path;
+use super::tast::{Data, Path};
 use crate::ast;
 use crate::ast::TypeApply;
+use crate::ast::TypeVarId;
 use crate::constrain::Assumptions;
 use crate::errors;
 use crate::inferer;
 use ast::{Meta, Trie};
 
 use super::context::Resolver;
+
+#[derive(Clone)]
+struct GenericParams<'s>(Vec<&'s str>);
+
+impl<'s> GenericParams<'s> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+    pub fn get(&self, s: &str) -> Option<TypeVarId> {
+        self.0.iter().position(|x| *x == s).map(|i| TypeVarId(i))
+    }
+    pub fn get_or_insert(&mut self, s: &'s str) -> TypeVarId {
+        if let Some(id) = self.get(s) {
+            return id;
+        }
+        let r = TypeVarId(self.0.len());
+        self.0.push(s);
+        r
+    }
+    pub fn var_cnt(&self) -> usize {
+        self.0.len()
+    }
+}
 
 fn check_symbols<'s>(symbols: &ast::Symbols<'s>, e: &mut errors::ManyError) {
     // Check method has been implemented
@@ -55,55 +79,143 @@ fn check_symbols<'s>(symbols: &ast::Symbols<'s>, e: &mut errors::ManyError) {
     });
 }
 
+fn collect_type_vars<'s>(
+    t: &tast::Type<'s>,
+    ns: &tast::NameSpace<'s>,
+    e: &mut errors::ManyError,
+    datas: &ast::Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &mut GenericParams<'s>,
+) -> ast::Type<'s> {
+    use tast::TypeNode::*;
+    match &t.node {
+        Generic(template, args) => match ns.resolve_to_name(template.clone(), datas) {
+            Err(err @ tast::IdentifierResolveError::NoHit) if args.len() == 0 => {
+                if let Some(id) = template.only_one() {
+                    // Is a generic
+                    let var = mapping.get_or_insert(id);
+                    ast::Type::new_var(var)
+                } else {
+                    err.commit(&template, e);
+                    ast::Type::new_never()
+                }
+            }
+            Err(other_error) => {
+                other_error.commit(&template, e);
+                ast::Type::new_never()
+            }
+            Ok(dn) => {
+                if args.len() != datas.get(&dn).unwrap().kind_arity() {
+                    e.push(errors::WrongNumberOfArgs::new(
+                        datas.get(&dn).unwrap().kind_arity(),
+                        &t.meta,
+                    ));
+                    return ast::Type::new_never();
+                }
+                let args = collect_type_vars_many(args.iter(), ns, e, datas, mapping);
+                ast::Type::new(ast::TypeNode::Generic(dn, args))
+            }
+        },
+        Callable(callable) => ast::Type::new(ast::TypeNode::Callable(collect_callable_type_vars(
+            callable, ns, e, datas, mapping,
+        ))),
+        ImpureCallable(callable) => ast::Type::new(ast::TypeNode::ImpureCallable(
+            collect_callable_type_vars(callable, ns, e, datas, mapping),
+        )),
+        Tuple(v) => {
+            let v = collect_type_vars_many(v.iter(), ns, e, datas, mapping);
+            ast::Type::new(ast::TypeNode::Tuple(v))
+        }
+        Primitive(p) => ast::Type::new(ast::TypeNode::Primitive(p.clone())),
+        Never => ast::Type::new_never(),
+        Unit => ast::Type::new_unit(),
+        WildCard => ast::Type::new_wildcard(),
+    }
+}
+
 fn lower_types<'s: 'a, 'a>(
     ts: impl Iterator<Item = &'a tast::Type<'s>>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &ast::Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &ast::Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> Vec<ast::Type<'s>> {
-    ts.map(|t| lower_type(t, ns, e, datas)).collect()
+    ts.map(|t| lower_type(t, ns, e, datas, mapping)).collect()
+}
+
+fn collect_type_vars_many<'s: 'a, 'a>(
+    ts: impl Iterator<Item = &'a tast::Type<'s>>,
+    ns: &tast::NameSpace<'s>,
+    e: &mut errors::ManyError,
+    datas: &ast::Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &mut GenericParams<'s>,
+) -> Vec<ast::Type<'s>> {
+    ts.map(|t| collect_type_vars(t, ns, e, datas, mapping))
+        .collect()
 }
 
 fn lower_type<'s>(
     t: &tast::Type<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &ast::Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &ast::Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> ast::Type<'s> {
     use tast::TypeNode::*;
     match &t.node {
         Generic(template, args) => match ns.resolve_to_name(template.clone(), datas) {
+            Err(err @ tast::IdentifierResolveError::NoHit) if args.len() == 0 => {
+                if let Some(var_id) = template.only_one().map(|id| mapping.get(id)).flatten() {
+                    ast::Type::new_var(var_id)
+                } else {
+                    err.commit(&template, e);
+                    ast::Type::new_never()
+                }
+            }
             Err(err) => {
                 err.commit(&template, e);
                 ast::Type::new_never()
             }
             Ok(dn) => {
-                if args.len() != datas.get(&dn).unwrap().kind_arity {
+                if args.len() != datas.get(&dn).unwrap().kind_arity() {
                     e.push(errors::WrongNumberOfArgs::new(
-                        datas.get(&dn).unwrap().kind_arity,
+                        datas.get(&dn).unwrap().kind_arity(),
                         &t.meta,
                     ));
                     return ast::Type::new_never();
                 }
-                let args = lower_types(args.iter(), ns, e, datas);
+                let args = lower_types(args.iter(), ns, e, datas, mapping);
                 ast::Type::new(ast::TypeNode::Generic(dn, args))
             }
         },
         Callable(callable) => ast::Type::new(ast::TypeNode::Callable(lower_callable_type(
-            callable, ns, e, &t.meta, datas,
+            callable, ns, e, datas, mapping,
         ))),
         ImpureCallable(callable) => ast::Type::new(ast::TypeNode::ImpureCallable(
-            lower_callable_type(callable, ns, e, &t.meta, datas),
+            lower_callable_type(callable, ns, e, datas, mapping),
         )),
         Tuple(v) => {
-            let v = lower_types(v.iter(), ns, e, datas);
+            let v = lower_types(v.iter(), ns, e, datas, mapping);
             ast::Type::new(ast::TypeNode::Tuple(v))
         }
         Primitive(p) => ast::Type::new(ast::TypeNode::Primitive(p.clone())),
-        Var(v) => ast::Type::new_var(*v),
         Never => ast::Type::new_never(),
         Unit => ast::Type::new_unit(),
         WildCard => ast::Type::new_wildcard(),
+    }
+}
+
+fn collect_callable_type_vars<'s>(
+    t: &tast::CallableType<'s>,
+    ns: &tast::NameSpace<'s>,
+    e: &mut errors::ManyError,
+    datas: &ast::Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &mut GenericParams<'s>,
+) -> ast::CallableType<'s> {
+    let params = collect_type_vars_many(t.params.iter(), ns, e, datas, mapping);
+    let ret = collect_type_vars(&t.ret, ns, e, datas, mapping);
+    ast::CallableType {
+        params,
+        ret: Box::new(ret),
     }
 }
 
@@ -111,11 +223,11 @@ fn lower_callable_type<'s>(
     t: &tast::CallableType<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    _meta: &Meta,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> ast::CallableType<'s> {
-    let params = lower_types(t.params.iter(), ns, e, datas);
-    let ret = lower_type(&t.ret, ns, e, datas);
+    let params = lower_types(t.params.iter(), ns, e, datas, mapping);
+    let ret = lower_type(&t.ret, ns, e, datas, mapping);
     ast::CallableType {
         params,
         ret: Box::new(ret),
@@ -126,9 +238,10 @@ fn lower_builtin_function<'s>(
     f: tast::BuiltinFunction<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
 ) -> ast::BuiltinFunction<'s> {
-    let callable = lower_callable_type(&f.type_, ns, e, &f.meta, datas);
+    let mut mapping = GenericParams::new();
+    let callable = collect_callable_type_vars(&f.type_, ns, e, datas, &mut mapping);
     ast::BuiltinFunction {
         var_cnt: f.var_cnt,
         type_: callable,
@@ -141,9 +254,10 @@ fn lower_constructor<'s>(
     c: tast::Constructor<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> ast::Constructor<'s> {
-    let params = lower_types(c.params.iter(), ns, e, datas);
+    let params = lower_types(c.params.iter(), ns, e, datas, mapping);
     ast::Constructor {
         name: c.name,
         params,
@@ -156,8 +270,9 @@ fn lower_constrain<'s, R: tast::RelationArity>(
     c: tast::Constrain<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
     relations: &Trie<ast::RelationName<'s>, R, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> Result<ast::Constrain<'s>, ()> {
     let rel_name = ns
         .resolve_to_name(c.rel_name.clone(), relations)
@@ -170,7 +285,34 @@ fn lower_constrain<'s, R: tast::RelationArity>(
             relations.get(&rel_name).unwrap().arity(),
         ))
     }
-    let args = lower_types(c.args.iter(), ns, e, datas);
+    let args = lower_types(c.args.iter(), ns, e, datas, mapping);
+    Ok(ast::Constrain {
+        rel_name,
+        args,
+        meta: c.meta,
+    })
+}
+
+fn lower_constrain_vars_collected<'s, R: tast::RelationArity>(
+    c: tast::Constrain<'s>,
+    ns: &tast::NameSpace<'s>,
+    e: &mut errors::ManyError,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
+    relations: &Trie<ast::RelationName<'s>, R, &'s str>,
+    mapping: &mut GenericParams<'s>,
+) -> Result<ast::Constrain<'s>, ()> {
+    let rel_name = ns
+        .resolve_to_name(c.rel_name.clone(), relations)
+        .map_err(|err| {
+            err.commit(&c.rel_name, e);
+        })?;
+    if c.args.len() != relations.get(&rel_name).unwrap().arity() {
+        e.push(errors::RelationArityWrong::new(
+            &c.meta,
+            relations.get(&rel_name).unwrap().arity(),
+        ))
+    }
+    let args = collect_type_vars_many(c.args.iter(), ns, e, datas, mapping);
     Ok(ast::Constrain {
         rel_name,
         args,
@@ -182,14 +324,16 @@ fn lower_method_sig<'s, R: tast::RelationArity>(
     sig: tast::MethodSig<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
     relations: &Trie<ast::RelationName<'s>, R, &'s str>,
+    mapping: &GenericParams<'s>,
 ) -> ast::MethodSig<'s> {
-    let type_ = lower_callable_type(&sig.type_, ns, e, &sig.meta, datas);
+    let mut mapping = mapping.clone();
+    let type_ = collect_callable_type_vars(&sig.type_, ns, e, datas, &mut mapping);
     let constrains = sig
         .constrains
         .into_iter()
-        .filter_map(|c| lower_constrain(c, ns, e, datas, relations).ok())
+        .filter_map(|c| lower_constrain(c, ns, e, datas, relations, &mapping).ok())
         .collect();
     ast::MethodSig {
         var_cnt: sig.var_cnt,
@@ -205,26 +349,53 @@ fn lower_relation<'s, R: tast::RelationArity>(
     r: tast::Relation<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
     relations: &Trie<ast::RelationName<'s>, R, &'s str>,
 ) -> ast::Relation<'s> {
+    let mapping = GenericParams(r.params.clone());
+
     let constrains = r
         .constrains
         .into_iter()
-        .filter_map(|c| lower_constrain(c, ns, e, datas, relations).ok())
+        .filter_map(|c| lower_constrain(c, ns, e, datas, relations, &mapping).ok())
         .collect::<Vec<_>>();
     let f_sigs = r
         .f_sigs
         .into_iter()
-        .map(|(f_name, sig)| (f_name, lower_method_sig(sig, ns, e, datas, relations)))
+        .map(|(f_name, sig)| {
+            (
+                f_name,
+                lower_method_sig(sig, ns, e, datas, relations, &mapping),
+            )
+        })
         .collect();
+    
+    let dependent = r.dependent.into_iter()
+        .filter_map(|d| {
+            r.params.iter().position(|x| *x == d)
+                .or_else(||{
+                    e.push(errors::DependentTypeVariableNotFound::new(&r.meta, d));
+                    None
+                })
+        }).collect();
+
     ast::Relation {
         name: r.name.into(),
-        dependent: r.dependent,
+        dependent,
         constrains,
-        arity: r.arity,
+        arity: r.params.len(),
         f_sigs,
         meta: r.meta,
+    }
+}
+
+fn lower_data<'s>(data: Data<'s>) -> ast::Data<'s> {
+    ast::Data {
+        name: data.name,
+        kind_arity: data.kind_arity(),
+        constructors: data.constructors,
+        meta: data.meta,
+        generic_metas: data.generic_metas,
     }
 }
 
@@ -233,17 +404,18 @@ fn lower_instance<'s, R: tast::RelationArity>(
     module: ast::Path<'s>,
     ns: &tast::NameSpace<'s>,
     e: &mut errors::ManyError,
-    datas: &Trie<ast::DataName<'s>, ast::Data<'s>, &'s str>,
+    datas: &Trie<ast::DataName<'s>, Data<'s>, &'s str>,
     relations: &Trie<ast::RelationName<'s>, R, &'s str>,
 ) -> Result<ast::Instance<'s>, ()> {
-    let rel = lower_constrain(ins.rel, ns, e, datas, relations)?;
+    let mut mapping = GenericParams::new();
+    let rel = lower_constrain_vars_collected(ins.rel, ns, e, datas, relations, &mut mapping)?;
     let constrains = ins
         .constrains
         .into_iter()
-        .filter_map(|c| lower_constrain(c, ns, e, datas, relations).ok())
+        .filter_map(|c| lower_constrain(c, ns, e, datas, relations, &mapping).ok())
         .collect();
     Ok(ast::Instance {
-        var_cnt: ins.var_cnt,
+        var_cnt: mapping.var_cnt(),
         rel,
         constrains,
         meta: ins.meta,
@@ -299,7 +471,19 @@ pub fn lower_symbols<'s>(
             let ns = module_namespaces
                 .get_by_path(cn.module_path().iter())
                 .unwrap();
-            (cn, lower_constructor(c, ns, e, &tast_symbols.datas))
+            let generic_params = GenericParams(
+                tast_symbols
+                    .datas
+                    .get(&c.belongs_to)
+                    .unwrap()
+                    .generic_params
+                    .clone(),
+            );
+
+            (
+                cn,
+                lower_constructor(c, ns, e, &tast_symbols.datas, &generic_params),
+            )
         })
         .collect::<Trie<_, _, _>>();
 
@@ -426,10 +610,19 @@ pub fn lower_symbols<'s>(
         }
     });
 
+    let datas =
+        tast_symbols
+            .datas
+            .into_iter()
+            .fold(ast::Trie::new_branch(), |mut datas, (dn, d)| {
+                datas.insert(dn, lower_data(d));
+                datas
+            });
+
     let ast_symbols = ast::Symbols {
         functions,
         constructors,
-        datas: tast_symbols.datas,
+        datas,
         builtins,
         relations,
         instances,
@@ -443,7 +636,7 @@ pub fn lower_symbols<'s>(
 fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
     f: tast::Function<'s>,
     ns: tast::NameSpace<'s>,
-    sy: GlobalSymbols<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    sy: GlobalSymbols<'s, 'sy, B, F, C, Data<'s>, R>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -451,6 +644,17 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
     let mut resolver = Resolver::new(ns, sy);
 
     let arity = f.params.len();
+
+    let mut mapping = GenericParams::new();
+    let type_ = f.type_.map(|t| {
+        collect_callable_type_vars(
+            &t,
+            &resolver.global,
+            e,
+            resolver.symbols.datas,
+            &mut mapping,
+        )
+    });
 
     let (local_cnt, body) = resolver.with_function_scope(|resolver| {
         resolver.with_scope(|resolver| {
@@ -460,14 +664,10 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 .for_each(|(p, m)| {
                     resolver.define_local(p, !f.pure, m.clone());
                 });
-            let body = lower_expr(*f.body, resolver, functions, ast_heap, e);
+            let body = lower_expr(*f.body, resolver, &mapping, functions, ast_heap, e);
             body
         })
     });
-
-    let type_ = f
-        .type_
-        .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
 
     let constrains = f
         .constrains
@@ -479,6 +679,7 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 e,
                 resolver.symbols.datas,
                 resolver.symbols.relations,
+                &mapping,
             )
             .ok()
         })
@@ -486,7 +687,7 @@ fn lower_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
 
     let ast_f = ast::Function {
         type_,
-        var_cnt: f.var_cnt,
+        var_cnt: mapping.var_cnt(),
         local_cnt,
         arity,
         body,
@@ -523,7 +724,8 @@ fn lower_constant<'s>(
 
 fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
     expr: tast::Expr<'s>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -531,22 +733,22 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
     use tast::ExprNode::*;
     let type_ = expr.type_.map(|t| {
         (
-            lower_type(&t, &resolver.global, e, resolver.symbols.datas),
+            lower_type(&t, &resolver.global, e, resolver.symbols.datas, mapping),
             t.meta,
         )
     });
     match expr.node {
         Apply { callee, args } => lower_apply(
-            *callee, args, expr.meta, type_, resolver, functions, ast_heap, e,
+            *callee, args, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
         ),
         IfElse { test, then, else_ } => lower_if_else(
-            *test, *then, *else_, expr.meta, type_, resolver, functions, ast_heap, e,
+            *test, *then, *else_, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
         ),
         Case { operand, arms } => lower_case_of(
-            *operand, arms, expr.meta, type_, resolver, functions, ast_heap, e,
+            *operand, arms, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
         ),
         LetPatIn { bind, value, in_ } => lower_let_pat(
-            bind, *value, *in_, expr.meta, type_, resolver, functions, ast_heap, e,
+            bind, *value, *in_, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
         ),
         LetFnIn {
             identifier,
@@ -561,14 +763,17 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
             expr.meta,
             type_,
             resolver,
+            mapping,
             functions,
             ast_heap,
             e,
         ),
-        AnonymousClosure(f) => {
-            lower_anonymous_closure(f, expr.meta, type_, resolver, functions, ast_heap, e)
-        }
-        Tuple(args) => lower_tuple(args, expr.meta, type_, resolver, functions, ast_heap, e),
+        AnonymousClosure(f) => lower_anonymous_closure(
+            f, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
+        ),
+        Tuple(args) => lower_tuple(
+            args, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
+        ),
         Constant(c) => {
             let expr = ast::Expr::new(
                 ast::ExprNode::Constant(lower_constant(&c, &expr.meta, e)),
@@ -577,22 +782,25 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
             );
             ast_heap.push(expr)
         }
-        Identifier(id) => lower_identifier(id, expr.meta, resolver, ast_heap, e),
+        Identifier(id) => lower_identifier(id, expr.meta, resolver, mapping, ast_heap, e),
         Seq(stmts, result) => lower_seq(
             stmts.into(),
             result,
             expr.meta,
             resolver,
+            mapping,
             functions,
             ast_heap,
             e,
         ),
-        Assign(to, from) => lower_assign(*to, *from, expr.meta, resolver, functions, ast_heap, e),
+        Assign(to, from) => lower_assign(
+            *to, *from, expr.meta, resolver, mapping, functions, ast_heap, e,
+        ),
         Access(lhs, rhs) => lower_access(
-            *lhs, *rhs, expr.meta, type_, resolver, functions, ast_heap, e,
+            *lhs, *rhs, expr.meta, type_, resolver, mapping, functions, ast_heap, e,
         ),
         InNameSpace(ns_ops, expr) => {
-            lower_in_namespace(ns_ops, *expr, resolver, functions, ast_heap, e)
+            lower_in_namespace(ns_ops, *expr, resolver, mapping, functions, ast_heap, e)
         }
         Unit => ast_heap.push(ast::Expr::new_untyped(ast::ExprNode::Unit, expr.meta)),
     }
@@ -601,7 +809,8 @@ fn lower_expr<'s, 'sy, B, F, C, R: tast::RelationArity>(
 fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
     id: &'s str,
     f: tast::Function<'s>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -613,13 +822,12 @@ fn lower_closure_function<'s, 'sy, B, F, C, R: tast::RelationArity>(
             .for_each(|(p, m)| {
                 resolver.define_local(p, !f.pure, m.clone());
             });
-        lower_expr(*f.body, resolver, functions, ast_heap, e)
+        lower_expr(*f.body, resolver, mapping, functions, ast_heap, e)
     });
 
     let f_type = f
         .type_
-        .map(|t| lower_callable_type(&t, &resolver.global, e, &f.meta, resolver.symbols.datas));
-
+        .map(|t| lower_callable_type(&t, &resolver.global, e, resolver.symbols.datas, mapping));
 
     let ast_f = ast::Function {
         type_: f_type,
@@ -643,7 +851,8 @@ fn lower_anonymous_closure<'s, 'sy, B, F, C, R: tast::RelationArity>(
     f: tast::Function<'s>,
     closure_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -653,6 +862,7 @@ fn lower_anonymous_closure<'s, 'sy, B, F, C, R: tast::RelationArity>(
             "<this closure is not bound to any local>",
             f,
             resolver,
+            mapping,
             functions,
             ast_heap,
             e,
@@ -675,7 +885,8 @@ fn lower_anonymous_closure<'s, 'sy, B, F, C, R: tast::RelationArity>(
 fn lower_in_namespace<'s, 'sy, B, F, C, R: tast::RelationArity>(
     ns_ops: Vec<tast::NameSpaceOp<'s>>,
     expr: tast::Expr<'s>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -686,7 +897,7 @@ fn lower_in_namespace<'s, 'sy, B, F, C, R: tast::RelationArity>(
             .global
             .apply(op, &|p| resolver.symbols.contains(p.iter()), e)
     });
-    let expr_id = lower_expr(expr, resolver, functions, ast_heap, e);
+    let expr_id = lower_expr(expr, resolver, mapping, functions, ast_heap, e);
     resolver.global = ns_old;
     expr_id
 }
@@ -718,7 +929,8 @@ fn lower_access<'s, 'sy, B, F, C, R: tast::RelationArity>(
     rhs: tast::Expr<'s>,
     meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    _mapping: &GenericParams<'s>,
     _functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -739,20 +951,22 @@ fn lower_assign<'s, 'sy, B, F, C, R: tast::RelationArity>(
     to: tast::Expr<'s>,
     from: tast::Expr<'s>,
     meta: Meta,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
-    let to = lower_expr(to, resolver, functions, ast_heap, e);
-    let from = lower_expr(from, resolver, functions, ast_heap, e);
+    let to = lower_expr(to, resolver, mapping, functions, ast_heap, e);
+    let from = lower_expr(from, resolver, mapping, functions, ast_heap, e);
     let expr = ast::Expr::new_untyped(ast::ExprNode::Assign(to, from), meta);
     ast_heap.push(expr)
 }
 
 fn lower_stmt<'s, 'sy, B, F, C, R: tast::RelationArity>(
     stmt: tast::Stmt<'s>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -761,17 +975,17 @@ fn lower_stmt<'s, 'sy, B, F, C, R: tast::RelationArity>(
     match stmt.node {
         LetDecl(..) => unreachable!(),
         If { test, then } => {
-            let test = lower_expr(test, resolver, functions, ast_heap, e);
-            let then = lower_expr(then, resolver, functions, ast_heap, e);
+            let test = lower_expr(test, resolver, mapping, functions, ast_heap, e);
+            let then = lower_expr(then, resolver, mapping, functions, ast_heap, e);
             ast::Stmt::new(ast::StmtNode::If { test, then }, stmt.meta)
         }
         While { test, then } => {
-            let test = lower_expr(test, resolver, functions, ast_heap, e);
-            let then = lower_expr(then, resolver, functions, ast_heap, e);
+            let test = lower_expr(test, resolver, mapping, functions, ast_heap, e);
+            let then = lower_expr(then, resolver, mapping, functions, ast_heap, e);
             ast::Stmt::new(ast::StmtNode::While { test, then }, stmt.meta)
         }
         Expr(expr) => {
-            let expr = lower_expr(expr, resolver, functions, ast_heap, e);
+            let expr = lower_expr(expr, resolver, mapping, functions, ast_heap, e);
             ast::Stmt::new(ast::StmtNode::Expr(expr), stmt.meta)
         }
     }
@@ -781,7 +995,8 @@ fn lower_seq<'s, 'sy, B, F, C, R: tast::RelationArity>(
     mut stmts: VecDeque<tast::Stmt<'s>>,
     result: Option<Box<tast::Expr<'s>>>,
     result_meta: ast::Meta,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -791,12 +1006,20 @@ fn lower_seq<'s, 'sy, B, F, C, R: tast::RelationArity>(
             node: tast::StmtNode::LetDecl(pat, value),
             meta,
         }) => {
-            let expr = lower_pattern(pat, resolver, e).map_or_else(
+            let expr = lower_pattern(pat, resolver, mapping, e).map_or_else(
                 |_| ast::Expr::new_never(meta.clone()),
                 |pat| {
-                    let rest =
-                        lower_seq(stmts, result, result_meta, resolver, functions, ast_heap, e);
-                    let value = lower_expr(value, resolver, functions, ast_heap, e);
+                    let rest = lower_seq(
+                        stmts,
+                        result,
+                        result_meta,
+                        resolver,
+                        mapping,
+                        functions,
+                        ast_heap,
+                        e,
+                    );
+                    let value = lower_expr(value, resolver, mapping, functions, ast_heap, e);
                     ast::Expr::new_untyped(
                         ast::ExprNode::LetPatIn {
                             bind: pat,
@@ -815,11 +1038,12 @@ fn lower_seq<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 result,
                 result_meta.clone(),
                 resolver,
+                mapping,
                 functions,
                 ast_heap,
                 e,
             );
-            let stmt = lower_stmt(stmt, resolver, functions, ast_heap, e);
+            let stmt = lower_stmt(stmt, resolver, mapping, functions, ast_heap, e);
             match &mut ast_heap[rest] {
                 ast::Expr {
                     node: ast::ExprNode::Seq(stmts, ..),
@@ -840,7 +1064,7 @@ fn lower_seq<'s, 'sy, B, F, C, R: tast::RelationArity>(
             let expr = ast::Expr::new_untyped(
                 ast::ExprNode::Seq(
                     VecDeque::new(),
-                    result.map(|expr| lower_expr(*expr, resolver, functions, ast_heap, e)),
+                    result.map(|expr| lower_expr(*expr, resolver, mapping, functions, ast_heap, e)),
                 ),
                 result_meta,
             );
@@ -854,7 +1078,8 @@ fn lower_apply<'s, 'sy, B, F, C, R: tast::RelationArity>(
     mut args: Vec<tast::Expr<'s>>,
     apply_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -863,10 +1088,10 @@ fn lower_apply<'s, 'sy, B, F, C, R: tast::RelationArity>(
         args.pop().unwrap();
     }
 
-    let callee = lower_expr(callee, resolver, functions, ast_heap, e);
+    let callee = lower_expr(callee, resolver, mapping, functions, ast_heap, e);
     let args = args
         .into_iter()
-        .map(|arg| lower_expr(arg, resolver, functions, ast_heap, e))
+        .map(|arg| lower_expr(arg, resolver, mapping, functions, ast_heap, e))
         .collect::<Vec<_>>();
     ast_heap.push(ast::Expr::new(
         ast::ExprNode::Apply { callee, args },
@@ -881,14 +1106,15 @@ fn lower_if_else<'s, 'sy, B, F, C, R: tast::RelationArity>(
     else_: tast::Expr<'s>,
     if_else_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
-    let test = lower_expr(test, resolver, functions, ast_heap, e);
-    let then = lower_expr(then, resolver, functions, ast_heap, e);
-    let else_ = lower_expr(else_, resolver, functions, ast_heap, e);
+    let test = lower_expr(test, resolver, mapping, functions, ast_heap, e);
+    let then = lower_expr(then, resolver, mapping, functions, ast_heap, e);
+    let else_ = lower_expr(else_, resolver, mapping, functions, ast_heap, e);
     ast_heap.push(ast::Expr::new(
         ast::ExprNode::IfElse { test, then, else_ },
         if_else_meta.clone(),
@@ -898,7 +1124,8 @@ fn lower_if_else<'s, 'sy, B, F, C, R: tast::RelationArity>(
 
 fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
     pat: tast::Pattern<'s>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     e: &mut errors::ManyError,
 ) -> Result<ast::Pattern<'s>, ()> {
     use tast::Pattern::*;
@@ -911,7 +1138,7 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
                 {
                     let mut args_lowred = Vec::new();
                     for arg in args.into_iter() {
-                        args_lowred.push(lower_pattern(arg, resolver, e)?);
+                        args_lowred.push(lower_pattern(arg, resolver, mapping, e)?);
                     }
                     Ok(ast::Pattern::Construct(cn, args_lowred, meta))
                 } else {
@@ -964,7 +1191,7 @@ fn lower_pattern<'s, 'sy, B, F, C, R: tast::RelationArity>(
             {
                 let mut args_lowered = Vec::new();
                 for arg in args.into_iter() {
-                    args_lowered.push(lower_pattern(arg, resolver, e)?);
+                    args_lowered.push(lower_pattern(arg, resolver, mapping, e)?);
                 }
                 args_lowered
             },
@@ -980,17 +1207,18 @@ fn lower_let_pat<'s, 'sy, B, F, C, R: tast::RelationArity>(
     in_: tast::Expr<'s>,
     let_pat_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
-    let value = lower_expr(value, resolver, functions, ast_heap, e);
+    let value = lower_expr(value, resolver, mapping, functions, ast_heap, e);
     resolver.with_scope(|resolver| {
-        let expr = lower_pattern(pat, resolver, e).map_or_else(
+        let expr = lower_pattern(pat, resolver, mapping, e).map_or_else(
             |_| ast::Expr::new_never(let_pat_meta.clone()),
             |pat| {
-                let in_ = lower_expr(in_, resolver, functions, ast_heap, e);
+                let in_ = lower_expr(in_, resolver, mapping, functions, ast_heap, e);
 
                 ast::Expr::new(
                     ast::ExprNode::LetPatIn {
@@ -1012,21 +1240,22 @@ fn lower_case_of<'s, 'sy, B, F, C, R: tast::RelationArity>(
     arms: Vec<tast::CaseArm<'s>>,
     case_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
-    let operand = lower_expr(operand, resolver, functions, ast_heap, e);
+    let operand = lower_expr(operand, resolver, mapping, functions, ast_heap, e);
     let arms = arms
         .into_iter()
         .filter_map(|arm| {
             resolver.with_scope(|resolver| {
-                let pat = lower_pattern(arm.pattern, resolver, e).ok()?;
+                let pat = lower_pattern(arm.pattern, resolver, mapping, e).ok()?;
                 let guard = arm
                     .guard
-                    .map(|g| lower_expr(g, resolver, functions, ast_heap, e));
-                let result = lower_expr(arm.result, resolver, functions, ast_heap, e);
+                    .map(|g| lower_expr(g, resolver, mapping, functions, ast_heap, e));
+                let result = lower_expr(arm.result, resolver, mapping, functions, ast_heap, e);
                 Some(ast::CaseArm {
                     pattern: pat,
                     guard,
@@ -1049,7 +1278,8 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     in_: tast::Expr<'s>,
     let_fn_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
@@ -1057,9 +1287,10 @@ fn lower_let_fn<'s, 'sy, B, F, C, R: tast::RelationArity>(
     let r = resolver.with_scope(|resolver| {
         let local_id = resolver.define_local(id, false, id_meta);
 
-        let (cinfo, closure_fid) = lower_closure_function(id, f, resolver, functions, ast_heap, e);
+        let (cinfo, closure_fid) =
+            lower_closure_function(id, f, resolver, mapping, functions, ast_heap, e);
 
-        let in_ = lower_expr(in_, resolver, functions, ast_heap, e);
+        let in_ = lower_expr(in_, resolver, mapping, functions, ast_heap, e);
 
         let closure_expr = ast::Expr::new(
             ast::ExprNode::MakeClosureAt {
@@ -1081,14 +1312,15 @@ fn lower_tuple<'s, 'sy, B, F, C, R: tast::RelationArity>(
     args: Vec<tast::Expr<'s>>,
     tuple_meta: Meta,
     type_: Option<(ast::Type<'s>, Meta)>,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    mapping: &GenericParams<'s>,
     functions: &mut ast::FunctionTable<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {
     let args = args
         .into_iter()
-        .map(|arg| lower_expr(arg, resolver, functions, ast_heap, e))
+        .map(|arg| lower_expr(arg, resolver, mapping, functions, ast_heap, e))
         .collect();
     ast_heap.push(ast::Expr::new(
         ast::ExprNode::Tuple(args),
@@ -1100,7 +1332,8 @@ fn lower_tuple<'s, 'sy, B, F, C, R: tast::RelationArity>(
 fn lower_identifier<'s, 'sy, B, F, C, R: tast::RelationArity>(
     id: &'s str,
     id_meta: Meta,
-    resolver: &mut Resolver<'s, 'sy, B, F, C, ast::Data<'s>, R>,
+    resolver: &mut Resolver<'s, 'sy, B, F, C, Data<'s>, R>,
+    _mapping: &GenericParams<'s>,
     ast_heap: &mut ast::ExprHeap<'s>,
     e: &mut errors::ManyError,
 ) -> ast::ExprId {

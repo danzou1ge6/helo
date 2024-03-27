@@ -233,6 +233,6 @@ function submitInput () {
 
 <style>
 .code-area {
-  font-family: "monospace"
+  font-family: monospace
 }
 </style>

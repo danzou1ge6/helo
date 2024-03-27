@@ -11,7 +11,7 @@ use inferer::Inferer;
 
 use ast::TypeVarId;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 struct TypeMapping {
     generics: Vec<TypeVarId>,
