@@ -48,9 +48,9 @@ import TextCode from 'src/components/TextCode.vue'
 import EmbededPlayGround from 'src/components/EmbededPlayGround.vue'
 
 const iteratorDefCode =
-`/* 'b is dependent on 'a */
-relation Iterator 'a,'b -> 'b
-    fn next it: ['a] -> ('a, 'b)
+`/* B is dependent on A */
+relation Iterator A,B -> B
+    fn next it: [A] -> (A, B)
 end
 
 data IntIterator = IntIterator Int
@@ -75,7 +75,7 @@ routine main =
 
 const constrainCode = ref(
   iteratorDefCode + `
-fn take 'a,'b it,n: ['a, Int] -> list.List['b] where Iterator 'a,'b =
+fn take it,n: [A, Int] -> list.List[B] where Iterator A,B =
     use list in
     use ops of (-),(==) in
     if n == 0 then
@@ -98,8 +98,8 @@ routine main =
 )
 
 const constrainCode2 = ref(
-`relation A 'a end
-relation B 'a where A 'a end
+`relation A A end
+relation B A where A A end
 
 instance B Int end
 

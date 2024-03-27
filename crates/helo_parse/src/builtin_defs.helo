@@ -122,8 +122,8 @@ module fmt
     builtin fn bool_to_str  a     : [Bool] -> Str     = ..
     builtin fn char_to_str  a     : [Char] -> Str     = ..
 
-    relation ToString 'a
-        fn to_string x : ['a] -> Str
+    relation ToString T 
+        fn to_string x : [T] -> Str
     end
 
     instance ToString Int
@@ -179,12 +179,12 @@ module io
 end
 
 module panic
-    builtin fn panic 'a     msg   : [Str] -> 'a          = ..
+    builtin fn panic msg   : [Str] -> T = ..
 end
 
 module option
-    data Option['a] = Some 'a
-                    | None
+    data Option[T] = Some T
+                   | None
     
     fn unwrap x = case x of
         | Some x -> x
@@ -193,13 +193,13 @@ module option
 end
 
 module result
-    data Result['a, 'e] = Ok 'a
-                        | Err 'e
+    data Result[T, E] = Ok T
+                      | Err E
 end
 
 module list
-    data List['a] = :: 'a, List['a] 
-                    | []
+    data List[T] = :: T, List[T] 
+                   | []
     
     fn head xs = case xs of
         | x::xs -> option.Some x
@@ -216,8 +216,8 @@ module list
         | _ -> false
     end
 
-    fn rev 'a xs: [List['a]] -> List['a] =
-        let fn helper as, bs: [List['a], List['a]] -> List['a] =
+    fn rev xs: [List[T]] -> List[T] =
+        let fn helper as, bs: [List[T], List[T]] -> List[T] =
             case as of
             | [] -> bs
             | a :: as -> helper as, a :: bs
@@ -227,61 +227,61 @@ module list
 end
 
 module ops
-    relation Add 'a,'c -> 'c
-        fn + a,b : ['a, 'a] -> 'c
+    relation Add A,C -> C
+        fn + a,b : [A, A] -> C
     end
-    relation Subs 'a,'c -> 'c
-        fn - a,b : ['a, 'a] -> 'c
+    relation Subs A,C -> C
+        fn - a,b : [A, A] -> C
     end
-    relation Mul 'a,'c -> 'c
-        fn * a,b : ['a, 'a] -> 'c
+    relation Mul A,C -> C
+        fn * a,b : [A, A] -> C
     end
-    relation Div 'a,'c -> 'c
-        fn / a,b : ['a, 'a] -> 'c
+    relation Div A,C -> C
+        fn / a,b : [A, A] -> C
     end
-    relation Pow 'a,'b,'c -> 'c
-        fn ** a,b : ['a, 'b] -> 'c
+    relation Pow A,B,C -> C
+        fn ** a,b : [A, B] -> C
     end
-    relation Mod 'a,'b,'c -> 'c
-        fn mod a,b : ['a, 'b] -> 'c
-    end
-
-    relation Eq 'a
-        fn /= a,b : ['a, 'a] -> Bool
-        fn == a,b : ['a, 'a] -> Bool
-    end
-    relation Lt 'a
-        fn < a,b : ['a, 'a] -> Bool
-    end
-    relation Gt 'a
-        fn > a,b : ['a, 'a] -> Bool
-    end
-    relation Le 'a
-        fn <= a,b : ['a, 'a] -> Bool
-    end
-    relation Ge 'a
-        fn >= a,b : ['a, 'a] -> Bool
+    relation Mod A,B,C -> C
+        fn mod a,b : [A, B] -> C
     end
 
-    relation Ord 'a where Eq 'a + Lt 'a
+    relation Eq T
+        fn /= a,b : [T, T] -> Bool
+        fn == a,b : [T, T] -> Bool
+    end
+    relation Lt T
+        fn < a,b : [T, T] -> Bool
+    end
+    relation Gt T
+        fn > a,b : [T, T] -> Bool
+    end
+    relation Le T
+        fn <= a,b : [T, T] -> Bool
+    end
+    relation Ge T
+        fn >= a,b : [T, T] -> Bool
     end
 
-    fn max 'a a,b : ['a, 'a] -> 'a where Ord 'a =
+    relation Ord T where Eq T + Lt T
+    end
+
+    fn max a,b : [T, T] -> T where Ord T =
         if a < b then b else a
     
-    fn min 'a a,b : ['a, 'a] -> 'a where Ord 'a =
+    fn min a,b : [T, T] -> T where Ord T =
         if a < b then a else b
     
 end
 
 module convert
-    relation From 'a,'b
-        fn from b : ['b] -> 'a
+    relation From A,B
+        fn from b : [B] -> A
     end
-    relation Into 'a,'b
-        fn into a : ['a] -> 'b
+    relation Into A,B
+        fn into a : [A] -> B
     end
-    instance 'a,'b Into 'a,'b where From 'b,'a
+    instance Into A,B where From B,A
         fn into a = from a
     end
 end

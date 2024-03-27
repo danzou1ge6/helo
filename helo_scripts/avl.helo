@@ -18,8 +18,8 @@ use result
 infix :: 10 9
 infix // 9 10
 
-data Avl['a] = Empty
-             | Node 'a, Avl['a], Avl['a], Int
+data Avl[T] = Empty
+             | Node T, Avl[T], Avl[T], Int
 
 fn height t = case t of
     | Empty -> 0
@@ -59,7 +59,7 @@ fn balance t = case t of
             t
     end
 
-fn insert 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
+fn insert x,t: [T, Avl[T]] -> Avl[T] where Ord T =
     case t of
     | Empty -> Node x,Empty,Empty,1
     | Node v,left,right,h ->
@@ -73,12 +73,12 @@ fn insert 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
             Node x,left,right,h
     end
 
-fn find_min 'a t: [Avl['a]] -> 'a = case t of
+fn find_min t: [Avl[T]] -> T = case t of
     | Node v,Empty,_,_ -> v
     | Node _,left,_,_ -> find_min left
     end
 
-fn delete 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
+fn delete x,t: [T, Avl[T]] -> Avl[T] where Ord T =
     case t of
     | Empty -> t
     | Node v,left,right,h ->
@@ -102,7 +102,7 @@ fn delete 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
             end
     end
 
-fn contains 'a x,t: ['a, Avl['a]] -> Bool where Ord 'a =
+fn contains x,t: [T, Avl[T]] -> Bool where Ord T =
     case t of
     | Empty -> false
     | Node v,left,right,_ ->
@@ -123,7 +123,7 @@ fn str_repeat c,n: [Char, Int] -> Str =
     in
         helper "",c,n
 
-fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
+fn debug t,indent: [Avl[T], Int] -> Str where fmt.ToString T =
     case t of
     | Empty -> (str_repeat ' ',indent) * "()\n"
     | Node v,Empty,Empty,h ->
@@ -134,8 +134,8 @@ fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
         * (debug right, (indent + 1))
     end
 
-fn :: 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a = insert x,t
-fn // 'a t,x: [Avl['a], 'a] -> Avl['a] where Ord 'a = delete x,t
+fn :: x,t: [T, Avl[T]] -> Avl[T] where Ord T = insert x,t
+fn // t,x: [Avl[T], T] -> Avl[T] where Ord T = delete x,t
 
 data Command = Insert Int | Delete Int
 data ParseError = ParseError Str,Str

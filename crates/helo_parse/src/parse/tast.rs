@@ -286,15 +286,6 @@ impl<'s> PartialEq for Type<'s> {
 }
 impl<'s> Eq for Type<'s> {}
 
-impl<'s> Type<'s> {
-    pub fn new_var(id: TypeVarId, meta: Meta) -> Self {
-        Self {
-            node: TypeNode::Var(id),
-            meta,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct CallableType<'s> {
     pub params: Vec<Type<'s>>,
@@ -308,7 +299,6 @@ pub enum TypeNode<'s> {
     Generic(Path<'s>, Vec<Type<'s>>),
     Tuple(Vec<Type<'s>>),
     Primitive(PrimitiveType),
-    Var(TypeVarId),
     Unit,
     Never,
     /// This is only used for parsing. During inference, any wildcard is replaced with a new variable
@@ -401,7 +391,6 @@ impl<'s> Stmt<'s> {
 #[derive(Debug, Clone)]
 pub struct Function<'s> {
     pub type_: Option<CallableType<'s>>,
-    pub var_cnt: usize,
     pub params: Vec<&'s str>,
     pub param_metas: Vec<ast::Meta>,
     pub body: Box<Expr<'s>>,
@@ -419,7 +408,6 @@ pub struct Constrain<'s> {
 
 #[derive(Clone, Debug)]
 pub struct Instance<'s> {
-    pub var_cnt: usize,
     pub rel: Constrain<'s>,
     pub constrains: Vec<Constrain<'s>>,
     pub meta: Meta,
@@ -445,9 +433,9 @@ pub struct MethodSig<'s> {
 pub struct Relation<'s> {
     pub name: ast::Path<'s>,
     /// Indicates whether some parameter is dependent on others
-    pub dependent: Vec<usize>,
+    pub dependent: Vec<&'s str>,
     pub constrains: Vec<Constrain<'s>>,
-    pub arity: usize,
+    pub params: Vec<&'s str>,
     pub f_sigs: std::collections::HashMap<&'s str, MethodSig<'s>>,
     pub meta: Meta,
 }
@@ -458,7 +446,7 @@ pub trait RelationArity {
 
 impl<'s> RelationArity for Relation<'s> {
     fn arity(&self) -> usize {
-        self.arity
+        self.params.len()
     }
 }
 
@@ -577,13 +565,25 @@ pub struct BuiltinFunction<'s> {
     pub pure: bool,
 }
 
-pub use ast::Data;
-
 pub struct Constructor<'s> {
     pub name: ast::ConstructorName<'s>,
     pub params: Vec<Type<'s>>,
     pub belongs_to: ast::DataName<'s>,
     pub meta: Meta,
+}
+
+pub struct Data<'s> {
+    pub name: &'s str,
+    pub generic_params: Vec<&'s str>,
+    pub constructors: Vec<ast::ConstructorName<'s>>,
+    pub meta: Meta,
+    pub generic_metas: Vec<Meta>,
+}
+
+impl<'s> Data<'s> {
+    pub fn kind_arity(&self) -> usize {
+        self.generic_params.len()
+    }
 }
 
 use ast::Trie;

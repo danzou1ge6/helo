@@ -12,8 +12,8 @@
     Helo Lang was originall built to be a strict-evaluated functional language.
     To support IO, I took the shortest path of introducing impure functions called routines,
     compared with Haskell's way, since I was discouraged by the complexity of a type system that supports
-    higher ranked types. Also, currying is not supported, as I belive implementing only partial application
-    is much easier to implement.
+    higher ranked types. Also, currying is not supported, as implementing only partial application
+    is much easier.
   </TextBody1>
   <TextBody1>
     Following list highlights major features of Helo.

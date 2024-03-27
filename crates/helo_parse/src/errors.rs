@@ -1034,6 +1034,27 @@ impl ExpectBindingGotPath {
 }
 
 #[derive(Debug, Error, Diagnostic)]
+#[error("Dependent type variable {} not found", var)]
+pub struct DependentTypeVariableNotFound {
+    pub var: String,
+    #[source_code]
+    pub src: NamedSource,
+    #[label("Referenced in this relation")]
+    pub span: SourceSpan
+}
+
+impl DependentTypeVariableNotFound {
+    pub fn new(meta: &ast::Meta, var: &str) -> Self {
+        Self {
+            var: var.to_string(),
+            src: meta.named_source(),
+            span: meta.span(),
+        }
+    }
+}
+
+
+#[derive(Debug, Error, Diagnostic)]
 #[error("Compile error")]
 pub struct ManyError {
     #[related]

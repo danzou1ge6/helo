@@ -302,16 +302,15 @@ fn if_expr<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
-        let (s2, test) = expression(s, ctx, precedence_table, generic_params)?;
+        let (s2, test) = expression(s, ctx, precedence_table)?;
 
         let (s3, _) = trailing_space1_tag("then")(s2)?;
-        let (s4, then) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, then) = expression(s3, ctx, precedence_table)?;
 
         let (s5, _) = trailing_space1_tag("else")(s4)?;
-        let (s6, else_) = expression(s5, ctx, precedence_table, generic_params)?;
+        let (s6, else_) = expression(s5, ctx, precedence_table)?;
 
         Ok((
             s6,
@@ -478,20 +477,19 @@ fn case_arm<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::CaseArm<'s>> {
     let parse = |s| {
         let (s1, pat) = pattern(s, ctx, precedence_table)?;
 
         let (s2, guard) = if let (s2, Some(_)) = ncomb::opt(trailing_space1_tag("if"))(s1)? {
-            let (s3, guard) = expression(s2, ctx, precedence_table, generic_params)?;
+            let (s3, guard) = expression(s2, ctx, precedence_table)?;
             (s3, Some(guard))
         } else {
             (s1, None)
         };
 
         let (s2, _) = trailing_space_tag("->")(s2)?;
-        let (s3, result) = expression(s2, ctx, precedence_table, generic_params)?;
+        let (s3, result) = expression(s2, ctx, precedence_table)?;
         Ok((
             s3,
             tast::CaseArm {
@@ -508,17 +506,16 @@ fn case_expr<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
-        let (s2, operand) = expression(s, ctx, precedence_table, generic_params)?;
+        let (s2, operand) = expression(s, ctx, precedence_table)?;
 
         let (s3, _) = trailing_space1_tag("of")(s2)?;
 
         let (s3, _) = ncomb::opt(trailing_space_tag("|"))(s3)?;
 
         let (s4, arms) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
-            case_arm(s, ctx, precedence_table, generic_params)
+            case_arm(s, ctx, precedence_table)
         })(s3)?;
 
         let (s5, _) = trailing_space_tag("end")(s4)?;
@@ -541,17 +538,16 @@ fn let_in_bind_expr<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
         let (s1, pattern) = pattern(s, ctx, precedence_table)?;
 
         let (s1, _) = trailing_space_tag("=")(s1)?;
 
-        let (s2, value) = expression(s1, ctx, precedence_table, generic_params)?;
+        let (s2, value) = expression(s1, ctx, precedence_table)?;
 
         let (s3, _) = trailing_space1_tag("in")(s2)?;
-        let (s4, in_) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, in_) = expression(s3, ctx, precedence_table)?;
         Ok((
             s4,
             tast::Expr::new_untyped(
@@ -586,7 +582,6 @@ fn anonymous_closure_expr<'s>(
     pure: bool,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
         let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| {
@@ -595,16 +590,15 @@ fn anonymous_closure_expr<'s>(
         let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
 
         let (s3, type_) = ncomb::opt(nseq::preceded(trailing_space_tag(":"), |s| {
-            type_callable_type(s, ctx, generic_params)
+            type_callable_type(s, ctx)
         }))(s2)?;
 
         let (s3, _) = trailing_space_tag("->")(s3)?;
 
-        let (s4, body) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, body) = expression(s3, ctx, precedence_table)?;
 
         let f = tast::Function {
             type_,
-            var_cnt: 0,
             body: Box::new(body),
             meta: ctx.meta(s, s4),
             params,
@@ -626,7 +620,6 @@ fn let_in_closure_expr<'s>(
     pure: bool,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
         let (s1, (id, id_meta)) = alphabetic_identifier_str_with_meta(s, ctx)?;
@@ -637,16 +630,15 @@ fn let_in_closure_expr<'s>(
         let (params, params_meta): (Vec<_>, Vec<_>) = params.into_iter().unzip();
 
         let (s3, type_) = ncomb::opt(nseq::preceded(trailing_space_tag(":"), |s| {
-            type_callable_type(s, ctx, generic_params)
+            type_callable_type(s, ctx)
         }))(s2)?;
 
         let (s3, _) = trailing_space_tag("=")(s3)?;
 
-        let (s4, body) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, body) = expression(s3, ctx, precedence_table)?;
 
         let f = tast::Function {
             type_,
-            var_cnt: 0,
             body: Box::new(body),
             meta: ctx.meta(s, s4),
             params,
@@ -656,7 +648,7 @@ fn let_in_closure_expr<'s>(
         };
 
         let (s5, _) = trailing_space1_tag("in")(s4)?;
-        let (s6, in_) = expression(s5, ctx, precedence_table, generic_params)?;
+        let (s6, in_) = expression(s5, ctx, precedence_table)?;
 
         let closure_expr = tast::Expr::new_untyped(
             tast::ExprNode::LetFnIn {
@@ -677,20 +669,18 @@ fn let_in_expr<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("fn"))(s)? {
-        let_in_closure_expr(s1, true, ctx, precedence_table, generic_params)
+        let_in_closure_expr(s1, true, ctx, precedence_table)
     } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("routine"))(s)? {
-        let_in_closure_expr(s1, false, ctx, precedence_table, generic_params)
+        let_in_closure_expr(s1, false, ctx, precedence_table)
     } else {
-        let_in_bind_expr(s, ctx, precedence_table, generic_params)
+        let_in_bind_expr(s, ctx, precedence_table)
     }
 }
 
 fn generic_param_a<'s>(s: &'s str, ctx: &Context<'s>) -> MResult<'s, &'s str> {
-    let (s1, _) = nbyte::tag("'")(s)?;
-    let (s2, name) = nchar::alphanumeric1(s1)?;
+    let (s2, name) = nchar::alphanumeric1(s)?;
     Ok((s2, (name, ctx.meta(s, s2))))
 }
 
@@ -708,11 +698,7 @@ fn generic_params_decl<'s>(
     nom_context("generic parameters", parse)(s)
 }
 
-fn type_generic<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
+fn type_generic<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
         let (s1, path) = path(s, ctx)?;
 
@@ -759,9 +745,8 @@ fn type_generic<'s>(
         }
 
         let (s4, args) = if let (s2, Some(_)) = ncomb::opt(trailing_space_tag("["))(s1)? {
-            let (s3, args) = nmulti::separated_list1(trailing_space_tag(","), |s| {
-                type_(s, ctx, generic_params)
-            })(s2)?;
+            let (s3, args) =
+                nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx))(s2)?;
             let (s4, _) = nbyte::tag("]")(s3)?;
             let (s5, _) = empty(s4)?;
             (s5, args)
@@ -780,18 +765,13 @@ fn type_generic<'s>(
     nom_context("generic type", parse)(s)
 }
 
-fn type_callable<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
+fn type_callable<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
-        let (s2, params) =
-            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(s)?;
+        let (s2, params) = nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx))(s)?;
         let (s3, _) = trailing_space_tag("]")(s2)?;
 
         let (s3, _) = trailing_space_tag("->")(s3)?;
-        let (s4, ret) = type_(s3, ctx, generic_params)?;
+        let (s4, ret) = type_(s3, ctx)?;
 
         Ok((
             s4,
@@ -807,21 +787,14 @@ fn type_callable<'s>(
     nom_context("callable type", parse)(s)
 }
 
-fn type_callable_type<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::CallableType<'s>> {
+fn type_callable_type<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::CallableType<'s>> {
     let parse = |s| {
         let (s1, _) = trailing_space_tag("[")(s)?;
-        let (s2, params) =
-            nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
-                s1,
-            )?;
+        let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx))(s1)?;
         let (s3, _) = trailing_space_tag("]")(s2)?;
 
         let (s3, _) = trailing_space_tag("->")(s3)?;
-        let (s4, ret) = type_(s3, ctx, generic_params)?;
+        let (s4, ret) = type_(s3, ctx)?;
 
         Ok((
             s4,
@@ -834,14 +807,9 @@ fn type_callable_type<'s>(
     nom_context("callable type", parse)(s)
 }
 
-fn type_parenthesed<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
+fn type_parenthesed<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Type<'s>> {
     let parse = |s| {
-        let (s2, args) =
-            nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(s)?;
+        let (s2, args) = nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx))(s)?;
         let (s3, _) = nbyte::tag(")")(s2)?;
         let (s4, _) = empty(s3)?;
 
@@ -860,43 +828,13 @@ fn type_parenthesed<'s>(
     nom_context("tuple type", parse)(s)
 }
 
-fn type_var<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
-    let (s1, idx) = type_var_idx(s, generic_params)?;
-    Ok((s1, tast::Type::new_var(idx.into(), ctx.meta(s, s1))))
-}
-
-fn type_var_idx<'s>(s: &'s str, generic_params: &Vec<&'s str>) -> PResult<'s, usize> {
-    let (s1, id) = alphabetic_identifier_str(s)?;
-
-    if let Some(idx) = generic_params.iter().position(|p| *p == id) {
-        Ok((s1, idx))
-    } else {
-        Err(nom::Err::Error(nom::error::VerboseError {
-            errors: vec![(
-                s,
-                nom::error::VerboseErrorKind::Nom(nom::error::ErrorKind::Verify),
-            )],
-        }))
-    }
-}
-
-fn type_<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Type<'s>> {
+fn type_<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Type<'s>> {
     if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
-        type_parenthesed(s1, ctx, generic_params)
+        type_parenthesed(s1, ctx)
     } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("["))(s)? {
-        type_callable(s1, ctx, generic_params)
-    } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("'"))(s)? {
-        type_var(s1, ctx, generic_params)
+        type_callable(s1, ctx)
     } else {
-        type_generic(s, ctx, generic_params)
+        type_generic(s, ctx)
     }
 }
 
@@ -904,15 +842,11 @@ fn constructor<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     data_name: &'s str,
-    generic_params: &Vec<&'s str>,
 ) -> PResult<'s, tast::Constructor<'s>> {
     let parse = |s| {
         let (s1, name) = nbr::alt((alphabetic_identifier_str, symbolic_identifier_str))(s)?;
 
-        let (s2, params) =
-            nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
-                s1,
-            )?;
+        let (s2, params) = nmulti::separated_list0(trailing_space_tag(","), |s| type_(s, ctx))(s1)?;
         Ok((
             s2,
             tast::Constructor {
@@ -942,19 +876,18 @@ fn data<'s>(
                 (s1, Vec::new(), Vec::new())
             };
 
-        let kind_arity = generic_params.len();
-
         let (s4, _) = trailing_space_tag("=")(s3)?;
 
-        let (s5, constructors) = nmulti::separated_list1(trailing_space_tag("|"), |s| {
-            constructor(s, ctx, data_name, &generic_params)
-        })(s4)?;
+        let (s5, constructors) =
+            nmulti::separated_list1(trailing_space_tag("|"), |s| constructor(s, ctx, data_name))(
+                s4,
+            )?;
 
         let meta = ctx.meta(s, s5);
 
         let data = tast::Data {
             name: data_name,
-            kind_arity,
+            generic_params,
             constructors: constructors.iter().map(|c| c.name.clone()).collect(),
             meta,
             generic_metas,
@@ -1014,11 +947,10 @@ fn expression_parenthesed<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
         let (s1, mut exprs) = nmulti::separated_list0(trailing_space_tag(","), |s| {
-            expression(s, ctx, precedence_table, generic_params)
+            expression(s, ctx, precedence_table)
         })(s)?;
         let (s2, _) = nbyte::tag(")")(s1)?;
         let (s3, _) = empty(s2)?;
@@ -1044,32 +976,31 @@ fn prefix_expression<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let parse = |s| {
         // Parenthesed
         if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("/*"))(s)? {
             let (s2, _) = comments(s1)?;
-            prefix_expression(s2, ctx, precedence_table, generic_params)
+            prefix_expression(s2, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(nbyte::tag("("))(s)? {
             let (s1, _) = empty(s1)?;
-            expression_parenthesed(s1, ctx, precedence_table, generic_params)
+            expression_parenthesed(s1, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("if"))(s)? {
-            if_expr(s1, ctx, precedence_table, generic_params)
+            if_expr(s1, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("case"))(s)? {
-            case_expr(s1, ctx, precedence_table, generic_params)
+            case_expr(s1, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("let"))(s)? {
-            let_in_expr(s1, ctx, precedence_table, generic_params)
+            let_in_expr(s1, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("begin"))(s)? {
-            seq_expr(s1, ctx, precedence_table, generic_params)
+            seq_expr(s1, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\'"))(s)? {
-            anonymous_closure_expr(s1, false, ctx, precedence_table, generic_params)
+            anonymous_closure_expr(s1, false, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space_tag("\\"))(s)? {
-            anonymous_closure_expr(s1, true, ctx, precedence_table, generic_params)
+            anonymous_closure_expr(s1, true, ctx, precedence_table)
         } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("use"))(s)? {
             let (s2, ns_ops) = use_decl(s1, ctx)?;
             let (s2, _) = trailing_space1_tag("in")(s2)?;
-            let (s3, expr) = expression(s2, ctx, precedence_table, generic_params)?;
+            let (s3, expr) = expression(s2, ctx, precedence_table)?;
             Ok((
                 s3,
                 tast::Expr::new_untyped(
@@ -1092,11 +1023,9 @@ fn build_infix_expr<'s>(
     rest: &'s str,
     lhs_begin: &'s str,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let p_right = precedence_table.priority_right(op_id);
-    let (s1, rhs) =
-        experssion_with_precedence(rest, ctx, p_right, precedence_table, generic_params)?;
+    let (s1, rhs) = experssion_with_precedence(rest, ctx, p_right, precedence_table)?;
     let callee = tast::Expr::new_untyped(tast::ExprNode::Identifier(op_id), op_meta);
 
     Ok((
@@ -1122,11 +1051,10 @@ fn expression_series<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> PResult<'s, Vec<tast::Expr<'s>>> {
     let parse = |s| {
         nmulti::separated_list1(trailing_space_tag(","), |s| {
-            expression(s, ctx, precedence_table, generic_params)
+            expression(s, ctx, precedence_table)
         })(s)
     };
     nom_context("comma seperated expressions", parse)(s)
@@ -1138,9 +1066,8 @@ fn build_application_expr<'s>(
     rest: &'s str,
     lhs_begin: &'s str,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
-    let (s1, arguments) = expression_series(rest, ctx, precedence_table, generic_params)?;
+    let (s1, arguments) = expression_series(rest, ctx, precedence_table)?;
     Ok((
         s1,
         tast::Expr::new_untyped(
@@ -1153,13 +1080,8 @@ fn build_application_expr<'s>(
     ))
 }
 
-fn add_type<'s>(
-    mut lhs: tast::Expr<'s>,
-    ctx: &Context<'s>,
-    rest: &'s str,
-    generic_params: &Vec<&'s str>,
-) -> EResult<'s> {
-    let (s1, type_) = type_(rest, ctx, generic_params)?;
+fn add_type<'s>(mut lhs: tast::Expr<'s>, ctx: &Context<'s>, rest: &'s str) -> EResult<'s> {
+    let (s1, type_) = type_(rest, ctx)?;
     lhs.type_ = Some(type_);
     Ok((s1, lhs))
 }
@@ -1194,10 +1116,9 @@ fn experssion_with_precedence<'s>(
     ctx: &Context<'s>,
     prec: OpPriority,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
     let lhs_begin = s;
-    let (mut s, mut lhs) = prefix_expression(s, ctx, precedence_table, generic_params)?;
+    let (mut s, mut lhs) = prefix_expression(s, ctx, precedence_table)?;
     while s.len() > 0 {
         if let (_, Some(_)) = ncomb::opt(expression_boundary)(s)? {
             break;
@@ -1211,7 +1132,7 @@ fn experssion_with_precedence<'s>(
 
         // Annotate `lhs` with some user provided type
         if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag(":"))(s)? {
-            (s, lhs) = add_type(lhs, ctx, s1, generic_params)?;
+            (s, lhs) = add_type(lhs, ctx, s1)?;
             continue;
         }
 
@@ -1230,7 +1151,6 @@ fn experssion_with_precedence<'s>(
                     s1,
                     lhs_begin,
                     precedence_table,
-                    generic_params,
                 )?;
                 continue;
             }
@@ -1243,8 +1163,7 @@ fn experssion_with_precedence<'s>(
         }
 
         // Function application
-        (s, lhs) =
-            build_application_expr(lhs, ctx, s1, lhs_begin, precedence_table, generic_params)?;
+        (s, lhs) = build_application_expr(lhs, ctx, s1, lhs_begin, precedence_table)?;
     }
 
     Ok((s, lhs))
@@ -1254,27 +1173,19 @@ fn expression<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
-    experssion_with_precedence(
-        s,
-        ctx,
-        PrecedenceTable::DEFAULT,
-        precedence_table,
-        generic_params,
-    )
+    experssion_with_precedence(s, ctx, PrecedenceTable::DEFAULT, precedence_table)
 }
 
 fn decl_stmt<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
     let parse = |s| {
         let (s2, pat) = pattern(s, ctx, precedence_table)?;
         let (s3, _) = trailing_space_tag("=")(s2)?;
-        let (s4, value) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, value) = expression(s3, ctx, precedence_table)?;
         Ok((
             s4,
             tast::Stmt::new(tast::StmtNode::LetDecl(pat, value), ctx.meta(s, s4)),
@@ -1287,13 +1198,12 @@ fn if_stmt<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
     let parse = |s| {
-        let (s2, test) = expression(s, ctx, precedence_table, generic_params)?;
+        let (s2, test) = expression(s, ctx, precedence_table)?;
 
         let (s3, _) = trailing_space1_tag("then")(s2)?;
-        let (s4, then) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, then) = expression(s3, ctx, precedence_table)?;
 
         Ok((
             s4,
@@ -1307,13 +1217,12 @@ fn while_stmt<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
     let parse = |s| {
-        let (s2, test) = expression(s, ctx, precedence_table, generic_params)?;
+        let (s2, test) = expression(s, ctx, precedence_table)?;
 
         let (s3, _) = trailing_space1_tag("then")(s2)?;
-        let (s4, then) = expression(s3, ctx, precedence_table, generic_params)?;
+        let (s4, then) = expression(s3, ctx, precedence_table)?;
 
         Ok((
             s4,
@@ -1327,10 +1236,9 @@ fn expr_stmt<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> SResult<'s> {
     let parse = |s| {
-        let (s1, expr) = expression(s, ctx, precedence_table, generic_params)?;
+        let (s1, expr) = expression(s, ctx, precedence_table)?;
         Ok((
             s1,
             tast::Stmt::new(tast::StmtNode::Expr(expr), ctx.meta(s, s1)),
@@ -1339,23 +1247,18 @@ fn expr_stmt<'s>(
     nom_context("expression statement", parse)(s)
 }
 
-fn stmt<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
-) -> SResult<'s> {
+fn stmt<'s>(s: &'s str, ctx: &Context<'s>, precedence_table: &PrecedenceTable<'s>) -> SResult<'s> {
     if let (s1, Some(_)) = ncomb::opt(nbyte::tag("/*"))(s)? {
         let (s1, _) = comments(s1)?;
-        stmt(s1, ctx, precedence_table, generic_params)
+        stmt(s1, ctx, precedence_table)
     } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("let"))(s)? {
-        decl_stmt(s1, ctx, precedence_table, generic_params)
+        decl_stmt(s1, ctx, precedence_table)
     } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("if"))(s)? {
-        if_stmt(s1, ctx, precedence_table, generic_params)
+        if_stmt(s1, ctx, precedence_table)
     } else if let (s1, Some(_)) = ncomb::opt(trailing_space1_tag("while"))(s)? {
-        while_stmt(s1, ctx, precedence_table, generic_params)
+        while_stmt(s1, ctx, precedence_table)
     } else {
-        expr_stmt(s, ctx, precedence_table, generic_params)
+        expr_stmt(s, ctx, precedence_table)
     }
 }
 
@@ -1363,11 +1266,9 @@ fn seq_expr<'s>(
     s: &'s str,
     ctx: &Context<'s>,
     precedence_table: &PrecedenceTable<'s>,
-    generic_params: &Vec<&'s str>,
 ) -> EResult<'s> {
-    let (s1, mut stmts) = nmulti::separated_list1(trailing_space_tag(";"), |s| {
-        stmt(s, ctx, precedence_table, generic_params)
-    })(s)?;
+    let (s1, mut stmts) =
+        nmulti::separated_list1(trailing_space_tag(";"), |s| stmt(s, ctx, precedence_table))(s)?;
 
     let (s2, stmts, result) = if let tast::StmtNode::Expr(_) = &stmts.last().unwrap().node {
         if let (s2, Some(_)) = ncomb::opt(trailing_space_tag(";"))(s1)? {
@@ -1399,17 +1300,10 @@ fn seq_expr<'s>(
     ))
 }
 
-fn constrain<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, tast::Constrain<'s>> {
+fn constrain<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Constrain<'s>> {
     let parse = |s| {
         let (s1, rel_name) = path(s, ctx)?;
-        let (s2, args) =
-            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, generic_params))(
-                s1,
-            )?;
+        let (s2, args) = nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx))(s1)?;
 
         Ok((
             s2,
@@ -1424,32 +1318,26 @@ fn constrain<'s>(
     nom_context("constrain", parse)(s)
 }
 
-fn constrains<'s>(
-    s: &'s str,
-    ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
-) -> PResult<'s, Vec<tast::Constrain<'s>>> {
-    nmulti::separated_list1(trailing_space_tag("+"), |s| {
-        constrain(s, ctx, generic_params)
-    })(s)
+fn constrains<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, Vec<tast::Constrain<'s>>> {
+    nmulti::separated_list1(trailing_space_tag("+"), |s| constrain(s, ctx))(s)
 }
 
-fn function_after_generic_params<'s>(
+fn function_after_name<'s>(
     s: &'s str,
     pure: bool,
     ctx: &Context<'s>,
-    generic_params: &Vec<&'s str>,
+
     precedence_table: &PrecedenceTable<'s>,
 ) -> PResult<'s, tast::Function<'s>> {
     let (s3, (params, param_metas)) = function_params(s, ctx)?;
 
     let (s4, f_type, constrains) = if let (s4, Some(_)) = ncomb::opt(nbyte::tag(":"))(s3)? {
         let (s4, _) = empty(s4)?;
-        let (s4, t) = type_callable_type(s4, ctx, &generic_params)?;
+        let (s4, t) = type_callable_type(s4, ctx)?;
 
         if let (s5, Some(_)) = ncomb::opt(nbyte::tag("where"))(s4)? {
             let (s5, _) = empty(s5)?;
-            let (s6, constrains) = constrains(s5, ctx, &generic_params)?;
+            let (s6, constrains) = constrains(s5, ctx)?;
             (s6, Some(t), constrains)
         } else {
             (s4, Some(t), Vec::new())
@@ -1460,11 +1348,10 @@ fn function_after_generic_params<'s>(
 
     let (s5, _) = trailing_space_tag("=")(s4)?;
 
-    let (s6, body) = expression(s5, ctx, precedence_table, &generic_params)?;
+    let (s6, body) = expression(s5, ctx, precedence_table)?;
 
     let f = tast::Function {
         type_: f_type,
-        var_cnt: generic_params.len(),
         body: Box::new(body),
         meta: ctx.meta(s, s6),
         param_metas,
@@ -1485,10 +1372,7 @@ fn function<'s>(
     let parse = |s| {
         let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
 
-        let (s2, (generic_params, _)) = generic_params_decl(s1, ctx)?;
-
-        let (s6, f) =
-            function_after_generic_params(s2, pure, ctx, &generic_params, precedence_table)?;
+        let (s6, f) = function_after_name(s1, pure, ctx, precedence_table)?;
 
         Ok((s6, (f_name, f)))
     };
@@ -1525,10 +1409,10 @@ fn method_signature<'s>(
         let (s, (_, _)) = function_params(s, ctx)?;
 
         let (s, _) = trailing_space_tag(":")(s)?;
-        let (s, type_) = type_callable_type(s, ctx, &generic_params)?;
+        let (s, type_) = type_callable_type(s, ctx)?;
 
         let (s1, constrains) = ncomb::opt(nseq::preceded(trailing_space1_tag("where"), |s| {
-            constrains(s, ctx, &generic_params)
+            constrains(s, ctx)
         }))(s)?;
 
         let constrains = constrains.unwrap_or_else(|| Vec::new());
@@ -1551,40 +1435,36 @@ fn relation<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Relation<'s>
     let parse = |s| {
         let s0 = s;
         let (s, rel_name) = alphabetic_identifier_str(s)?;
-        let (s, (args, _)) = generic_params_decl(s, ctx)?;
+        let (s, (params, _)) = generic_params_decl(s, ctx)?;
         let s1 = s;
 
         let (s, dependents) = if let (s, Some(_)) = ncomb::opt(trailing_space_tag("->"))(s)? {
-            nmulti::separated_list1(
-                trailing_space_tag(","),
-                nseq::preceded(trailing_space_tag("'"), |s| type_var_idx(s, &args)),
-            )(s)?
+            nmulti::separated_list1(trailing_space_tag(","), alphabetic_identifier_str)(s)?
         } else {
             (s, Vec::new())
         };
-        let arity = args.len();
 
         let (s, constrains) = ncomb::opt(nseq::preceded(trailing_space1_tag("where"), |s| {
-            constrains(s, ctx, &args)
+            constrains(s, ctx)
         }))(s)?;
         let constrains = constrains.unwrap_or_else(|| Vec::new());
 
         let primary_constrain = ast::Constrain {
             rel_name: ctx.path_of(rel_name).into(),
-            args: (0..args.len())
+            args: (0..params.len())
                 .map(|x| ast::Type::new_var(ast::TypeVarId(x)))
                 .collect(),
             meta: ctx.meta(s0, s1),
         };
 
         let (s, sigs) =
-            nmulti::many0(|s| method_signature(s, ctx, &args[..], &primary_constrain))(s)?;
+            nmulti::many0(|s| method_signature(s, ctx, &params[..], &primary_constrain))(s)?;
 
         let rel = tast::Relation {
             name: ctx.path_of(rel_name),
             dependent: dependents,
             constrains,
-            arity,
+            params,
             f_sigs: sigs.into_iter().map(|(x, sig)| (x, sig)).collect(),
             meta: ctx.meta(s0, s1),
         };
@@ -1599,20 +1479,12 @@ fn relation<'s>(s: &'s str, ctx: &Context<'s>) -> PResult<'s, tast::Relation<'s>
 fn instance_method<'s>(
     s: &'s str,
     ctx: &Context<'s>,
-    generic_params: &[&'s str],
     precedence_table: &PrecedenceTable<'s>,
 ) -> PResult<'s, (&'s str, tast::Function<'s>)> {
     let parse = |s| {
         let (s, pure) = routine_or_fn(s)?;
-
         let (s1, (f_name, _)) = function_name_identifier(s, ctx)?;
-
-        let (s2, (generic_params2, _)) = generic_params_decl(s1, ctx)?;
-        let mut generic_params = generic_params.to_vec();
-        generic_params.extend_from_slice(&generic_params2);
-
-        let (s3, f) =
-            function_after_generic_params(s2, pure, ctx, &generic_params, precedence_table)?;
+        let (s3, f) = function_after_name(s1, pure, ctx, precedence_table)?;
 
         Ok((s3, (f_name, f)))
     };
@@ -1625,31 +1497,25 @@ fn instance<'s>(
     precedence_table: &PrecedenceTable<'s>,
 ) -> PResult<'s, (tast::Instance<'s>, Vec<(&'s str, tast::Function<'s>)>)> {
     let parse = |s| {
-        let (s1, (generic_params, _)) = generic_params_decl(s, ctx)?;
-        let (s2, rel_name) = path(s1, ctx)?;
-        let (s3, args) =
-            nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx, &generic_params))(
-                s2,
-            )?;
+        let (s2, rel_name) = path(s, ctx)?;
+        let (s3, args) = nmulti::separated_list1(trailing_space_tag(","), |s| type_(s, ctx))(s2)?;
 
         let (s5, constrains) = ncomb::opt(nseq::preceded(trailing_space1_tag("where"), |s| {
-            constrains(s, ctx, &generic_params)
+            constrains(s, ctx)
         }))(s3)?;
         let constrains = constrains.unwrap_or_else(|| Vec::new());
 
         let instance = tast::Instance {
-            var_cnt: generic_params.len(),
             rel: tast::Constrain {
                 rel_name,
                 args,
-                meta: ctx.meta(s1, s3),
+                meta: ctx.meta(s, s3),
             },
             constrains,
-            meta: ctx.meta(s1, s3),
+            meta: ctx.meta(s, s3),
         };
 
-        let (s6, methods) =
-            nmulti::many0(|s| instance_method(s, ctx, &generic_params, precedence_table))(s5)?;
+        let (s6, methods) = nmulti::many0(|s| instance_method(s, ctx, precedence_table))(s5)?;
 
         let (s6, _) = trailing_space1_tag("end")(s6)?;
 
@@ -1762,7 +1628,7 @@ fn builtin_signature<'s>(
     let (s3, (_, _)) = function_params(s2, ctx)?;
     let (s3, _) = trailing_space_tag(":")(s3)?;
 
-    let (s4, t) = type_callable_type(s3, ctx, &generic_params)?;
+    let (s4, t) = type_callable_type(s3, ctx)?;
 
     let (s5, _) = trailing_space_tag("=")(s4)?;
     let (s5, _) = nbyte::tag("..")(s5)?;
