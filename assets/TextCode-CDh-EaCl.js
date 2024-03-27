@@ -1,1 +1,0 @@
-import{_ as o,a as s,f as t,H as c}from"./index-tVr8bQrc.js";const r={},n={class:"code"};function _(e,a){return s(),t("code",n,[c(e.$slots,"default")])}const f=o(r,[["render",_],["__file","TextCode.vue"]]);export{f as T};

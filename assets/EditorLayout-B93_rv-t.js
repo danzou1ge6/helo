@@ -1,4 +1,4 @@
-import{Q as y,a as w,R as k}from"./QBtn-DCnwbdmd.js";import{Q as P,a as I,b as H,N as A,c as L,d as C,e as B,f as M}from"./NavigationButtons-DxIbyc91.js";import{Q as R,a as E,b as _}from"./QScrollObserver-CNI9KVLI.js";import{Q as F,a as Q,P as V}from"./PlayGround-ByfgStqG.js";import{i as D,q as T,d as U,o as q,r as i,a as l,c as m,w as e,b as n,e as p,f as z,g as K,F as $,h as O,j,k as G,t as J,_ as W}from"./index-tVr8bQrc.js";function X(){return D(T)}const Y=`/* An AVL tree implementation
+import{Q as w,a as P,R as E}from"./QBtn-DKy_yooC.js";import{Q as A,a as I,b as B,N as H,c as C,d as L,e as M,f as R}from"./NavigationButtons-1B0Mayvj.js";import{Q as F,a as O,b as _}from"./QScrollObserver-C9H9M275.js";import{Q,a as V,P as D}from"./PlayGround-DJiHJlkP.js";import{i as U,q as z,d as q,o as v,r as s,a as l,c as m,w as e,b as n,e as p,f as K,g as j,F as $,h as T,j as G,k as J,t as W,_ as X}from"./index-DHLu7VNo.js";function Y(){return U(z)}const Z=`/* An AVL tree implementation
  * 
  * Usage:
  *   There are two commands
@@ -18,8 +18,8 @@ use result
 infix :: 10 9
 infix // 9 10
 
-data Avl['a] = Empty
-             | Node 'a, Avl['a], Avl['a], Int
+data Avl[T] = Empty
+             | Node T, Avl[T], Avl[T], Int
 
 fn height t = case t of
     | Empty -> 0
@@ -59,7 +59,7 @@ fn balance t = case t of
             t
     end
 
-fn insert 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
+fn insert x,t: [T, Avl[T]] -> Avl[T] where Ord T =
     case t of
     | Empty -> Node x,Empty,Empty,1
     | Node v,left,right,h ->
@@ -73,12 +73,12 @@ fn insert 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
             Node x,left,right,h
     end
 
-fn find_min 'a t: [Avl['a]] -> 'a = case t of
+fn find_min t: [Avl[T]] -> T = case t of
     | Node v,Empty,_,_ -> v
     | Node _,left,_,_ -> find_min left
     end
 
-fn delete 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
+fn delete x,t: [T, Avl[T]] -> Avl[T] where Ord T =
     case t of
     | Empty -> t
     | Node v,left,right,h ->
@@ -102,7 +102,7 @@ fn delete 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a =
             end
     end
 
-fn contains 'a x,t: ['a, Avl['a]] -> Bool where Ord 'a =
+fn contains x,t: [T, Avl[T]] -> Bool where Ord T =
     case t of
     | Empty -> false
     | Node v,left,right,_ ->
@@ -123,7 +123,7 @@ fn str_repeat c,n: [Char, Int] -> Str =
     in
         helper "",c,n
 
-fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
+fn debug t,indent: [Avl[T], Int] -> Str where fmt.ToString T =
     case t of
     | Empty -> (str_repeat ' ',indent) * "()\\n"
     | Node v,Empty,Empty,h ->
@@ -134,8 +134,8 @@ fn debug 'a t,indent: [Avl['a], Int] -> Str where fmt.ToString 'a =
         * (debug right, (indent + 1))
     end
 
-fn :: 'a x,t: ['a, Avl['a]] -> Avl['a] where Ord 'a = insert x,t
-fn // 'a t,x: [Avl['a], 'a] -> Avl['a] where Ord 'a = delete x,t
+fn :: x,t: [T, Avl[T]] -> Avl[T] where Ord T = insert x,t
+fn // t,x: [Avl[T], T] -> Avl[T] where Ord T = delete x,t
 
 data Command = Insert Int | Delete Int
 data ParseError = ParseError Str,Str
@@ -192,7 +192,7 @@ routine main =
     end
     end
 
-`,Z=`/* An infix expression evaluator implementation
+`,nn=`/* An infix expression evaluator implementation
  *
  * Addition, subtraction, multiplication and division of float numbers are supported.
  * Note that an naive method to parse float here is applied here, which is definitely not the most accurate.
@@ -405,33 +405,33 @@ routine main = begin
         end
     end
 end
-`,nn=`relation Bigger 'a,'b end
+`,en=`relation Bigger A,B end
 
 module eat_rel
-    relation Eat 'a,'b,'c -> 'c where super.Bigger 'a,'b
-        routine eat a,b : ['a,'b] -> 'c
+    relation Eat A,B,C -> C where super.Bigger A,B
+        routine eat a,b : [A,B] -> C
     end
 end
 
-relation Carnivorous 'a,'c -> 'c
-    routine car_eat 'b a,b: ['a,'b] -> 'c where Bigger 'a,'b
+relation Carnivorous A,C -> C
+    routine car_eat B a,b: [A,B] -> C where Bigger A,B
 end
 
-relation Poop 'b end
+relation Poop B end
 
-relation PoopEating 'a,'c -> 'c
-    routine eat_poop 'b a,b: ['a,'b] -> 'c where Poop 'b
+relation PoopEating A,C -> C
+    routine eat_poop B a,b: [A,B] -> C where Poop B
 end
 
 /* Implement \`Eat(a, b, c)\` for all \`(a, b, c)\` such that \`PoopEating(a, c)\` and \`Poop(b)\` and \`Bigger(a, b)\`
  */
-instance 'a,'b,'c eat_rel.Eat 'a,'b,'c where PoopEating 'a,'c + Poop 'b + Bigger 'a,'b
+instance eat_rel.Eat A,B,C where PoopEating A,C + Poop B + Bigger A,B
     routine eat a,b = eat_poop a,b
 end
 
 /* Implement \`Eat(a, b, c)\` for all \`(a, b, c)\` such that \`Carnivorous(a, c)\` and \`Bigger(a, b)\`
  */
-instance 'a,'b,'c eat_rel.Eat 'a,'b,'c where Carnivorous 'a,'c + Bigger 'a,'b
+instance eat_rel.Eat A,B,C where Carnivorous A,C + Bigger A,B
     routine eat a,b = car_eat a,b
 end
 
@@ -445,7 +445,7 @@ data CO2 = CO2 Int
 
 instance Poop NekoPoop end
 instance Poop MickeyPoop end
-instance 'p Bigger Bacteria,'p where Poop 'p end
+instance Bigger Bacteria,P where Poop P end
 
 instance PoopEating Bacteria,CO2
     routine eat_poop a,b = begin
@@ -487,7 +487,7 @@ routine main =
         eat bacteria,neko_poop
     end
 
-`,en=`use list of (::) , ([])
+`,tn=`use list of (::) , ([])
 use ops
 
 infix :: 10 9
@@ -512,7 +512,7 @@ routine main =
         end
     end
 
-`,tn=`infix >>= 9 10
+`,rn=`infix >>= 9 10
 
 use result
 use ops
@@ -552,7 +552,7 @@ routine main =
     end
 
 
-`,rn=`/* An implementation of Skew Binomial Heap as described in _Purely Functional Datastructures_ by
+`,sn=`/* An implementation of Skew Binomial Heap as described in _Purely Functional Datastructures_ by
  * Okasaki
  *
  * Usage:
@@ -570,9 +570,9 @@ use result
 
 infix :- 10 9
 
-data Node['a] = Node Int,'a,List['a],List[Node['a]]
+data Node[T] = Node Int,T,List[T],List[Node[T]]
 
-data Heap['a] = Heap List[Node['a]]
+data Heap[T] = Heap List[Node[T]]
 
 fn is_empty h =
     let Heap ts = h in
@@ -582,7 +582,7 @@ fn rank node = let Node r,_,_,_ = node in r
 
 fn root node = let Node _,x,_,_ = node in x
 
-fn link 'a t1,t2: [Node['a], Node['a]] -> Node['a] where Ord 'a =
+fn link t1,t2: [Node[T], Node[T]] -> Node[T] where Ord T =
     let Node r,x1,xs1,c1 = t1 in
     let Node _,x2,xs2,c2 = t2 in
     if x2 < x1 then
@@ -590,14 +590,14 @@ fn link 'a t1,t2: [Node['a], Node['a]] -> Node['a] where Ord 'a =
     else
         Node r + 1, x1, xs1, t2 :: c1
 
-fn skew_link 'a x,t1,t2: ['a, Node['a], Node['a]] -> Node['a] where Ord 'a =
+fn skew_link x,t1,t2: [T, Node[T], Node[T]] -> Node[T] where Ord T =
     let Node r,y,ys,c = link t1,t2 in
     if y < x then
         Node r, y, x :: ys, c
     else
         Node r, x, y :: ys, c
 
-fn ins_tree 'a t,ts : [Node['a], List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn ins_tree t,ts : [Node[T], List[Node[T]]] -> List[Node[T]] where Ord T =
     case ts of
     | [] -> t :: []
     | t2 :: ts ->
@@ -607,7 +607,7 @@ fn ins_tree 'a t,ts : [Node['a], List[Node['a]]] -> List[Node['a]] where Ord 'a 
             ins_tree (link t, t2), ts
     end
 
-fn merge_trees 'a h1,h2: [List[Node['a]], List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn merge_trees h1,h2: [List[Node[T]], List[Node[T]]] -> List[Node[T]] where Ord T =
     case (h1, h2) of
     | (ts1, []) -> h1
     | ([], ts2) -> h2
@@ -620,13 +620,13 @@ fn merge_trees 'a h1,h2: [List[Node['a]], List[Node['a]]] -> List[Node['a]] wher
             ins_tree (link t1,t2), (merge_trees ts1,ts2)
     end
 
-fn normalize 'a h: [List[Node['a]]] -> List[Node['a]] where Ord 'a =
+fn normalize h: [List[Node[T]]] -> List[Node[T]] where Ord T =
     case h of
     | [] -> h
     | t :: ts -> ins_tree t, ts
     end
 
-fn insert 'a x,h: ['a, Heap['a]] -> Heap['a] where Ord 'a =
+fn insert x,h: [T, Heap[T]] -> Heap[T] where Ord T =
     case h of
     | Heap t1 :: t2 :: ts -> 
         if (rank t1) == (rank t2) then
@@ -637,12 +637,12 @@ fn insert 'a x,h: ['a, Heap['a]] -> Heap['a] where Ord 'a =
         Heap (Node 0,x,[],[]) :: ts
     end
 
-fn merge 'a h1,h2: [Heap['a], Heap['a]] -> Heap['a] where Ord 'a =
+fn merge h1,h2: [Heap[T], Heap[T]] -> Heap[T] where Ord T =
     let Heap h1 = h1 in
     let Heap h2 = h2 in
     Heap merge_trees (normalize h1), (normalize h2)
 
-fn find_min 'a h: [Heap['a]] -> Option['a] where Ord 'a =
+fn find_min h: [Heap[T]] -> Option[T] where Ord T =
     case h of
     | Heap [] -> None
     | Heap t :: [] -> Some root t
@@ -654,11 +654,11 @@ fn find_min 'a h: [Heap['a]] -> Option['a] where Ord 'a =
         end
     end
 
-fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
+fn delete_min h: [Heap[T]] -> Option[Heap[T]] where Ord T =
     case h of
     | Heap [] -> None
     | Heap ts ->
-        let fn get_min ts: [List[Node['a]]] -> (Node['a], List[Node['a]]) =
+        let fn get_min ts: [List[Node[T]]] -> (Node[T], List[Node[T]]) =
             case ts of
             | t :: [] -> (t, [])
             | t :: ts ->
@@ -669,7 +669,7 @@ fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
                     (t, ts)
             end
         in
-        let fn insert_all ts, h: [List['a], Heap['a]] -> Heap['a] =
+        let fn insert_all ts, h: [List[T], Heap[T]] -> Heap[T] =
             case ts of
             | [] -> h
             | t :: ts -> insert_all ts,(insert t,h)
@@ -679,8 +679,8 @@ fn delete_min 'a h: [Heap['a]] -> Option[Heap['a]] where Ord 'a =
         Some insert_all xs, (Heap merge_trees (rev c),(normalize ts1))
     end
 
-fn empty 'a : [] -> Heap['a] = Heap []
-fn :- 'a x,h : ['a, Heap['a]] -> Heap['a] where Ord 'a = insert x,h
+fn empty : [] -> Heap[T] = Heap []
+fn :- x,h : [T, Heap[T]] -> Heap[T] where Ord T = insert x,h
 
 data Command = Insert Int | Pop
 data ParseError = ParseError Str,Str
@@ -719,7 +719,7 @@ fn parse_command s: [Str] -> (Str, Result[Command, ParseError]) =
         end
     else (s, Err ParseError s,"command")
 
-fn format_heap 'a h: [Heap['a]] -> Str where Ord 'a + fmt.ToString 'a =
+fn format_heap h: [Heap[T]] -> Str where Ord T + fmt.ToString T =
     case find_min h of
     | None -> ""
     | Some x ->
@@ -750,4 +750,4 @@ routine main =
     end
     end
 
-`,an={class:"q-pa-sm"},sn=U({name:"EditorLayout",__name:"EditorLayout",props:{exampleName:{}},setup(b){const u=b;q(()=>{if(u.exampleName!==void 0){const c=a.value.findIndex(t=>t[0]===u.exampleName);c!==-1&&(s.value=c,g.value=!0)}});const v=X().screen.height-50,x=i(50),g=i(!1),o=i(!1),a=i([["New",""],["AVLTree",Y],["Calculator",Z],["RelationExample",nn],["InfixConstructorExample",en],["ErrorMonadExample",tn],["SkewBinomialHeap",rn]]),s=i(0);function N(){o.value=!o.value}const d=i(""),f=i(!1);function S(){a.value.push([d.value,""]),f.value=!1,s.value=a.value.length-1}return(c,t)=>(l(),m(P,{view:"hHh Lpr lFf"},{default:e(()=>[n(L,{style:{height:"50px"}},{default:e(()=>[n(I,null,{default:e(()=>[n(y,{flat:"",dense:"",icon:"menu","aria-label":"Menu",onClick:N}),n(H,{style:{}},{default:e(()=>[p(" Helo ")]),_:1}),n(A)]),_:1})]),_:1}),n(B,{modelValue:o.value,"onUpdate:modelValue":t[2]||(t[2]=r=>o.value=r),bordered:""},{default:e(()=>[n(R,{header:""},{default:e(()=>[p("Example Scripts")]),_:1}),n(C,null,{default:e(()=>[(l(!0),z($,null,K(a.value,(r,h)=>O((l(),m(E,{clickable:"",key:h,active:h==s.value,"active-class":"bg-blue-1"},{default:e(()=>[n(_,{onClick:ln=>s.value=h},{default:e(()=>[p(J(r[0]),1)]),_:2},1032,["onClick"])]),_:2},1032,["active"])),[[k]])),128)),O((l(),m(E,{clickable:""},{default:e(()=>[n(_,{avatar:""},{default:e(()=>[n(w,{class:"text-primary",name:"add"})]),_:1}),n(_,{class:"text-primary"},{default:e(()=>[p("Add New File")]),_:1}),n(F,{modelValue:f.value,"onUpdate:modelValue":t[1]||(t[1]=r=>f.value=r),style:{"font-size":"1.2rem"},anchor:"top right"},{default:e(()=>[j("div",an,[n(Q,{autofocus:"",placeholder:"File Name",dense:"",modelValue:d.value,"onUpdate:modelValue":t[0]||(t[0]=r=>d.value=r),onKeyup:G(S,["enter"])},null,8,["modelValue"])])]),_:1},8,["modelValue"])]),_:1})),[[k]])]),_:1})]),_:1},8,["modelValue"]),n(M,null,{default:e(()=>[n(V,{"page-height":v,modelValue:a.value[s.value][1],"onUpdate:modelValue":t[3]||(t[3]=r=>a.value[s.value][1]=r),"show-output":!0,split:x.value,"onUpdate:split":t[4]||(t[4]=r=>x.value=r),"run-on-mount":g.value,name:a.value[s.value][0]},null,8,["modelValue","split","run-on-mount","name"])]),_:1})]),_:1}))}}),_n=W(sn,[["__file","EditorLayout.vue"]]);export{_n as default};
+`,an={class:"q-pa-sm"},on=q({name:"EditorLayout",__name:"EditorLayout",props:{exampleName:{}},setup(b){const u=b;v(()=>{if(u.exampleName!==void 0){const c=a.value.findIndex(t=>t[0]===u.exampleName);c!==-1&&(i.value=c,k.value=!0)}});const N=Y(),x=s(N.screen.height-50);v(()=>{window.addEventListener("resize",()=>{x.value=window.innerHeight-50})});const g=s(50),k=s(!1),o=s(!1),a=s([["New",""],["AVLTree",Z],["Calculator",nn],["RelationExample",en],["InfixConstructorExample",tn],["ErrorMonadExample",rn],["SkewBinomialHeap",sn]]),i=s(0);function S(){o.value=!o.value}const d=s(""),f=s(!1);function y(){a.value.push([d.value,""]),f.value=!1,i.value=a.value.length-1}return(c,t)=>(l(),m(A,{view:"hHh Lpr lFf"},{default:e(()=>[n(C,{style:{height:"50px"}},{default:e(()=>[n(I,null,{default:e(()=>[n(w,{flat:"",dense:"",icon:"menu","aria-label":"Menu",onClick:S}),n(B,{style:{}},{default:e(()=>[p(" Helo ")]),_:1}),n(H)]),_:1})]),_:1}),n(M,{modelValue:o.value,"onUpdate:modelValue":t[2]||(t[2]=r=>o.value=r),bordered:""},{default:e(()=>[n(F,{header:""},{default:e(()=>[p("Example Scripts")]),_:1}),n(L,null,{default:e(()=>[(l(!0),K($,null,j(a.value,(r,h)=>T((l(),m(O,{clickable:"",key:h,active:h==i.value,"active-class":"bg-blue-1"},{default:e(()=>[n(_,{onClick:ln=>i.value=h},{default:e(()=>[p(W(r[0]),1)]),_:2},1032,["onClick"])]),_:2},1032,["active"])),[[E]])),128)),T((l(),m(O,{clickable:""},{default:e(()=>[n(_,{avatar:""},{default:e(()=>[n(P,{class:"text-primary",name:"add"})]),_:1}),n(_,{class:"text-primary"},{default:e(()=>[p("Add New File")]),_:1}),n(Q,{modelValue:f.value,"onUpdate:modelValue":t[1]||(t[1]=r=>f.value=r),style:{"font-size":"1.2rem"},anchor:"top right"},{default:e(()=>[G("div",an,[n(V,{autofocus:"",placeholder:"File Name",dense:"",modelValue:d.value,"onUpdate:modelValue":t[0]||(t[0]=r=>d.value=r),onKeyup:J(y,["enter"])},null,8,["modelValue"])])]),_:1},8,["modelValue"])]),_:1})),[[E]])]),_:1})]),_:1},8,["modelValue"]),n(R,null,{default:e(()=>[n(D,{"page-height":x.value,modelValue:a.value[i.value][1],"onUpdate:modelValue":t[3]||(t[3]=r=>a.value[i.value][1]=r),"show-output":!0,split:g.value,"onUpdate:split":t[4]||(t[4]=r=>g.value=r),"run-on-mount":k.value,name:a.value[i.value][0]},null,8,["page-height","modelValue","split","run-on-mount","name"])]),_:1})]),_:1}))}}),_n=X(on,[["__file","EditorLayout.vue"]]);export{_n as default};
